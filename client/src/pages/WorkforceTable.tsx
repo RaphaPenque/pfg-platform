@@ -115,12 +115,6 @@ function EnglishBadge({ level }: { level: string | null }) {
   return <span className={`badge ${cls}`}>{level}</span>;
 }
 
-function TechBadge({ level }: { level: string | null }) {
-  if (!level) return <span className="text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>—</span>;
-  const cls = level === "Tech 3" ? "badge-green" : level === "Tech 2" ? "badge-amber" : "badge-accent";
-  return <span className={`badge ${cls}`}>{level}</span>;
-}
-
 // ─── Score bar ───
 function ScoreBar({ label, value, max }: { label: string; value: number | null; max?: number }) {
   const v = value ?? 0;
@@ -1089,7 +1083,7 @@ function UtilBar({ assignments }: { assignments: DashboardAssignment[] }) {
 }
 
 // ─── Sort types ───
-type SortKey = "name" | "role" | "status" | "nationality" | "englishLevel" | "techLevel" | "measuringSkills" | "utilisation";
+type SortKey = "name" | "role" | "status" | "englishLevel" | "costCentre" | "measuringSkills" | "utilisation";
 type SortDir = "asc" | "desc";
 
 export default function WorkforceTable() {
@@ -1097,8 +1091,7 @@ export default function WorkforceTable() {
   const [search, setSearch] = useState("");
   const [filterRole, setFilterRole] = useState<string[]>([]);
   const [filterStatus, setFilterStatus] = useState<string[]>([]);
-  const [filterNat, setFilterNat] = useState<string[]>([]);
-  const [filterTech, setFilterTech] = useState<string[]>([]);
+  const [filterCostCentre, setFilterCostCentre] = useState<string[]>([]);
   const [filterEnglish, setFilterEnglish] = useState<string[]>([]);
   const [filterOem, setFilterOem] = useState<string[]>([]);
   const [filterAssigned, setFilterAssigned] = useState<string[]>([]);
@@ -1112,8 +1105,10 @@ export default function WorkforceTable() {
   // Derive unique filter options
   const roles = useMemo(() => Array.from(new Set(workers.map(w => w.role))).sort(), [workers]);
   const statuses = useMemo(() => Array.from(new Set(workers.map(w => w.status))).sort(), [workers]);
-  const nationalities = useMemo(() => Array.from(new Set(workers.map(w => w.nationality).filter(Boolean) as string[])).sort(), [workers]);
-  const techLevels = useMemo(() => Array.from(new Set(workers.map(w => w.techLevel).filter(Boolean) as string[])).sort(), [workers]);
+  const costCentreOptions = useMemo(() => {
+    const fteCentres = Array.from(new Set(workers.filter(w => w.status === "FTE" && w.costCentre).map(w => w.costCentre!))).sort();
+    return [...fteCentres, "Temp"];
+  }, [workers]);
   const englishLevels = useMemo(() => Array.from(new Set(workers.map(w => w.englishLevel).filter(Boolean) as string[])).sort(), [workers]);
   const allOems = useMemo(() => Array.from(new Set(workers.flatMap(w => w.oemExperience.map(o => o.split(" - ")[0])))).sort(), [workers]);
   const assignedOptions = ["Assigned", "Available"];
@@ -1124,8 +1119,10 @@ export default function WorkforceTable() {
       if (search && !w.name.toLowerCase().includes(search.toLowerCase())) return false;
       if (filterRole.length > 0 && !filterRole.includes(w.role)) return false;
       if (filterStatus.length > 0 && !filterStatus.includes(w.status)) return false;
-      if (filterNat.length > 0 && !filterNat.includes(w.nationality || "")) return false;
-      if (filterTech.length > 0 && !filterTech.includes(w.techLevel || "")) return false;
+      if (filterCostCentre.length > 0) {
+        const wCostCentre = w.status === "FTE" ? (w.costCentre || "") : "Temp";
+        if (!filterCostCentre.includes(wCostCentre)) return false;
+      }
       if (filterEnglish.length > 0 && !filterEnglish.includes(w.englishLevel || "")) return false;
       if (filterOem.length > 0) {
         const workerOems = w.oemExperience.map(o => o.split(" - ")[0]);
@@ -1138,7 +1135,7 @@ export default function WorkforceTable() {
       }
       return true;
     });
-  }, [workers, search, filterRole, filterStatus, filterNat, filterTech, filterEnglish, filterOem, filterAssigned]);
+  }, [workers, search, filterRole, filterStatus, filterCostCentre, filterEnglish, filterOem, filterAssigned]);
 
   // Sort
   const sorted = useMemo(() => {
@@ -1146,6 +1143,11 @@ export default function WorkforceTable() {
       const dir = sortDir === "asc" ? 1 : -1;
       if (sortKey === "utilisation") {
         return (calcUtilisation(a.assignments).pct - calcUtilisation(b.assignments).pct) * dir;
+      }
+      if (sortKey === "costCentre") {
+        const av = a.status === "FTE" ? (a.costCentre || "") : "Temp";
+        const bv = b.status === "FTE" ? (b.costCentre || "") : "Temp";
+        return av.localeCompare(bv) * dir;
       }
       const av = (a[sortKey] as string) || "";
       const bv = (b[sortKey] as string) || "";
@@ -1172,11 +1174,12 @@ export default function WorkforceTable() {
   const availFte = workers.filter(w => w.status === "FTE" && !w.assignments.some(a => a.status === "active")).length;
   const availTemp = workers.filter(w => w.status === "Temp" && !w.assignments.some(a => a.status === "active")).length;
 
-  const natCounts = workers.reduce<Record<string, number>>((acc, w) => {
-    if (w.nationality) acc[w.nationality] = (acc[w.nationality] || 0) + 1;
+  const ccCounts = workers.reduce<Record<string, number>>((acc, w) => {
+    const cc = w.status === "FTE" ? (w.costCentre || "Unassigned") : "Temp";
+    acc[cc] = (acc[cc] || 0) + 1;
     return acc;
   }, {});
-  const topNats = Object.entries(natCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const topCostCentres = Object.entries(ccCounts).sort((a, b) => b[1] - a[1]).slice(0, 5);
 
   const roleCounts = workers.reduce<Record<string, number>>((acc, w) => {
     acc[w.role] = (acc[w.role] || 0) + 1;
@@ -1214,12 +1217,12 @@ export default function WorkforceTable() {
           <div className="text-xs mt-1.5" style={{ color: "var(--pfg-steel)" }}>FTE · <span className="font-semibold">{availTemp}</span> Temps available</div>
         </div>
         <div className="rounded-xl border p-5" style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--card-border))", boxShadow: "var(--shadow-sm)" }}>
-          <div className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: "hsl(var(--muted-foreground))" }}>Top Nationalities</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: "hsl(var(--muted-foreground))" }}>Cost Centre Distribution</div>
           <div className="space-y-1">
-            {topNats.map(([name, count]) => (
-              <div key={name} className="flex items-center justify-between text-xs">
-                <span style={{ color: "var(--pfg-steel)" }}>{name}</span>
-                <span className="font-semibold tabular-nums">{count}</span>
+            {topCostCentres.map(([name, count]) => (
+              <div key={name} className="flex items-center justify-between text-xs gap-2">
+                <span className="truncate" style={{ color: "var(--pfg-steel)", maxWidth: 180 }} title={name}>{name}</span>
+                <span className="font-semibold tabular-nums shrink-0">{count}</span>
               </div>
             ))}
           </div>
@@ -1254,8 +1257,7 @@ export default function WorkforceTable() {
 
           <MultiSelect label="Role" options={roles} selected={filterRole} onChange={setFilterRole} testId="filter-role" />
           <MultiSelect label="Status" options={statuses} selected={filterStatus} onChange={setFilterStatus} testId="filter-status" />
-          <MultiSelect label="Nationality" options={nationalities} selected={filterNat} onChange={setFilterNat} testId="filter-nationality" />
-          <MultiSelect label="Tech Level" options={techLevels} selected={filterTech} onChange={setFilterTech} testId="filter-tech" />
+          <MultiSelect label="Cost Centre" options={costCentreOptions} selected={filterCostCentre} onChange={setFilterCostCentre} testId="filter-cost-centre" />
           <MultiSelect label="English" options={englishLevels} selected={filterEnglish} onChange={setFilterEnglish} testId="filter-english" />
           <MultiSelect label="OEM Experience" options={allOems} selected={filterOem} onChange={setFilterOem} testId="filter-oem" />
           <MultiSelect label="Assigned" options={assignedOptions} selected={filterAssigned} onChange={setFilterAssigned} testId="filter-assigned" />
@@ -1270,9 +1272,8 @@ export default function WorkforceTable() {
                   Name: w.name,
                   Role: w.role,
                   Status: w.status,
-                  Nationality: w.nationality || "",
+                  "Cost Centre": w.status === "FTE" ? (w.costCentre || "") : "Temp",
                   "English Level": w.englishLevel || "",
-                  "Tech Level": w.techLevel || "",
                   "Measuring Skills": w.measuringSkills || "",
                   "OEM Experience": w.oemExperience.map(o => o.split(" - ")[0]).join("; "),
                   "Utilisation %": util.pct,
@@ -1309,8 +1310,8 @@ export default function WorkforceTable() {
             <thead>
               <tr>
                 {([
-                  ["name", "Name"], ["role", "Role"], ["status", "Status"], ["nationality", "Nationality"],
-                  ["englishLevel", "English"], ["techLevel", "Tech Level"], ["measuringSkills", "Measuring"],
+                  ["name", "Name"], ["role", "Role"], ["status", "Status"],
+                  ["costCentre", "Cost Centre"], ["englishLevel", "English"], ["measuringSkills", "Measuring"],
                 ] as [SortKey, string][]).map(([key, label]) => (
                   <th key={key} onClick={() => handleSort(key)}
                     className="text-left px-2.5 py-2.5 text-[11px] font-semibold uppercase tracking-wide cursor-pointer select-none whitespace-nowrap"
@@ -1342,7 +1343,7 @@ export default function WorkforceTable() {
             <tbody>
               {sorted.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="text-center py-16" style={{ color: "hsl(var(--muted-foreground))" }}>
+                  <td colSpan={10} className="text-center py-16" style={{ color: "hsl(var(--muted-foreground))" }}>
                     <Search className="w-8 h-8 mx-auto mb-2 opacity-40" />
                     <h3 className="text-base font-semibold mb-1" style={{ color: "var(--pfg-navy)" }}>No results found</h3>
                     <p className="text-xs">Try adjusting your filters</p>
@@ -1362,9 +1363,12 @@ export default function WorkforceTable() {
                         <td className="px-2.5 py-2.5 font-semibold whitespace-nowrap text-pfg-navy">{w.name}</td>
                         <td className="px-2.5 py-2.5">{w.role}</td>
                         <td className="px-2.5 py-2.5"><StatusBadge status={w.status} /></td>
-                        <td className="px-2.5 py-2.5">{w.nationality || "—"}</td>
+                        <td className="px-2.5 py-2.5">
+                          <span className="block truncate max-w-[180px]" title={w.status === "FTE" ? (w.costCentre || "—") : "Temp"}>
+                            {w.status === "FTE" ? (w.costCentre || "—") : "Temp"}
+                          </span>
+                        </td>
                         <td className="px-2.5 py-2.5"><EnglishBadge level={w.englishLevel} /></td>
-                        <td className="px-2.5 py-2.5"><TechBadge level={w.techLevel} /></td>
                         <td className="px-2.5 py-2.5">{w.measuringSkills || "—"}</td>
                         <td className="px-2.5 py-2.5">
                           <div className="flex flex-wrap gap-1">
@@ -1392,7 +1396,7 @@ export default function WorkforceTable() {
                         </td>
                       </tr>
                       {isExpanded && (
-                        <tr><td colSpan={12} className="p-0"><WorkerDetail worker={w} /></td></tr>
+                        <tr><td colSpan={10} className="p-0"><WorkerDetail worker={w} /></td></tr>
                       )}
                     </Fragment>
                   );
