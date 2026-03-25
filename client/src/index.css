@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap');
+
+:root {
+  /* PFG Brand Palette */
+  --pfg-navy: #1A1D23;
+  --pfg-yellow: #F5BD00;
+  --pfg-yellow-dark: #D4A300;
+  --pfg-steel: #63758C;
+  --pfg-khaki: #C2B299;
+
+  /* OEM Brand Colours */
+  --oem-arabelle: #FE5716;
+  --oem-ge: #005E60;
+  --oem-mitsubishi: #E60012;
+  --oem-siemens: #009999;
+  --oem-sulzer: #1D59AF;
+
+  /* Shadcn tokens - PFG themed */
+  --background: 40 10% 97%;
+  --foreground: 220 16% 12%;
+  --card: 0 0% 100%;
+  --card-foreground: 220 16% 12%;
+  --card-border: 35 8% 88%;
+  --popover: 40 8% 96%;
+  --popover-foreground: 220 16% 12%;
+  --primary: 45 100% 48%;
+  --primary-foreground: 220 16% 12%;
+  --secondary: 215 17% 47%;
+  --secondary-foreground: 0 0% 100%;
+  --muted: 35 8% 92%;
+  --muted-foreground: 215 14% 55%;
+  --accent: 45 100% 95%;
+  --accent-foreground: 220 16% 12%;
+  --destructive: 0 72% 45%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 35 10% 88%;
+  --input: 215 14% 75%;
+  --ring: 45 100% 48%;
+  --radius: 0.5rem;
+
+  /* Status colours */
+  --green: #16A34A;
+  --green-bg: #DCFCE7;
+  --amber: #D97706;
+  --amber-bg: #FEF3C7;
+  --red: #B91C1C;
+  --red-bg: #FEE2E2;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow: 0 1px 3px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.04);
+
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-display: 'Outfit', 'Inter', system-ui, sans-serif;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply font-sans antialiased bg-background text-foreground;
+    font-family: var(--font-sans);
+    font-size: 14px;
+  }
+  h1, h2, h3, h4 {
+    font-family: var(--font-display);
+  }
+}
+
+/* PFG-specific utility classes */
+.font-display { font-family: var(--font-display); }
+.text-pfg-navy { color: var(--pfg-navy); }
+.bg-pfg-navy { background-color: var(--pfg-navy); }
+.text-pfg-yellow { color: var(--pfg-yellow); }
+.bg-pfg-yellow { background-color: var(--pfg-yellow); }
+.text-pfg-steel { color: var(--pfg-steel); }
+
+/* Badge styles */
+.badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.badge-navy { background: var(--pfg-navy); color: #fff; }
+.badge-grey { background: #F3F4F6; color: #6B7280; }
+.badge-green { background: var(--green-bg); color: var(--green); }
+.badge-amber { background: var(--amber-bg); color: var(--amber); }
+.badge-red { background: var(--red-bg); color: var(--red); }
+.badge-accent { background: #FEF9E7; color: #8B6E00; }
+
+/* OEM pill styles */
+.oem-pill { display: inline-block; padding: 1px 7px; border-radius: 9999px; font-size: 10px; font-weight: 500; white-space: nowrap; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+
+/* Tabular nums for data */
+.tabular-nums { font-variant-numeric: tabular-nums lining-nums; }
