@@ -2,6 +2,30 @@ import type { Express } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
 import { insertWorkerSchema, insertProjectSchema, insertAssignmentSchema, insertDocumentSchema, insertOemTypeSchema, insertRoleSlotSchema } from "@shared/schema";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+
+// Upload directory
+const UPLOAD_BASE = fs.existsSync("/data") ? "/data/uploads" : "./uploads";
+if (!fs.existsSync(UPLOAD_BASE)) fs.mkdirSync(UPLOAD_BASE, { recursive: true });
+
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (req, _file, cb) => {
+      const workerId = String(req.params.id || "0");
+      const dir = path.join(UPLOAD_BASE, workerId);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      cb(null, dir);
+    },
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname) || ".bin";
+      const type = (_req.body && _req.body.type) || "file";
+      cb(null, `${type}${ext}`);
+    },
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+});
 
 export function registerRoutes(server: Server, app: Express) {
   // ===== WORKERS =====
@@ -160,6 +184,31 @@ export function registerRoutes(server: Server, app: Express) {
     res.status(201).json(oemType);
   });
 
+  // ===== FILE UPLOADS =====
+  app.post("/api/workers/:id/upload", upload.single("file"), (req: any, res) => {
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    const workerId = req.params.id;
+    const fileType = req.body?.type || "file";
+    const filePath = `/api/uploads/${workerId}/${req.file.filename}`;
+
+    // Update worker record with file path
+    if (fileType === "photo") {
+      storage.updateWorker(parseInt(workerId), { profilePhotoPath: filePath });
+    } else if (fileType === "passport") {
+      storage.updateWorker(parseInt(workerId), { passportPath: filePath });
+    }
+
+    res.json({ path: filePath, filename: req.file.filename, type: fileType });
+  });
+
+  // Serve uploaded files
+  app.get("/api/uploads/:workerId/:filename", (req, res) => {
+    const { workerId, filename } = req.params;
+    const filePath = path.join(UPLOAD_BASE, workerId, filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: "File not found" });
+    res.sendFile(path.resolve(filePath));
+  });
+
   // ===== DASHBOARD SUMMARY =====
   // Single endpoint that returns everything the dashboard needs
   app.get("/api/dashboard", (_req, res) => {
@@ -180,6 +229,7 @@ export function registerRoutes(server: Server, app: Express) {
         projectName: proj?.name || '',
         customer: proj?.customer || '',
         location: proj?.location || '',
+        equipmentType: proj?.equipmentType || '',
       });
     });
 

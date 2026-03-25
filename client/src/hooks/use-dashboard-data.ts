@@ -21,6 +21,13 @@ export interface DashboardWorker {
   oemFocus: string | null;
   oemExperience: string[];
   assignments: DashboardAssignment[];
+  dateOfBirth: string | null;
+  costCentre: string | null;
+  roles: string | null; // JSON array string
+  profilePhotoPath: string | null;
+  passportPath: string | null;
+  driversLicense: string | null;
+  driversLicenseUploaded: number | null;
 }
 
 export interface DashboardAssignment {
@@ -28,6 +35,7 @@ export interface DashboardAssignment {
   workerId: number;
   projectId: number;
   task: string | null;
+  role: string | null;
   shift: string | null;
   startDate: string | null;
   endDate: string | null;
@@ -37,6 +45,7 @@ export interface DashboardAssignment {
   projectName: string;
   customer: string;
   location: string;
+  equipmentType?: string | null;
 }
 
 export interface DashboardProject {

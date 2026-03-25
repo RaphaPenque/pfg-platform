@@ -23,6 +23,13 @@ export const workers = sqliteTable("workers", {
   oemFocus: text("oem_focus"),
   // OEM experience stored as JSON array: ["GE Vernova - ST", "Arabelle Solutions - STV"]
   oemExperience: text("oem_experience"), // JSON string array
+  dateOfBirth: text("date_of_birth"), // ISO date
+  costCentre: text("cost_centre"), // only for FTE workers
+  roles: text("roles"), // JSON array of role strings
+  profilePhotoPath: text("profile_photo_path"), // file path for uploaded photo
+  passportPath: text("passport_path"), // file path for passport scan
+  driversLicense: text("drivers_license"), // expiry date ISO string or null
+  driversLicenseUploaded: integer("drivers_license_uploaded"), // 0 or 1
 });
 
 export const insertWorkerSchema = createInsertSchema(workers).omit({ id: true });

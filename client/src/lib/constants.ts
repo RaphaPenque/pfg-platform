@@ -48,6 +48,7 @@ export const CERT_DEFS = [
   { name: 'ITH Bolt Tensioning' },
   { name: 'Fork Lift License' },
   { name: 'Mobile Elevating Work Platform (MEWP)' },
+  { name: "Driver's License" },
 ];
 
 // OEM options for dropdowns
@@ -80,6 +81,45 @@ export const EQUIPMENT_TYPES = [
   { value: 'GEN', label: 'GEN (Generator)' },
   { value: 'COMP', label: 'COMP (Compressor)' },
 ];
+
+// Cost Centres (FTE only)
+export const COST_CENTRES = [
+  'Powerforce Maintenance UK Limited',
+  'Powerforce Global S.L',
+  'Powerforce Maintenance B.V',
+  'Powerforce Arabia for Operations and Maintenance Company',
+  'Powerforce MENA Industrial Maintenance Services',
+  'Powerforce Maintenance d.o.o.',
+  'POWERFORCE MANUTENÇÃO INDUSTRIAL, UNIPESSOAL LDA',
+  'Powerforce Maintenance Services Morocco',
+];
+
+// Role hierarchy (highest first)
+export const ROLE_HIERARCHY = [
+  'Superintendent',
+  'Foreman',
+  'Lead Technician',
+  'Technician 2',
+  'Technician 1',
+  'Rigger',
+  'Crane Driver',
+  'HSE Officer',
+  'Welder',
+  'I&C Technician',
+  'Electrician',
+  'Apprentice',
+];
+
+export function getHighestRole(roles: string[]): string {
+  if (!roles || roles.length === 0) return '';
+  for (const r of ROLE_HIERARCHY) {
+    if (roles.includes(r)) return r;
+  }
+  return roles[0]; // fallback
+}
+
+// English proficiency levels
+export const ENGLISH_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'TBC'];
 
 // Utilisation calculation: 187 working days baseline, 2 days mob/demob per assignment
 export function calcUtilisation(assignments: any[]): { days: number; pct: number } {
