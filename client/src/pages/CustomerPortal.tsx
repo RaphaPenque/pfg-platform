@@ -129,7 +129,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
           data-testid="download-all-btn"
         >
           <Download className="w-3.5 h-3.5" />
-          Download All SQEP
+          Download Customer Pack
         </button>
       </header>
 

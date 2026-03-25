@@ -1443,13 +1443,13 @@ function EditProjectModal({
                     {activeCount}
                   </span>
                 </div>
-                {editEndDate && card.members.some(m => !removedIds.has(m.assignment.id) && m.assignment.endDate && m.assignment.endDate < editEndDate) && (
+                {editEnd && card.members.some(m => !removedIds.has(m.assignment.id) && m.assignment.endDate && m.assignment.endDate < editEnd) && (
                   <button
                     onClick={async () => {
-                      if (!confirm(`Extend all assignments to ${editEndDate}?`)) return;
+                      if (!confirm(`Extend all assignments to ${editEnd}?`)) return;
                       for (const m of card.members) {
-                        if (!removedIds.has(m.assignment.id) && m.assignment.endDate && m.assignment.endDate < editEndDate) {
-                          await apiRequest("PATCH", `/api/assignments/${m.assignment.id}`, { endDate: editEndDate });
+                        if (!removedIds.has(m.assignment.id) && m.assignment.endDate && m.assignment.endDate < editEnd) {
+                          await apiRequest("PATCH", `/api/assignments/${m.assignment.id}`, { endDate: editEnd });
                         }
                       }
                       await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
@@ -1457,7 +1457,7 @@ function EditProjectModal({
                     className="text-xs font-semibold px-3 py-1.5 rounded-lg border"
                     style={{ borderColor: "var(--pfg-yellow)", color: "var(--pfg-navy)" }}
                     data-testid="extend-all-assignments">
-                    Extend All to {editEndDate}
+                    Extend All to {editEnd}
                   </button>
                 )}
               </div>
@@ -1496,7 +1496,7 @@ function EditProjectModal({
                             style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--background))", width: "120px" }}
                             data-testid={`assignment-end-date-${m.assignment.id}`}
                           />
-                          {m.assignment.endDate && editEndDate && m.assignment.endDate < editEndDate && (
+                          {m.assignment.endDate && editEnd && m.assignment.endDate < editEnd && (
                             <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: "var(--amber-bg, hsl(var(--accent)))", color: "var(--amber, #D97706)" }}>ends early</span>
                           )}
                         </div>
