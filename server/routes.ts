@@ -99,6 +99,40 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(project);
   });
 
+  // Change project status
+  app.post("/api/projects/:id/status", (req, res) => {
+    const { status } = req.body;
+    if (!status || !["active", "completed", "cancelled", "potential"].includes(status)) {
+      return res.status(400).json({ error: "Invalid status. Must be: active, completed, cancelled, or potential" });
+    }
+    const project = storage.getProject(parseInt(req.params.id));
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    // When cancelling an active project, mark all assignments as removed
+    if (status === "cancelled" && project.status === "active") {
+      const projectAssignments = storage.getAssignmentsByProject(project.id);
+      for (const a of projectAssignments) {
+        if (a.status === "active") {
+          storage.updateAssignment(a.id, { status: "removed" });
+        }
+      }
+    }
+
+    const updated = storage.updateProjectStatus(project.id, status);
+    res.json(updated);
+  });
+
+  // Delete project (cascade-deletes role_slots and assignments) — only for potential projects
+  app.delete("/api/projects/:id", (req, res) => {
+    const project = storage.getProject(parseInt(req.params.id));
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    if (project.status !== "potential") {
+      return res.status(400).json({ error: "Only potential projects can be deleted" });
+    }
+    storage.deleteProject(project.id);
+    res.status(204).send();
+  });
+
   // Project with team members
   app.get("/api/projects/:id/team", (req, res) => {
     const project = storage.getProject(parseInt(req.params.id));

@@ -1,11 +1,14 @@
-import { useMemo } from "react";
-import { useDashboardData, type DashboardProject } from "@/hooks/use-dashboard-data";
+import { useState, useMemo } from "react";
+import { useDashboardData } from "@/hooks/use-dashboard-data";
 import { getProjectColor } from "@/lib/constants";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, Cell, Legend } from "recharts";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, Cell } from "recharts";
+import { Check } from "lucide-react";
 
 const FTE_BASELINE = 54;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const CURRENT_YEAR = 2026;
+
+type ProjectStatus = "active" | "potential" | "completed" | "cancelled";
 
 function LoadingSkeleton() {
   return (
@@ -35,20 +38,41 @@ function dateToWeekIndex(dateStr: string): number {
   return Math.floor((d.getTime() - firstMonday.getTime()) / (7 * 24 * 60 * 60 * 1000));
 }
 
+const STATUS_FILTERS: { key: ProjectStatus; label: string; defaultOn: boolean }[] = [
+  { key: "active", label: "Active", defaultOn: true },
+  { key: "potential", label: "Potential", defaultOn: true },
+  { key: "completed", label: "Completed", defaultOn: false },
+  { key: "cancelled", label: "Cancelled", defaultOn: false },
+];
+
 export default function GanttChart() {
   const { data, isLoading } = useDashboardData();
+  const [activeFilters, setActiveFilters] = useState<Set<ProjectStatus>>(new Set(["active", "potential"]));
+
+  const handleToggleFilter = (status: ProjectStatus) => {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(status)) {
+        next.delete(status);
+      } else {
+        next.add(status);
+      }
+      return next;
+    });
+  };
 
   const ganttData = useMemo(() => {
     if (!data) return null;
 
     const { workers, projects } = data;
-    const activeProjects = projects.filter((p) => p.status === "active");
+    const filteredProjects = projects.filter((p) => activeFilters.has((p.status || "active") as ProjectStatus));
 
     // Compute project rows
-    const projectRows = activeProjects.map((p) => {
+    const projectRows = filteredProjects.map((p) => {
       const startMonth = dateToMonthIndex(p.startDate);
       const endMonth = dateToMonthIndex(p.endDate);
       const color = getProjectColor(p.code);
+      const status = (p.status || "active") as ProjectStatus;
 
       // Count active assignments
       const assignedCount = workers.reduce((count, w) => {
@@ -61,37 +85,41 @@ export default function GanttChart() {
         endMonth: endMonth ?? 11,
         color,
         headcount: assignedCount || p.headcount || 0,
+        status,
       };
     });
 
-    // Summary stats
-    const totalPositions = projectRows.reduce((sum, r) => sum + r.headcount, 0);
+    // Summary stats — only count active
+    const activeProjects = projects.filter((p) => p.status === "active");
+    const totalPositions = projectRows
+      .filter((r) => r.status === "active")
+      .reduce((sum, r) => sum + r.headcount, 0);
 
     // Demand curve: weekly headcount based on individual worker assignment overlaps
-    // Weeks: Mon Jan 5 2026 through Mon Dec 28 2026
     const weeklyDemand: { week: number; label: string; count: number }[] = [];
-    const firstMonday = new Date(CURRENT_YEAR, 0, 5); // Jan 5, 2026 is a Monday
+    const firstMonday = new Date(CURRENT_YEAR, 0, 5);
     const totalWeeks = 52;
 
-    // Collect all assignments from all workers
+    // Only count assignments from active projects for demand
+    const activeProjectIds = new Set(activeProjects.map((p) => p.id));
     const allAssignments = workers.flatMap((w) =>
-      w.assignments.map((a) => ({
-        startDate: a.startDate ? new Date(a.startDate) : null,
-        endDate: a.endDate ? new Date(a.endDate) : null,
-      }))
+      w.assignments
+        .filter((a) => activeProjectIds.has(a.projectId))
+        .map((a) => ({
+          startDate: a.startDate ? new Date(a.startDate) : null,
+          endDate: a.endDate ? new Date(a.endDate) : null,
+        }))
     );
 
     for (let w = 0; w < totalWeeks; w++) {
       const weekStart = new Date(firstMonday.getTime() + w * 7 * 24 * 60 * 60 * 1000);
-      const weekEnd = new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000); // Sunday
+      const weekEnd = new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000);
       const weekMonth = MONTHS[weekStart.getMonth()];
       const weekDay = weekStart.getDate();
 
-      // Count how many individual assignments overlap with this week
       let count = 0;
       for (const a of allAssignments) {
         if (!a.startDate || !a.endDate) continue;
-        // Assignment overlaps with week if it starts before week ends AND ends after week starts
         if (a.startDate <= weekEnd && a.endDate >= weekStart) {
           count++;
         }
@@ -113,7 +141,7 @@ export default function GanttChart() {
       peakDemand,
       weeklyDemand,
     };
-  }, [data]);
+  }, [data, activeFilters]);
 
   if (isLoading || !data || !ganttData) return <LoadingSkeleton />;
 
@@ -147,6 +175,29 @@ export default function GanttChart() {
         ))}
       </div>
 
+      {/* Status filter toggles */}
+      <div className="flex gap-2 mb-4" data-testid="gantt-status-filter">
+        {STATUS_FILTERS.map((sf) => {
+          const isOn = activeFilters.has(sf.key);
+          return (
+            <button
+              key={sf.key}
+              onClick={() => handleToggleFilter(sf.key)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold border transition-colors"
+              style={{
+                borderColor: isOn ? "var(--pfg-yellow)" : "hsl(var(--border))",
+                background: isOn ? "hsl(var(--accent))" : "transparent",
+                color: isOn ? "var(--pfg-navy)" : "hsl(var(--muted-foreground))",
+              }}
+              data-testid={`gantt-filter-${sf.key}`}
+            >
+              {isOn && <Check className="w-3 h-3" />}
+              {sf.label}
+            </button>
+          );
+        })}
+      </div>
+
       {/* Gantt Chart */}
       <div
         className="rounded-xl border overflow-hidden mb-4"
@@ -159,6 +210,10 @@ export default function GanttChart() {
             <div className="flex items-center gap-1.5">
               <div className="w-2.5 h-2.5 rounded-sm" style={{ background: "var(--red)" }} />
               Today
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-6 h-2.5 rounded-sm border-2 border-dashed" style={{ borderColor: "#94a3b8", background: "transparent" }} />
+              Potential
             </div>
           </div>
         </div>
@@ -196,75 +251,112 @@ export default function GanttChart() {
               </tr>
             </thead>
             <tbody>
-              {ganttData.projectRows.map((row) => (
-                <tr
-                  key={row.project.id}
-                  className="group"
-                  data-testid={`gantt-row-${row.project.code}`}
-                >
-                  <td
-                    className="px-4 py-1 text-xs font-semibold text-pfg-navy whitespace-nowrap sticky left-0 z-[1]"
-                    style={{
-                      background: "hsl(var(--card))",
-                      borderBottom: "1px solid hsl(var(--border))",
-                      borderRight: "1px solid hsl(var(--border))",
-                    }}
-                  >
-                    <div className="flex items-center gap-2">
-                      <div className="w-1 h-5 rounded-full" style={{ background: row.color }} />
-                      <span>{row.project.code}</span>
-                      <span className="text-[11px] font-normal" style={{ color: "var(--pfg-steel)" }}>
-                        {row.project.location || ""}
-                      </span>
-                    </div>
-                  </td>
-                  <td
-                    className="text-center text-xs font-bold tabular-nums text-pfg-navy"
-                    style={{ borderBottom: "1px solid hsl(var(--border))" }}
-                  >
-                    {row.headcount}
-                  </td>
-                  {MONTHS.map((_, monthIdx) => {
-                    const isInRange = monthIdx >= row.startMonth && monthIdx <= row.endMonth;
-                    const isStart = monthIdx === row.startMonth;
-                    const isEnd = monthIdx === row.endMonth;
-                    const isToday = monthIdx === todayMonth;
+              {ganttData.projectRows.map((row) => {
+                const isPotential = row.status === "potential";
+                const isInactive = row.status === "completed" || row.status === "cancelled";
 
-                    return (
-                      <td
-                        key={monthIdx}
-                        className="relative"
-                        style={{
-                          borderBottom: "1px solid hsl(var(--border))",
-                          borderLeft: "1px solid hsl(var(--border))",
-                          height: 32,
-                          padding: "4px 0",
-                        }}
-                      >
-                        {isInRange && (
-                          <div
-                            className="absolute top-1 bottom-1 cursor-pointer transition-opacity hover:opacity-80"
-                            style={{
-                              background: row.color,
-                              left: isStart ? "4px" : 0,
-                              right: isEnd ? "4px" : 0,
-                              borderRadius: isStart && isEnd ? 3 : isStart ? "3px 0 0 3px" : isEnd ? "0 3px 3px 0" : 0,
-                            }}
-                            title={`${row.project.code} — ${row.project.name} (${row.project.startDate} → ${row.project.endDate})`}
-                          />
+                return (
+                  <tr
+                    key={row.project.id}
+                    className="group"
+                    data-testid={`gantt-row-${row.project.code}`}
+                  >
+                    <td
+                      className="px-4 py-1 text-xs font-semibold whitespace-nowrap sticky left-0 z-[1]"
+                      style={{
+                        background: "hsl(var(--card))",
+                        borderBottom: "1px solid hsl(var(--border))",
+                        borderRight: "1px solid hsl(var(--border))",
+                        color: isInactive ? "hsl(var(--muted-foreground))" : "var(--pfg-navy)",
+                        textDecoration: row.status === "cancelled" ? "line-through" : undefined,
+                      }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className="w-1 h-5 rounded-full" style={{ background: isInactive ? "#94a3b8" : row.color, opacity: isPotential ? 0.6 : 1 }} />
+                        <span>{row.project.code}</span>
+                        <span className="text-[11px] font-normal" style={{ color: "var(--pfg-steel)" }}>
+                          {row.project.location || ""}
+                        </span>
+                        {isPotential && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--accent))", color: "#8B6E00" }}>
+                            POT
+                          </span>
                         )}
-                        {/* Today line */}
-                        {isToday && (
-                          <div
-                            className="absolute top-0 bottom-0 w-0.5 z-[5]"
-                            style={{ background: "var(--red)", left: `${todayDayFraction * 100}%` }}
-                          />
+                        {isInactive && (
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--muted))", color: "hsl(var(--muted-foreground))" }}>
+                            {row.status === "completed" ? "DONE" : "CXL"}
+                          </span>
                         )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
+                      </div>
+                    </td>
+                    <td
+                      className="text-center text-xs font-bold tabular-nums"
+                      style={{
+                        borderBottom: "1px solid hsl(var(--border))",
+                        color: isInactive ? "hsl(var(--muted-foreground))" : "var(--pfg-navy)",
+                      }}
+                    >
+                      {row.headcount}
+                    </td>
+                    {MONTHS.map((_, monthIdx) => {
+                      const isInRange = monthIdx >= row.startMonth && monthIdx <= row.endMonth;
+                      const isStart = monthIdx === row.startMonth;
+                      const isEnd = monthIdx === row.endMonth;
+                      const isToday = monthIdx === todayMonth;
+
+                      return (
+                        <td
+                          key={monthIdx}
+                          className="relative"
+                          style={{
+                            borderBottom: "1px solid hsl(var(--border))",
+                            borderLeft: "1px solid hsl(var(--border))",
+                            height: 32,
+                            padding: "4px 0",
+                          }}
+                        >
+                          {isInRange && (
+                            isPotential ? (
+                              // Dashed bar for potential projects
+                              <div
+                                className="absolute top-1 bottom-1 cursor-pointer transition-opacity hover:opacity-80"
+                                style={{
+                                  border: `2px dashed ${row.color}`,
+                                  background: `${row.color}15`,
+                                  left: isStart ? "4px" : 0,
+                                  right: isEnd ? "4px" : 0,
+                                  borderRadius: isStart && isEnd ? 3 : isStart ? "3px 0 0 3px" : isEnd ? "0 3px 3px 0" : 0,
+                                }}
+                                title={`${row.project.code} — ${row.project.name} (Potential) (${row.project.startDate} → ${row.project.endDate})`}
+                              />
+                            ) : (
+                              // Solid bar for active / completed / cancelled
+                              <div
+                                className="absolute top-1 bottom-1 cursor-pointer transition-opacity hover:opacity-80"
+                                style={{
+                                  background: isInactive ? "#94a3b8" : row.color,
+                                  opacity: isInactive ? 0.5 : 1,
+                                  left: isStart ? "4px" : 0,
+                                  right: isEnd ? "4px" : 0,
+                                  borderRadius: isStart && isEnd ? 3 : isStart ? "3px 0 0 3px" : isEnd ? "0 3px 3px 0" : 0,
+                                }}
+                                title={`${row.project.code} — ${row.project.name} (${row.project.startDate} → ${row.project.endDate})`}
+                              />
+                            )
+                          )}
+                          {/* Today line */}
+                          {isToday && (
+                            <div
+                              className="absolute top-0 bottom-0 w-0.5 z-[5]"
+                              style={{ background: "var(--red)", left: `${todayDayFraction * 100}%` }}
+                            />
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

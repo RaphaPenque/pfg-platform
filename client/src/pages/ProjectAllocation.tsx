@@ -1,8 +1,8 @@
 import { useState, useMemo } from "react";
-import { useDashboardData, type DashboardWorker, type DashboardProject, type DashboardAssignment } from "@/hooks/use-dashboard-data";
+import { useDashboardData, type DashboardWorker, type DashboardProject, type DashboardAssignment, type DashboardRoleSlot } from "@/hooks/use-dashboard-data";
 import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, OEM_OPTIONS, EQUIPMENT_TYPES, PROJECT_ROLES, calcUtilisation } from "@/lib/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Plus, X, ExternalLink, Trash2, Undo2, Search, ChevronDown, ChevronUp, Check, Loader2 } from "lucide-react";
+import { Plus, X, ExternalLink, Trash2, Undo2, Search, ChevronDown, ChevronUp, Check, Loader2, CheckCircle2, XCircle, Sparkles, RotateCcw, AlertTriangle } from "lucide-react";
 import { Link } from "wouter";
 
 // ─── Shared small components ───────────────────────────────────────
@@ -29,7 +29,7 @@ function LoadingSkeleton() {
 }
 
 // Modal overlay wrapper
-function ModalOverlay({ children, onClose, testId }: { children: React.ReactNode; onClose: () => void; testId: string }) {
+function ModalOverlay({ children, onClose, testId, wide }: { children: React.ReactNode; onClose: () => void; testId: string; wide?: boolean }) {
   return (
     <div
       className="fixed inset-0 z-[200] flex items-center justify-center"
@@ -38,7 +38,7 @@ function ModalOverlay({ children, onClose, testId }: { children: React.ReactNode
       data-testid={testId}
     >
       <div
-        className="rounded-xl overflow-hidden w-[900px] max-w-[95vw] max-h-[90vh] flex flex-col"
+        className={`rounded-xl overflow-hidden ${wide ? "w-[1040px]" : "w-[900px]"} max-w-[95vw] max-h-[90vh] flex flex-col`}
         style={{ background: "hsl(var(--card))", boxShadow: "0 20px 60px rgba(27,42,74,0.3)" }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -77,27 +77,166 @@ interface RoleSlotDraft {
   shift: string;
 }
 
+type ProjectStatus = "active" | "potential" | "completed" | "cancelled";
+
+// ─── Confirm Dialog ──────────────────────────────────────────────
+
+function ConfirmDialog({
+  title,
+  message,
+  confirmLabel,
+  confirmColor,
+  onConfirm,
+  onCancel,
+}: {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  confirmColor: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[300] flex items-center justify-center"
+      style={{ background: "rgba(27,42,74,0.6)", backdropFilter: "blur(2px)" }}
+      onClick={onCancel}
+    >
+      <div
+        className="rounded-xl overflow-hidden w-[420px] max-w-[90vw]"
+        style={{ background: "hsl(var(--card))", boxShadow: "0 20px 60px rgba(27,42,74,0.3)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="px-6 py-5">
+          <div className="flex items-center gap-2 mb-3">
+            <AlertTriangle className="w-5 h-5" style={{ color: confirmColor }} />
+            <h3 className="font-display font-bold text-pfg-navy">{title}</h3>
+          </div>
+          <p className="text-[13px]" style={{ color: "var(--pfg-steel)" }}>{message}</p>
+        </div>
+        <div className="px-6 py-4 border-t flex justify-end gap-2" style={{ borderColor: "hsl(var(--border))" }}>
+          <button
+            onClick={onCancel}
+            className="px-4 py-2 text-[13px] font-medium rounded-lg border"
+            style={{ borderColor: "hsl(var(--border))" }}
+            data-testid="confirm-cancel"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            className="px-4 py-2 text-[13px] font-semibold rounded-lg text-white"
+            style={{ background: confirmColor }}
+            data-testid="confirm-action"
+          >
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Project Status Filter Toggles ──────────────────────────────
+
+const STATUS_FILTERS: { key: ProjectStatus; label: string; defaultOn: boolean }[] = [
+  { key: "active", label: "Active", defaultOn: true },
+  { key: "potential", label: "Potential", defaultOn: true },
+  { key: "completed", label: "Completed", defaultOn: false },
+  { key: "cancelled", label: "Cancelled", defaultOn: false },
+];
+
+function StatusFilterBar({
+  activeFilters,
+  onToggle,
+}: {
+  activeFilters: Set<ProjectStatus>;
+  onToggle: (s: ProjectStatus) => void;
+}) {
+  return (
+    <div className="flex gap-2 mb-4" data-testid="status-filter-bar">
+      {STATUS_FILTERS.map((sf) => {
+        const isOn = activeFilters.has(sf.key);
+        return (
+          <button
+            key={sf.key}
+            onClick={() => onToggle(sf.key)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold border transition-colors"
+            style={{
+              borderColor: isOn ? "var(--pfg-yellow)" : "hsl(var(--border))",
+              background: isOn ? "hsl(var(--accent))" : "transparent",
+              color: isOn ? "var(--pfg-navy)" : "hsl(var(--muted-foreground))",
+            }}
+            data-testid={`filter-${sf.key}`}
+          >
+            {isOn && <Check className="w-3 h-3" />}
+            {sf.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 // ─── Project Card ──────────────────────────────────────────────────
 
-function ProjectCard({ card, onClick }: { card: ProjectCardData; onClick: () => void }) {
+function ProjectCard({ card, onClick, effectiveStatus }: { card: ProjectCardData; onClick: () => void; effectiveStatus?: ProjectStatus }) {
   const customer = card.project.customer || PROJECT_CUSTOMER[card.project.code] || "";
   const color = customer ? (OEM_BRAND_COLORS[customer] || "#64748B") : "#64748B";
+  const status = effectiveStatus || (card.project.status || "active") as ProjectStatus;
+
+  const isPotential = status === "potential";
+  const isCompleted = status === "completed";
+  const isCancelled = status === "cancelled";
+  const isInactive = isCompleted || isCancelled;
 
   return (
     <div
       className="rounded-xl border overflow-hidden cursor-pointer transition-shadow hover:shadow-md"
-      style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--card-border))", boxShadow: "var(--shadow-sm)" }}
+      style={{
+        background: "hsl(var(--card))",
+        borderColor: isPotential ? "var(--pfg-yellow)" : "hsl(var(--card-border))",
+        borderStyle: isPotential ? "dashed" : "solid",
+        borderWidth: isPotential ? "2px" : "1px",
+        boxShadow: "var(--shadow-sm)",
+        opacity: isInactive ? 0.6 : 1,
+      }}
       onClick={onClick}
       data-testid={`project-card-${card.project.code}`}
     >
-      <div className="px-5 py-4 flex items-center justify-between font-display" style={{ background: color, color: "#fff" }}>
+      <div
+        className="px-5 py-4 flex items-center justify-between font-display"
+        style={{
+          background: isInactive ? "#94a3b8" : isPotential ? `${color}B3` : color,
+          color: "#fff",
+        }}
+      >
         <div>
-          <div className="text-sm font-bold">{card.project.code} — {card.project.name}</div>
+          <div className="text-sm font-bold" style={{ textDecoration: isCancelled ? "line-through" : undefined }}>
+            {card.project.code} — {card.project.name}
+          </div>
           {card.project.location && <div className="text-[11px] opacity-80 mt-0.5">{card.project.location}</div>}
         </div>
-        <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.2)" }}>
-          {card.members.length}
-        </span>
+        <div className="flex items-center gap-2">
+          {isPotential && (
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.3)", color: "#fff" }} data-testid={`badge-potential-${card.project.code}`}>
+              POTENTIAL
+            </span>
+          )}
+          {isCompleted && (
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.3)", color: "#fff" }} data-testid={`badge-completed-${card.project.code}`}>
+              COMPLETED
+            </span>
+          )}
+          {isCancelled && (
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.3)", color: "#fff" }} data-testid={`badge-cancelled-${card.project.code}`}>
+              CANCELLED
+            </span>
+          )}
+          <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.2)" }}>
+            {card.members.length}
+          </span>
+        </div>
       </div>
 
       <div>
@@ -183,6 +322,7 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
   const [shift, setShift] = useState("Day");
   const [headcount, setHeadcount] = useState(6);
   const [notes, setNotes] = useState("");
+  const [createAsStatus, setCreateAsStatus] = useState<"active" | "potential">("active");
 
   // Step 2: Role slots
   const [roleSlots, setRoleSlots] = useState<RoleSlotDraft[]>([]);
@@ -304,7 +444,7 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
         shift: shift || null,
         headcount: headcount || null,
         notes: notes.trim() || null,
-        status: "active",
+        status: createAsStatus,
       });
       const project = await projRes.json();
 
@@ -407,50 +547,105 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
       <div className="p-6 overflow-y-auto flex-1">
         {/* Step 1: Project Details */}
         {step === 1 && (
-          <div className="grid grid-cols-2 gap-4">
-            <FormGroup label="Project Code *">
-              <input className={inputCls} style={inputStyle} value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g. TRNS" data-testid="input-code" />
-            </FormGroup>
-            <FormGroup label="Customer">
-              <input className={inputCls} style={inputStyle} value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Customer name" data-testid="input-customer" />
-            </FormGroup>
-            <FormGroup label="OEM">
-              <select className={inputCls} style={inputStyle} value={oem} onChange={(e) => setOem(e.target.value)} data-testid="input-oem">
-                <option value="">Select OEM...</option>
-                {OEM_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
-              </select>
-            </FormGroup>
-            <FormGroup label="Project Name *">
-              <input className={inputCls} style={inputStyle} value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="Full project name" data-testid="input-name" />
-            </FormGroup>
-            <FormGroup label="Location">
-              <input className={inputCls} style={inputStyle} value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Torness, UK" data-testid="input-location" />
-            </FormGroup>
-            <FormGroup label="Equipment Type">
-              <select className={inputCls} style={inputStyle} value={equipmentType} onChange={(e) => setEquipmentType(e.target.value)} data-testid="input-equipment">
-                <option value="">Select...</option>
-                {EQUIPMENT_TYPES.map((et) => <option key={et.value} value={et.value}>{et.label}</option>)}
-              </select>
-            </FormGroup>
-            <FormGroup label="Start Date *">
-              <input type="date" className={inputCls} style={inputStyle} value={startDate} onChange={(e) => setStartDate(e.target.value)} data-testid="input-start" />
-            </FormGroup>
-            <FormGroup label="End Date *">
-              <input type="date" className={inputCls} style={inputStyle} value={endDate} onChange={(e) => setEndDate(e.target.value)} data-testid="input-end" />
-            </FormGroup>
-            <FormGroup label="Headcount *">
-              <input type="number" min={1} max={100} className={inputCls} style={inputStyle} value={headcount} onChange={(e) => setHeadcount(parseInt(e.target.value) || 6)} data-testid="input-headcount" />
-            </FormGroup>
-            <FormGroup label="Shift Pattern">
-              <select className={inputCls} style={inputStyle} value={shift} onChange={(e) => setShift(e.target.value)} data-testid="input-shift">
-                <option value="Day">Day</option>
-                <option value="Night">Night</option>
-                <option value="Day + Night">Day + Night</option>
-              </select>
-            </FormGroup>
-            <FormGroup label="Notes" full>
-              <textarea className={`${inputCls} resize-y min-h-[60px]`} style={inputStyle} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional notes..." data-testid="input-notes" />
-            </FormGroup>
+          <div className="space-y-4">
+            {/* Active / Potential toggle */}
+            <div className="flex gap-3 mb-2" data-testid="create-status-toggle">
+              <label
+                className="flex items-center gap-2 px-4 py-2.5 rounded-lg border cursor-pointer transition-colors"
+                style={{
+                  borderColor: createAsStatus === "active" ? "var(--pfg-yellow)" : "hsl(var(--border))",
+                  background: createAsStatus === "active" ? "hsl(var(--accent))" : "transparent",
+                }}
+              >
+                <input
+                  type="radio"
+                  name="createStatus"
+                  value="active"
+                  checked={createAsStatus === "active"}
+                  onChange={() => setCreateAsStatus("active")}
+                  className="sr-only"
+                  data-testid="radio-active"
+                />
+                <div
+                  className="w-4 h-4 rounded-full border-2 flex items-center justify-center"
+                  style={{ borderColor: createAsStatus === "active" ? "var(--pfg-yellow)" : "hsl(var(--border))" }}
+                >
+                  {createAsStatus === "active" && <div className="w-2 h-2 rounded-full" style={{ background: "var(--pfg-yellow)" }} />}
+                </div>
+                <span className="text-[13px] font-semibold text-pfg-navy">Create as Active Project</span>
+              </label>
+              <label
+                className="flex items-center gap-2 px-4 py-2.5 rounded-lg border cursor-pointer transition-colors"
+                style={{
+                  borderColor: createAsStatus === "potential" ? "var(--pfg-yellow)" : "hsl(var(--border))",
+                  background: createAsStatus === "potential" ? "hsl(var(--accent))" : "transparent",
+                  borderStyle: createAsStatus === "potential" ? "dashed" : "solid",
+                }}
+              >
+                <input
+                  type="radio"
+                  name="createStatus"
+                  value="potential"
+                  checked={createAsStatus === "potential"}
+                  onChange={() => setCreateAsStatus("potential")}
+                  className="sr-only"
+                  data-testid="radio-potential"
+                />
+                <div
+                  className="w-4 h-4 rounded-full border-2 flex items-center justify-center"
+                  style={{ borderColor: createAsStatus === "potential" ? "var(--pfg-yellow)" : "hsl(var(--border))" }}
+                >
+                  {createAsStatus === "potential" && <div className="w-2 h-2 rounded-full" style={{ background: "var(--pfg-yellow)" }} />}
+                </div>
+                <span className="text-[13px] font-semibold text-pfg-navy">Create as Potential Project</span>
+              </label>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <FormGroup label="Project Code *">
+                <input className={inputCls} style={inputStyle} value={code} onChange={(e) => setCode(e.target.value)} placeholder="e.g. TRNS" data-testid="input-code" />
+              </FormGroup>
+              <FormGroup label="Customer">
+                <input className={inputCls} style={inputStyle} value={customer} onChange={(e) => setCustomer(e.target.value)} placeholder="Customer name" data-testid="input-customer" />
+              </FormGroup>
+              <FormGroup label="OEM">
+                <select className={inputCls} style={inputStyle} value={oem} onChange={(e) => setOem(e.target.value)} data-testid="input-oem">
+                  <option value="">Select OEM...</option>
+                  {OEM_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
+                </select>
+              </FormGroup>
+              <FormGroup label="Project Name *">
+                <input className={inputCls} style={inputStyle} value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="Full project name" data-testid="input-name" />
+              </FormGroup>
+              <FormGroup label="Location">
+                <input className={inputCls} style={inputStyle} value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. Torness, UK" data-testid="input-location" />
+              </FormGroup>
+              <FormGroup label="Equipment Type">
+                <select className={inputCls} style={inputStyle} value={equipmentType} onChange={(e) => setEquipmentType(e.target.value)} data-testid="input-equipment">
+                  <option value="">Select...</option>
+                  {EQUIPMENT_TYPES.map((et) => <option key={et.value} value={et.value}>{et.label}</option>)}
+                </select>
+              </FormGroup>
+              <FormGroup label="Start Date *">
+                <input type="date" className={inputCls} style={inputStyle} value={startDate} onChange={(e) => setStartDate(e.target.value)} data-testid="input-start" />
+              </FormGroup>
+              <FormGroup label="End Date *">
+                <input type="date" className={inputCls} style={inputStyle} value={endDate} onChange={(e) => setEndDate(e.target.value)} data-testid="input-end" />
+              </FormGroup>
+              <FormGroup label="Headcount *">
+                <input type="number" min={1} max={100} className={inputCls} style={inputStyle} value={headcount} onChange={(e) => setHeadcount(parseInt(e.target.value) || 6)} data-testid="input-headcount" />
+              </FormGroup>
+              <FormGroup label="Shift Pattern">
+                <select className={inputCls} style={inputStyle} value={shift} onChange={(e) => setShift(e.target.value)} data-testid="input-shift">
+                  <option value="Day">Day</option>
+                  <option value="Night">Night</option>
+                  <option value="Day + Night">Day + Night</option>
+                </select>
+              </FormGroup>
+              <FormGroup label="Notes" full>
+                <textarea className={`${inputCls} resize-y min-h-[60px]`} style={inputStyle} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional notes..." data-testid="input-notes" />
+              </FormGroup>
+            </div>
           </div>
         )}
 
@@ -640,6 +835,7 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
                 {[
                   ["Code", code.toUpperCase()],
                   ["Name", projectName],
+                  ["Status", createAsStatus === "potential" ? "Potential" : "Active"],
                   ["Customer", customer || oem || "\u2014"],
                   ["OEM", oem || "\u2014"],
                   ["Location", location || "\u2014"],
@@ -711,7 +907,7 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
           <div className="text-center py-8 space-y-4">
             <div className="text-sm font-bold text-pfg-navy font-display">Ready to create project?</div>
             <div className="text-[13px]" style={{ color: "var(--pfg-steel)" }}>
-              This will create <strong>{code.toUpperCase()}</strong> with {roleSlots.length} role slot{roleSlots.length !== 1 ? "s" : ""} and {filledPositions} assignment{filledPositions !== 1 ? "s" : ""}.
+              This will create <strong>{code.toUpperCase()}</strong> as {createAsStatus === "potential" ? "a potential" : "an active"} project with {roleSlots.length} role slot{roleSlots.length !== 1 ? "s" : ""} and {filledPositions} assignment{filledPositions !== 1 ? "s" : ""}.
             </div>
             {error && <div className="text-sm font-medium px-3 py-2 rounded-lg mx-auto max-w-md" style={{ background: "var(--red-bg)", color: "var(--red)" }}>{error}</div>}
           </div>
@@ -790,28 +986,87 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// EDIT PROJECT MODAL (remove/undo members, add person, save)
+// EDIT PROJECT MODAL (Tabbed: Details, Role Planning, Team)
 // ═══════════════════════════════════════════════════════════════════
 
 function EditProjectModal({
   card,
   allWorkers,
+  allRoleSlots,
   onClose,
 }: {
   card: ProjectCardData;
   allWorkers: DashboardWorker[];
+  allRoleSlots: DashboardRoleSlot[];
   onClose: () => void;
 }) {
   const customer = card.project.customer || PROJECT_CUSTOMER[card.project.code] || "";
   const color = customer ? (OEM_BRAND_COLORS[customer] || "#64748B") : "#64748B";
+  const today = new Date().toISOString().split("T")[0];
+  const rawStatus = (card.project.status || "active") as ProjectStatus;
+  const projectStatus = (rawStatus === "active" && card.project.endDate && card.project.endDate < today) ? "completed" as ProjectStatus : rawStatus;
 
-  // Track removals and additions locally
+  const [activeTab, setActiveTab] = useState<"details" | "roles" | "team">("details");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmAction, setConfirmAction] = useState<{ title: string; message: string; label: string; color: string; action: () => void } | null>(null);
+
+  // ── Details tab state ──
+  const [editCode, setEditCode] = useState(card.project.code);
+  const [editName, setEditName] = useState(card.project.name);
+  const [editCustomer, setEditCustomer] = useState(card.project.customer || "");
+  const [editLocation, setEditLocation] = useState(card.project.location || "");
+  const [editEquipment, setEditEquipment] = useState(card.project.equipmentType || "");
+  const [editStart, setEditStart] = useState(card.project.startDate || "");
+  const [editEnd, setEditEnd] = useState(card.project.endDate || "");
+  const [editShift, setEditShift] = useState(card.project.shift || "Day");
+  const [editHeadcount, setEditHeadcount] = useState(card.project.headcount || 6);
+  const [editNotes, setEditNotes] = useState(card.project.notes || "");
+
+  // Detect OEM from customer
+  const editOem = OEM_OPTIONS.find((o) => editCustomer.includes(o)) || "";
+
+  // ── Role Planning tab state ──
+  const existingSlots = allRoleSlots.filter((s) => s.projectId === card.project.id);
+  const [roleSlotEdits, setRoleSlotEdits] = useState<RoleSlotDraft[]>(
+    existingSlots.map((s, i) => ({
+      key: -(s.id), // negative keys for existing
+      role: s.role,
+      startDate: s.startDate,
+      endDate: s.endDate,
+      quantity: s.quantity,
+      shift: s.shift || "Day",
+    }))
+  );
+  const [nextRoleKey, setNextRoleKey] = useState(1);
+  const [deletedSlotIds, setDeletedSlotIds] = useState<number[]>([]);
+
+  const addEditRoleSlot = () => {
+    setRoleSlotEdits((prev) => [
+      ...prev,
+      { key: nextRoleKey, role: "Technician 2", startDate: editStart, endDate: editEnd, quantity: 1, shift: "Day" },
+    ]);
+    setNextRoleKey((k) => k + 1);
+  };
+
+  const updateEditSlot = (key: number, field: keyof RoleSlotDraft, value: string | number) => {
+    setRoleSlotEdits((prev) => prev.map((s) => (s.key === key ? { ...s, [field]: value } : s)));
+  };
+
+  const removeEditSlot = (key: number) => {
+    if (key < 0) {
+      // Existing slot — mark for deletion
+      const slotId = Math.abs(key);
+      setDeletedSlotIds((prev) => [...prev, slotId]);
+    }
+    setRoleSlotEdits((prev) => prev.filter((s) => s.key !== key));
+  };
+
+  // ── Team tab state ──
   const [removedIds, setRemovedIds] = useState<Set<number>>(new Set());
   const [additions, setAdditions] = useState<{ workerId: number; task: string; shift: string }[]>([]);
   const [showAddPanel, setShowAddPanel] = useState(false);
   const [addSearch, setAddSearch] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const handleRemove = (assignmentId: number) => {
     setRemovedIds((prev) => new Set(prev).add(assignmentId));
@@ -834,7 +1089,6 @@ function EditProjectModal({
     setAdditions((prev) => prev.filter((a) => a.workerId !== workerId));
   };
 
-  // Workers available to add: not on this project already (unless removed), and not already in additions
   const currentMemberWorkerIds = new Set(
     card.members.filter((m) => !removedIds.has(m.assignment.id)).map((m) => m.worker.id)
   );
@@ -851,31 +1105,94 @@ function EditProjectModal({
         if (!w.name.toLowerCase().includes(q) && !w.role.toLowerCase().includes(q)) return false;
       }
       return true;
+    }).sort((a, b) => {
+      // FTE first
+      if (a.status !== b.status) return a.status === "FTE" ? -1 : 1;
+      // OEM match
+      const oemMatch = editOem && editEquipment ? `${editOem} - ${editEquipment}` : null;
+      if (oemMatch) {
+        const aMatch = a.oemExperience.includes(oemMatch) ? 0 : 1;
+        const bMatch = b.oemExperience.includes(oemMatch) ? 0 : 1;
+        if (aMatch !== bMatch) return aMatch - bMatch;
+      }
+      // Lowest utilisation
+      return calcUtilisation(a.assignments).pct - calcUtilisation(b.assignments).pct;
     });
   }, [allWorkers, currentMemberWorkerIds, additionWorkerIds, addSearch, removedIds]);
 
-  const hasChanges = removedIds.size > 0 || additions.length > 0;
-
   const activeCount = card.members.filter((m) => !removedIds.has(m.assignment.id)).length + additions.length;
 
+  // ── Track changes ──
+  const detailsChanged =
+    editCode !== card.project.code ||
+    editName !== card.project.name ||
+    editCustomer !== (card.project.customer || "") ||
+    editLocation !== (card.project.location || "") ||
+    editEquipment !== (card.project.equipmentType || "") ||
+    editStart !== (card.project.startDate || "") ||
+    editEnd !== (card.project.endDate || "") ||
+    editShift !== (card.project.shift || "Day") ||
+    editHeadcount !== (card.project.headcount || 6) ||
+    editNotes !== (card.project.notes || "");
+
+  const rolesChanged = deletedSlotIds.length > 0 || roleSlotEdits.some((s) => s.key > 0);
+  const teamChanged = removedIds.size > 0 || additions.length > 0;
+  const hasChanges = detailsChanged || rolesChanged || teamChanged;
+
+  // ── Save handler ──
   const handleSave = async () => {
     setSaving(true);
     setError(null);
     try {
-      // Process removals
+      // Save details
+      if (detailsChanged) {
+        await apiRequest("PATCH", `/api/projects/${card.project.id}`, {
+          code: editCode.trim().toUpperCase(),
+          name: editName.trim(),
+          customer: editCustomer.trim() || null,
+          location: editLocation.trim() || null,
+          equipmentType: editEquipment || null,
+          startDate: editStart || null,
+          endDate: editEnd || null,
+          shift: editShift || null,
+          headcount: editHeadcount || null,
+          notes: editNotes.trim() || null,
+        });
+      }
+
+      // Delete removed role slots
+      for (const slotId of deletedSlotIds) {
+        await apiRequest("DELETE", `/api/role-slots/${slotId}`);
+      }
+
+      // Create new role slots (key > 0)
+      for (const slot of roleSlotEdits) {
+        if (slot.key > 0) {
+          await apiRequest("POST", "/api/role-slots", {
+            projectId: card.project.id,
+            role: slot.role,
+            startDate: slot.startDate,
+            endDate: slot.endDate,
+            quantity: slot.quantity,
+            shift: slot.shift,
+          });
+        }
+      }
+
+      // Process team removals
       for (const id of Array.from(removedIds)) {
         await apiRequest("DELETE", `/api/assignments/${id}`);
       }
 
-      // Process additions
+      // Process team additions
       for (const add of additions) {
         await apiRequest("POST", "/api/assignments", {
           workerId: add.workerId,
           projectId: card.project.id,
           task: add.task || null,
           shift: add.shift,
-          startDate: card.project.startDate,
-          endDate: card.project.endDate,
+          startDate: editStart,
+          endDate: editEnd,
           status: "active",
         });
       }
@@ -889,14 +1206,79 @@ function EditProjectModal({
     }
   };
 
+  // ── Status action handlers ──
+  const handleStatusAction = async (action: string) => {
+    setSaving(true);
+    setError(null);
+    try {
+      if (action === "discard") {
+        // Delete entirely (potential only)
+        await apiRequest("DELETE", `/api/projects/${card.project.id}`);
+      } else {
+        const statusMap: Record<string, string> = {
+          complete: "completed",
+          cancel: "cancelled",
+          materialise: "active",
+          reactivate: "active",
+        };
+        await apiRequest("POST", `/api/projects/${card.project.id}/status`, {
+          status: statusMap[action],
+        });
+      }
+      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      onClose();
+    } catch (e: any) {
+      setError(e.message || "Action failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const tabs = [
+    { key: "details" as const, label: "Details" },
+    { key: "roles" as const, label: "Role Planning" },
+    { key: "team" as const, label: "Team" },
+  ];
+
+  const isPotential = projectStatus === "potential";
+  const isActive = projectStatus === "active";
+  const isCompleted = projectStatus === "completed";
+  const isCancelled = projectStatus === "cancelled";
+  const isInactive = isCompleted || isCancelled;
+
   return (
-    <ModalOverlay onClose={onClose} testId="edit-project-modal">
+    <ModalOverlay onClose={onClose} testId="edit-project-modal" wide>
       {/* Header */}
-      <div className="px-6 py-5 flex items-center justify-between" style={{ background: color, color: "#fff" }}>
-        <div>
-          <div className="font-display text-lg font-bold">{card.project.code} — {card.project.name}</div>
-          <div className="text-xs opacity-80 mt-0.5">
-            {card.project.location} · {card.project.customer} · {card.project.equipmentType || "—"}
+      <div
+        className="px-6 py-5 flex items-center justify-between"
+        style={{
+          background: isInactive ? "#94a3b8" : isPotential ? `${color}B3` : color,
+          color: "#fff",
+        }}
+      >
+        <div className="flex items-center gap-3">
+          <div>
+            <div className="font-display text-lg font-bold flex items-center gap-2">
+              {card.project.code} — {card.project.name}
+              {isPotential && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.3)" }}>
+                  POTENTIAL
+                </span>
+              )}
+              {isCompleted && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.3)" }}>
+                  COMPLETED
+                </span>
+              )}
+              {isCancelled && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.3)" }}>
+                  CANCELLED
+                </span>
+              )}
+            </div>
+            <div className="text-xs opacity-80 mt-0.5">
+              {card.project.location} · {card.project.customer} · {card.project.equipmentType || "—"}
+            </div>
           </div>
         </div>
         <button onClick={onClose} className="text-white/60 hover:text-white p-1" data-testid="edit-modal-close">
@@ -904,156 +1286,338 @@ function EditProjectModal({
         </button>
       </div>
 
-      {/* Body */}
-      <div className="p-6 overflow-y-auto flex-1">
-        {/* Current Team */}
-        <div className="mb-5">
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-sm font-bold text-pfg-navy font-display flex items-center gap-2">
-              Team Members
-              <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "hsl(var(--accent))", color: "#8B6E00" }}>
-                {activeCount}
-              </span>
-            </div>
-          </div>
+      {/* Tabs */}
+      <div className="flex border-b" style={{ borderColor: "hsl(var(--border))" }}>
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className="px-5 py-3 text-[13px] font-semibold border-b-[3px] transition-colors"
+            style={{
+              borderColor: activeTab === tab.key ? "var(--pfg-yellow)" : "transparent",
+              color: activeTab === tab.key ? "var(--pfg-navy)" : "hsl(var(--muted-foreground))",
+              background: activeTab === tab.key ? "hsl(var(--accent))" : "transparent",
+            }}
+            data-testid={`tab-${tab.key}`}
+          >
+            {tab.label}
+            {tab.key === "team" && <span className="ml-1.5 text-[11px]">({activeCount})</span>}
+          </button>
+        ))}
+      </div>
 
-          <div className="space-y-1">
-            {card.members.map((m) => {
-              const isRemoved = removedIds.has(m.assignment.id);
-              return (
-                <div
-                  key={m.assignment.id}
-                  className="flex items-center gap-3 px-3.5 py-2.5 rounded-lg border transition-colors"
-                  style={{
-                    borderColor: "hsl(var(--border))",
-                    opacity: isRemoved ? 0.45 : 1,
-                    background: isRemoved ? "hsl(var(--muted))" : undefined,
-                    textDecoration: isRemoved ? "line-through" : undefined,
-                  }}
-                  data-testid={`member-row-${m.assignment.id}`}
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[13px] font-semibold text-pfg-navy">{m.worker.name}</div>
-                    <div className="text-[11px] mt-0.5" style={{ color: "var(--pfg-steel)" }}>
-                      {m.assignment.task || m.worker.role} · {m.assignment.startDate || "—"} → {m.assignment.endDate || "—"}
+      {/* Body */}
+      <div className="p-6 overflow-y-auto flex-1" style={{ minHeight: 300 }}>
+        {/* Details Tab */}
+        {activeTab === "details" && (
+          <div className="grid grid-cols-2 gap-4">
+            <FormGroup label="Project Code *">
+              <input className={inputCls} style={inputStyle} value={editCode} onChange={(e) => setEditCode(e.target.value)} data-testid="edit-code" />
+            </FormGroup>
+            <FormGroup label="Customer">
+              <input className={inputCls} style={inputStyle} value={editCustomer} onChange={(e) => setEditCustomer(e.target.value)} data-testid="edit-customer" />
+            </FormGroup>
+            <FormGroup label="Project Name *">
+              <input className={inputCls} style={inputStyle} value={editName} onChange={(e) => setEditName(e.target.value)} data-testid="edit-name" />
+            </FormGroup>
+            <FormGroup label="Location">
+              <input className={inputCls} style={inputStyle} value={editLocation} onChange={(e) => setEditLocation(e.target.value)} data-testid="edit-location" />
+            </FormGroup>
+            <FormGroup label="Equipment Type">
+              <select className={inputCls} style={inputStyle} value={editEquipment} onChange={(e) => setEditEquipment(e.target.value)} data-testid="edit-equipment">
+                <option value="">Select...</option>
+                {EQUIPMENT_TYPES.map((et) => <option key={et.value} value={et.value}>{et.label}</option>)}
+              </select>
+            </FormGroup>
+            <FormGroup label="Shift Pattern">
+              <select className={inputCls} style={inputStyle} value={editShift} onChange={(e) => setEditShift(e.target.value)} data-testid="edit-shift">
+                <option value="Day">Day</option>
+                <option value="Night">Night</option>
+                <option value="Day + Night">Day + Night</option>
+              </select>
+            </FormGroup>
+            <FormGroup label="Start Date *">
+              <input type="date" className={inputCls} style={inputStyle} value={editStart} onChange={(e) => setEditStart(e.target.value)} data-testid="edit-start" />
+            </FormGroup>
+            <FormGroup label="End Date *">
+              <input type="date" className={inputCls} style={inputStyle} value={editEnd} onChange={(e) => setEditEnd(e.target.value)} data-testid="edit-end" />
+            </FormGroup>
+            <FormGroup label="Headcount">
+              <input type="number" min={1} max={100} className={inputCls} style={inputStyle} value={editHeadcount} onChange={(e) => setEditHeadcount(parseInt(e.target.value) || 6)} data-testid="edit-headcount" />
+            </FormGroup>
+            <FormGroup label="Status">
+              <div className="px-3 py-2 text-[13px] rounded-lg border capitalize" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--muted))", color: "var(--pfg-navy)" }}>
+                {projectStatus}
+              </div>
+            </FormGroup>
+            <FormGroup label="Notes" full>
+              <textarea className={`${inputCls} resize-y min-h-[60px]`} style={inputStyle} value={editNotes} onChange={(e) => setEditNotes(e.target.value)} data-testid="edit-notes" />
+            </FormGroup>
+          </div>
+        )}
+
+        {/* Role Planning Tab */}
+        {activeTab === "roles" && (
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-sm font-bold text-pfg-navy font-display flex items-center gap-2">
+                Role Slots
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "hsl(var(--accent))", color: "#8B6E00" }}>
+                  {roleSlotEdits.reduce((s, r) => s + r.quantity, 0)}
+                </span>
+              </div>
+              <button
+                onClick={addEditRoleSlot}
+                className="flex items-center gap-1 text-xs font-semibold px-3 py-1.5 rounded-lg border"
+                style={{ borderColor: "var(--pfg-yellow)", color: "var(--pfg-yellow)" }}
+                data-testid="edit-add-role-slot"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add Role
+              </button>
+            </div>
+
+            {roleSlotEdits.length === 0 ? (
+              <div className="text-center py-10 text-sm" style={{ color: "hsl(var(--muted-foreground))" }}>
+                No role slots. Click "Add Role" to start planning.
+              </div>
+            ) : (
+              <div className="rounded-lg border overflow-hidden" style={{ borderColor: "hsl(var(--border))" }}>
+                <table className="w-full text-[13px]" style={{ borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr>
+                      {["Role", "Start Date", "End Date", "Qty", "Shift", ""].map((h) => (
+                        <th key={h} className="text-left px-3 py-2 text-[10px] font-semibold uppercase tracking-wide" style={{ background: "hsl(var(--muted))", color: "hsl(var(--muted-foreground))", borderBottom: "1px solid hsl(var(--border))" }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {roleSlotEdits.map((slot) => (
+                      <tr key={slot.key} style={{ borderBottom: "1px solid hsl(var(--border))" }}>
+                        <td className="px-3 py-1.5">
+                          <select className="text-[13px] px-2 py-1 rounded border w-full" style={inputStyle} value={slot.role} onChange={(e) => updateEditSlot(slot.key, "role", e.target.value)} data-testid={`edit-slot-role-${slot.key}`}>
+                            {PROJECT_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
+                          </select>
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <input type="date" className="text-[13px] px-2 py-1 rounded border" style={inputStyle} value={slot.startDate} onChange={(e) => updateEditSlot(slot.key, "startDate", e.target.value)} data-testid={`edit-slot-start-${slot.key}`} />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <input type="date" className="text-[13px] px-2 py-1 rounded border" style={inputStyle} value={slot.endDate} onChange={(e) => updateEditSlot(slot.key, "endDate", e.target.value)} data-testid={`edit-slot-end-${slot.key}`} />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <input type="number" min={1} max={50} className="text-[13px] px-2 py-1 rounded border w-16 tabular-nums" style={inputStyle} value={slot.quantity} onChange={(e) => updateEditSlot(slot.key, "quantity", parseInt(e.target.value) || 1)} data-testid={`edit-slot-qty-${slot.key}`} />
+                        </td>
+                        <td className="px-3 py-1.5">
+                          <select className="text-[13px] px-2 py-1 rounded border" style={inputStyle} value={slot.shift} onChange={(e) => updateEditSlot(slot.key, "shift", e.target.value)} data-testid={`edit-slot-shift-${slot.key}`}>
+                            <option value="Day">Day</option>
+                            <option value="Night">Night</option>
+                          </select>
+                        </td>
+                        <td className="px-3 py-1.5 text-center">
+                          <button onClick={() => removeEditSlot(slot.key)} className="p-1 rounded hover:bg-[var(--red-bg)]" data-testid={`edit-slot-delete-${slot.key}`}>
+                            <Trash2 className="w-3.5 h-3.5" style={{ color: "var(--red)" }} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Team Tab */}
+        {activeTab === "team" && (
+          <div>
+            {/* Current Team */}
+            <div className="mb-5">
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-bold text-pfg-navy font-display flex items-center gap-2">
+                  Team Members
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "hsl(var(--accent))", color: "#8B6E00" }}>
+                    {activeCount}
+                  </span>
+                </div>
+                {editEndDate && card.members.some(m => !removedIds.has(m.assignment.id) && m.assignment.endDate && m.assignment.endDate < editEndDate) && (
+                  <button
+                    onClick={async () => {
+                      if (!confirm(`Extend all assignments to ${editEndDate}?`)) return;
+                      for (const m of card.members) {
+                        if (!removedIds.has(m.assignment.id) && m.assignment.endDate && m.assignment.endDate < editEndDate) {
+                          await apiRequest("PATCH", `/api/assignments/${m.assignment.id}`, { endDate: editEndDate });
+                        }
+                      }
+                      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+                    }}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg border"
+                    style={{ borderColor: "var(--pfg-yellow)", color: "var(--pfg-navy)" }}
+                    data-testid="extend-all-assignments">
+                    Extend All to {editEndDate}
+                  </button>
+                )}
+              </div>
+
+              <div className="space-y-1">
+                {card.members.map((m) => {
+                  const isRemoved = removedIds.has(m.assignment.id);
+                  return (
+                    <div
+                      key={m.assignment.id}
+                      className="flex items-center gap-3 px-3.5 py-2.5 rounded-lg border transition-colors"
+                      style={{
+                        borderColor: "hsl(var(--border))",
+                        opacity: isRemoved ? 0.45 : 1,
+                        background: isRemoved ? "hsl(var(--muted))" : undefined,
+                        textDecoration: isRemoved ? "line-through" : undefined,
+                      }}
+                      data-testid={`member-row-${m.assignment.id}`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[13px] font-semibold text-pfg-navy">{m.worker.name}</div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>
+                            {m.assignment.role || m.worker.role} · {m.assignment.startDate || "—"} →
+                          </span>
+                          <input
+                            type="date"
+                            value={m.assignment.endDate || ""}
+                            onChange={async (e) => {
+                              try {
+                                await apiRequest("PATCH", `/api/assignments/${m.assignment.id}`, { endDate: e.target.value });
+                                await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+                              } catch (err) { /* silent */ }
+                            }}
+                            className="text-[11px] px-1.5 py-0.5 border rounded"
+                            style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--background))", width: "120px" }}
+                            data-testid={`assignment-end-date-${m.assignment.id}`}
+                          />
+                          {m.assignment.endDate && editEndDate && m.assignment.endDate < editEndDate && (
+                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: "var(--amber-bg, hsl(var(--accent)))", color: "var(--amber, #D97706)" }}>ends early</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <ShiftBadge shift={m.assignment.shift} />
+                        <StatusBadge status={m.worker.status} />
+                        {isRemoved ? (
+                          <button
+                            onClick={() => handleUndo(m.assignment.id)}
+                            className="ml-1 p-1 rounded hover:bg-[var(--green-bg)]"
+                            title="Undo removal"
+                            data-testid={`undo-remove-${m.assignment.id}`}
+                          >
+                            <Undo2 className="w-3.5 h-3.5" style={{ color: "var(--green)" }} />
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => handleRemove(m.assignment.id)}
+                            className="ml-1 p-1 rounded hover:bg-[var(--red-bg)]"
+                            title="Remove from project"
+                            data-testid={`remove-member-${m.assignment.id}`}
+                          >
+                            <X className="w-3.5 h-3.5" style={{ color: "var(--red)" }} />
+                          </button>
+                        )}
+                      </div>
                     </div>
+                  );
+                })}
+
+                {/* Newly added workers */}
+                {additions.map((add) => {
+                  const worker = allWorkers.find((w) => w.id === add.workerId);
+                  if (!worker) return null;
+                  return (
+                    <div
+                      key={`add-${add.workerId}`}
+                      className="flex items-center gap-3 px-3.5 py-2.5 rounded-lg border"
+                      style={{ borderColor: "var(--green)", background: "var(--green-bg)" }}
+                      data-testid={`addition-row-${add.workerId}`}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[13px] font-semibold text-pfg-navy">{worker.name}</div>
+                        <div className="text-[11px] mt-0.5" style={{ color: "var(--pfg-steel)" }}>
+                          {worker.role} · New addition
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <StatusBadge status={worker.status} />
+                        <button
+                          onClick={() => handleRemoveAddition(add.workerId)}
+                          className="ml-1 p-1 rounded hover:bg-[var(--red-bg)]"
+                          data-testid={`remove-addition-${add.workerId}`}
+                        >
+                          <X className="w-3.5 h-3.5" style={{ color: "var(--red)" }} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Add Person Panel */}
+            <div>
+              <button
+                onClick={() => setShowAddPanel(!showAddPanel)}
+                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border mb-3"
+                style={{ borderColor: "var(--pfg-yellow)", color: "var(--pfg-navy)" }}
+                data-testid="toggle-add-panel"
+              >
+                {showAddPanel ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                Add Person
+              </button>
+
+              {showAddPanel && (
+                <div className="rounded-lg border p-3" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--muted))" }}>
+                  <div className="relative mb-3">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: "hsl(var(--muted-foreground))" }} />
+                    <input
+                      type="text"
+                      placeholder="Search available workers..."
+                      value={addSearch}
+                      onChange={(e) => setAddSearch(e.target.value)}
+                      className="w-full pl-8 pr-3 py-2 text-[13px] rounded-lg border"
+                      style={inputStyle}
+                      data-testid="add-person-search"
+                    />
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <ShiftBadge shift={m.assignment.shift} />
-                    <StatusBadge status={m.worker.status} />
-                    {isRemoved ? (
-                      <button
-                        onClick={() => handleUndo(m.assignment.id)}
-                        className="ml-1 p-1 rounded hover:bg-[var(--green-bg)]"
-                        title="Undo removal"
-                        data-testid={`undo-remove-${m.assignment.id}`}
-                      >
-                        <Undo2 className="w-3.5 h-3.5" style={{ color: "var(--green)" }} />
-                      </button>
+
+                  <div className="max-h-[250px] overflow-y-auto space-y-0.5">
+                    {availableToAdd.length === 0 ? (
+                      <div className="text-center py-6 text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>
+                        No available workers found
+                      </div>
                     ) : (
-                      <button
-                        onClick={() => handleRemove(m.assignment.id)}
-                        className="ml-1 p-1 rounded hover:bg-[var(--red-bg)]"
-                        title="Remove from project"
-                        data-testid={`remove-member-${m.assignment.id}`}
-                      >
-                        <X className="w-3.5 h-3.5" style={{ color: "var(--red)" }} />
-                      </button>
+                      availableToAdd.map((w) => (
+                        <div
+                          key={w.id}
+                          className="flex items-center gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-colors hover:border-[var(--pfg-yellow)] hover:bg-[hsl(var(--accent))]"
+                          style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}
+                          onClick={() => handleAddWorker(w.id)}
+                          data-testid={`add-worker-${w.id}`}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[13px] font-semibold text-pfg-navy">{w.name}</div>
+                            <div className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>{w.role} · {w.nationality || "—"}</div>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <StatusBadge status={w.status} />
+                            <Plus className="w-4 h-4" style={{ color: "var(--pfg-yellow)" }} />
+                          </div>
+                        </div>
+                      ))
                     )}
                   </div>
                 </div>
-              );
-            })}
-
-            {/* Newly added workers */}
-            {additions.map((add) => {
-              const worker = allWorkers.find((w) => w.id === add.workerId);
-              if (!worker) return null;
-              return (
-                <div
-                  key={`add-${add.workerId}`}
-                  className="flex items-center gap-3 px-3.5 py-2.5 rounded-lg border"
-                  style={{ borderColor: "var(--green)", background: "var(--green-bg)" }}
-                  data-testid={`addition-row-${add.workerId}`}
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[13px] font-semibold text-pfg-navy">{worker.name}</div>
-                    <div className="text-[11px] mt-0.5" style={{ color: "var(--pfg-steel)" }}>
-                      {worker.role} · New addition
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <StatusBadge status={worker.status} />
-                    <button
-                      onClick={() => handleRemoveAddition(add.workerId)}
-                      className="ml-1 p-1 rounded hover:bg-[var(--red-bg)]"
-                      data-testid={`remove-addition-${add.workerId}`}
-                    >
-                      <X className="w-3.5 h-3.5" style={{ color: "var(--red)" }} />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Add Person Panel */}
-        <div>
-          <button
-            onClick={() => setShowAddPanel(!showAddPanel)}
-            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border mb-3"
-            style={{ borderColor: "var(--pfg-yellow)", color: "var(--pfg-navy)" }}
-            data-testid="toggle-add-panel"
-          >
-            {showAddPanel ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-            Add Person
-          </button>
-
-          {showAddPanel && (
-            <div className="rounded-lg border p-3" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--muted))" }}>
-              <div className="relative mb-3">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: "hsl(var(--muted-foreground))" }} />
-                <input
-                  type="text"
-                  placeholder="Search available workers..."
-                  value={addSearch}
-                  onChange={(e) => setAddSearch(e.target.value)}
-                  className="w-full pl-8 pr-3 py-2 text-[13px] rounded-lg border"
-                  style={inputStyle}
-                  data-testid="add-person-search"
-                />
-              </div>
-
-              <div className="max-h-[250px] overflow-y-auto space-y-0.5">
-                {availableToAdd.length === 0 ? (
-                  <div className="text-center py-6 text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>
-                    No available workers found
-                  </div>
-                ) : (
-                  availableToAdd.map((w) => (
-                    <div
-                      key={w.id}
-                      className="flex items-center gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-colors hover:border-[var(--pfg-yellow)] hover:bg-[hsl(var(--accent))]"
-                      style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}
-                      onClick={() => handleAddWorker(w.id)}
-                      data-testid={`add-worker-${w.id}`}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[13px] font-semibold text-pfg-navy">{w.name}</div>
-                        <div className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>{w.role} · {w.nationality || "—"}</div>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <StatusBadge status={w.status} />
-                        <Plus className="w-4 h-4" style={{ color: "var(--pfg-yellow)" }} />
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
+              )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {error && (
           <div className="mt-4 text-sm font-medium px-3 py-2 rounded-lg" style={{ background: "var(--red-bg)", color: "var(--red)" }}>
@@ -1063,26 +1627,137 @@ function EditProjectModal({
       </div>
 
       {/* Footer */}
-      <div className="px-6 py-4 border-t flex items-center justify-end gap-2" style={{ borderColor: "hsl(var(--border))" }}>
-        <button
-          onClick={onClose}
-          className="px-4 py-2 text-[13px] font-medium rounded-lg border"
-          style={{ borderColor: "hsl(var(--border))" }}
-          data-testid="edit-cancel"
-        >
-          Cancel
-        </button>
-        <button
-          onClick={handleSave}
-          disabled={!hasChanges || saving}
-          className="px-5 py-2 text-[13px] font-semibold rounded-lg flex items-center gap-1.5 disabled:opacity-40"
-          style={{ background: "var(--pfg-yellow)", color: "var(--pfg-navy)" }}
-          data-testid="save-changes"
-        >
-          {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-          Save Changes
-        </button>
+      <div className="px-6 py-4 border-t flex items-center justify-between" style={{ borderColor: "hsl(var(--border))" }}>
+        <div className="flex gap-2">
+          {/* Status action buttons */}
+          {isPotential && (
+            <>
+              <button
+                onClick={() => setConfirmAction({
+                  title: "Materialise Project",
+                  message: `Convert "${card.project.code}" from potential to active? This project will become a real, active project.`,
+                  label: "Materialise",
+                  color: "var(--green, #16a34a)",
+                  action: () => handleStatusAction("materialise"),
+                })}
+                disabled={saving}
+                className="flex items-center gap-1.5 px-3 py-2 text-[12px] font-semibold rounded-lg text-white"
+                style={{ background: "var(--green, #16a34a)" }}
+                data-testid="action-materialise"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                Materialise
+              </button>
+              <button
+                onClick={() => setConfirmAction({
+                  title: "Discard Project",
+                  message: `Permanently delete "${card.project.code}"? This potential project and all its role slots and assignments will be removed. This cannot be undone.`,
+                  label: "Discard",
+                  color: "var(--red, #dc2626)",
+                  action: () => handleStatusAction("discard"),
+                })}
+                disabled={saving}
+                className="flex items-center gap-1.5 px-3 py-2 text-[12px] font-semibold rounded-lg"
+                style={{ background: "var(--red-bg)", color: "var(--red)" }}
+                data-testid="action-discard"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                Discard
+              </button>
+            </>
+          )}
+          {isActive && (
+            <>
+              <button
+                onClick={() => setConfirmAction({
+                  title: "Mark Completed",
+                  message: `Mark "${card.project.code}" as completed? All assignments will remain in history.`,
+                  label: "Mark Completed",
+                  color: "var(--green, #16a34a)",
+                  action: () => handleStatusAction("complete"),
+                })}
+                disabled={saving}
+                className="flex items-center gap-1.5 px-3 py-2 text-[12px] font-semibold rounded-lg text-white"
+                style={{ background: "var(--green, #16a34a)" }}
+                data-testid="action-complete"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                Mark Completed
+              </button>
+              <button
+                onClick={() => setConfirmAction({
+                  title: "Cancel Project",
+                  message: `Cancel "${card.project.code}"? All active assignments will be marked as removed.`,
+                  label: "Cancel Project",
+                  color: "var(--red, #dc2626)",
+                  action: () => handleStatusAction("cancel"),
+                })}
+                disabled={saving}
+                className="flex items-center gap-1.5 px-3 py-2 text-[12px] font-semibold rounded-lg"
+                style={{ background: "var(--red-bg)", color: "var(--red)" }}
+                data-testid="action-cancel"
+              >
+                <XCircle className="w-3.5 h-3.5" />
+                Cancel Project
+              </button>
+            </>
+          )}
+          {isInactive && (
+            <button
+              onClick={() => setConfirmAction({
+                title: "Reactivate Project",
+                message: `Reactivate "${card.project.code}"? It will be set back to active status.`,
+                label: "Reactivate",
+                color: "var(--pfg-navy, #1B2A4A)",
+                action: () => handleStatusAction("reactivate"),
+              })}
+              disabled={saving}
+              className="flex items-center gap-1.5 px-3 py-2 text-[12px] font-semibold rounded-lg text-white"
+              style={{ background: "var(--pfg-navy)" }}
+              data-testid="action-reactivate"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              Reactivate
+            </button>
+          )}
+        </div>
+
+        <div className="flex gap-2">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-[13px] font-medium rounded-lg border"
+            style={{ borderColor: "hsl(var(--border))" }}
+            data-testid="edit-cancel"
+          >
+            Close
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={!hasChanges || saving}
+            className="px-5 py-2 text-[13px] font-semibold rounded-lg flex items-center gap-1.5 disabled:opacity-40"
+            style={{ background: "var(--pfg-yellow)", color: "var(--pfg-navy)" }}
+            data-testid="save-changes"
+          >
+            {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            Save Changes
+          </button>
+        </div>
       </div>
+
+      {/* Confirm Dialog */}
+      {confirmAction && (
+        <ConfirmDialog
+          title={confirmAction.title}
+          message={confirmAction.message}
+          confirmLabel={confirmAction.label}
+          confirmColor={confirmAction.color}
+          onConfirm={() => {
+            confirmAction.action();
+            setConfirmAction(null);
+          }}
+          onCancel={() => setConfirmAction(null)}
+        />
+      )}
     </ModalOverlay>
   );
 }
@@ -1095,13 +1770,35 @@ export default function ProjectAllocation() {
   const { data, isLoading } = useDashboardData();
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [activeFilters, setActiveFilters] = useState<Set<ProjectStatus>>(new Set(["active", "potential"]));
+
+  const handleToggleFilter = (status: ProjectStatus) => {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(status)) {
+        next.delete(status);
+      } else {
+        next.add(status);
+      }
+      return next;
+    });
+  };
 
   if (isLoading || !data) return <LoadingSkeleton />;
 
-  const { workers, projects } = data;
+  const { workers, projects, roleSlots: allRoleSlots } = data;
+
+  const today = new Date().toISOString().split("T")[0];
+
+  // Auto-complete: projects with endDate in the past display as "completed"
+  const getEffectiveStatus = (p: DashboardProject): ProjectStatus => {
+    const raw = (p.status || "active") as ProjectStatus;
+    if (raw === "active" && p.endDate && p.endDate < today) return "completed";
+    return raw;
+  };
 
   const projectCards: ProjectCardData[] = projects
-    .filter((p) => p.status === "active")
+    .filter((p) => activeFilters.has(getEffectiveStatus(p)))
     .map((project) => {
       const members: ProjectCardData["members"] = [];
       for (const w of workers) {
@@ -1113,12 +1810,21 @@ export default function ProjectAllocation() {
       }
       return { project, members };
     })
-    .sort((a, b) => b.members.length - a.members.length);
+    .sort((a, b) => {
+      // Sort: active first, then potential, then completed, then cancelled
+      const statusOrder: Record<string, number> = { active: 0, potential: 1, completed: 2, cancelled: 3 };
+      const aOrder = statusOrder[getEffectiveStatus(a.project)] ?? 0;
+      const bOrder = statusOrder[getEffectiveStatus(b.project)] ?? 0;
+      if (aOrder !== bOrder) return aOrder - bOrder;
+      return b.members.length - a.members.length;
+    });
 
   const assignedWorkerIds = new Set(
     workers.filter((w) => w.assignments.some((a) => a.status === "active")).map((w) => w.id)
   );
   const availableWorkers = workers.filter((w) => !assignedWorkerIds.has(w.id));
+
+  const activeProjectCount = projects.filter((p) => p.status === "active").length;
 
   const selectedCard = projectCards.find((c) => c.project.code === selectedProject);
 
@@ -1129,7 +1835,7 @@ export default function ProjectAllocation() {
         <div>
           <h2 className="font-display text-lg font-bold text-pfg-navy">Project Allocation</h2>
           <p className="text-xs mt-0.5" style={{ color: "var(--pfg-steel)" }}>
-            {projectCards.length} active projects · {availableWorkers.length} available
+            {activeProjectCount} active projects · {availableWorkers.length} available
           </p>
         </div>
         <button
@@ -1143,6 +1849,9 @@ export default function ProjectAllocation() {
         </button>
       </div>
 
+      {/* Status Filter Toggles */}
+      <StatusFilterBar activeFilters={activeFilters} onToggle={handleToggleFilter} />
+
       {/* Project Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-4">
         {projectCards.map((card) => (
@@ -1150,6 +1859,7 @@ export default function ProjectAllocation() {
             key={card.project.id}
             card={card}
             onClick={() => setSelectedProject(card.project.code)}
+            effectiveStatus={getEffectiveStatus(card.project)}
           />
         ))}
       </div>
@@ -1162,6 +1872,7 @@ export default function ProjectAllocation() {
         <EditProjectModal
           card={selectedCard}
           allWorkers={workers}
+          allRoleSlots={allRoleSlots}
           onClose={() => setSelectedProject(null)}
         />
       )}

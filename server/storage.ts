@@ -52,6 +52,8 @@ export interface IStorage {
   getProjectByCode(code: string): Project | undefined;
   createProject(data: InsertProject): Project;
   updateProject(id: number, data: Partial<InsertProject>): Project | undefined;
+  updateProjectStatus(id: number, status: string): Project | undefined;
+  deleteProject(id: number): void;
 
   // Assignments
   getAssignments(): Assignment[];
@@ -117,6 +119,17 @@ export class SqliteStorage implements IStorage {
 
   updateProject(id: number, data: Partial<InsertProject>): Project | undefined {
     return db.update(projects).set(data).where(eq(projects.id, id)).returning().get();
+  }
+
+  updateProjectStatus(id: number, status: string): Project | undefined {
+    return db.update(projects).set({ status }).where(eq(projects.id, id)).returning().get();
+  }
+
+  deleteProject(id: number): void {
+    // Cascade delete: assignments first, then role slots, then project
+    db.delete(assignments).where(eq(assignments.projectId, id)).run();
+    db.delete(roleSlots).where(eq(roleSlots.projectId, id)).run();
+    db.delete(projects).where(eq(projects.id, id)).run();
   }
 
   // Assignments

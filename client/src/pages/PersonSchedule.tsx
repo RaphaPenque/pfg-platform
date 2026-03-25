@@ -1,10 +1,12 @@
 import { useState, useMemo } from "react";
 import { useDashboardData, type DashboardWorker } from "@/hooks/use-dashboard-data";
 import { getProjectColor, calcUtilisation } from "@/lib/constants";
-import { Search } from "lucide-react";
+import { Search, Check } from "lucide-react";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const CURRENT_YEAR = 2026;
+
+type ProjectStatus = "active" | "potential" | "completed" | "cancelled";
 
 function LoadingSkeleton() {
   return (
@@ -28,18 +30,54 @@ function dateToDayFraction(dateStr: string): number {
   return (d.getDate() - 1) / daysInMonth;
 }
 
+const STATUS_FILTERS: { key: ProjectStatus; label: string }[] = [
+  { key: "active", label: "Active" },
+  { key: "potential", label: "Potential" },
+  { key: "completed", label: "Completed" },
+  { key: "cancelled", label: "Cancelled" },
+];
+
 export default function PersonSchedule() {
   const { data, isLoading } = useDashboardData();
   const [search, setSearch] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
+  const [activeStatusFilters, setActiveStatusFilters] = useState<Set<ProjectStatus>>(new Set(["active"]));
+
+  const handleToggleFilter = (status: ProjectStatus) => {
+    setActiveStatusFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(status)) {
+        next.delete(status);
+      } else {
+        next.add(status);
+      }
+      return next;
+    });
+  };
 
   const workers = data?.workers ?? [];
   const projects = data?.projects ?? [];
 
-  // Get unique project codes for filter
+  // Build a map of projectId -> project status for filtering
+  const projectStatusMap = useMemo(() => {
+    const map: Record<number, string> = {};
+    projects.forEach((p) => { map[p.id] = p.status || "active"; });
+    return map;
+  }, [projects]);
+
+  // Project IDs that pass the status filter
+  const visibleProjectIds = useMemo(() => {
+    return new Set(
+      projects
+        .filter((p) => activeStatusFilters.has((p.status || "active") as ProjectStatus))
+        .map((p) => p.id)
+    );
+  }, [projects, activeStatusFilters]);
+
+  // Get unique project codes for filter dropdown (only from visible projects)
   const projectCodes = useMemo(() => Array.from(new Set(projects.map((p) => p.code))).sort(), [projects]);
 
-  // Sort: FTEs first alphabetically, then Temps alphabetically
+  // Filter workers to only show those with assignments in visible projects (or unassigned)
   const sortedWorkers = useMemo(() => {
     let filtered = workers;
 
@@ -50,7 +88,7 @@ export default function PersonSchedule() {
 
     if (projectFilter) {
       filtered = filtered.filter((w) =>
-        w.assignments.some((a) => a.projectCode === projectFilter)
+        w.assignments.some((a) => a.projectCode === projectFilter && visibleProjectIds.has(a.projectId))
       );
     }
 
@@ -58,7 +96,7 @@ export default function PersonSchedule() {
       if (a.status !== b.status) return a.status === "FTE" ? -1 : 1;
       return a.name.localeCompare(b.name);
     });
-  }, [workers, search, projectFilter]);
+  }, [workers, search, projectFilter, visibleProjectIds]);
 
   if (isLoading || !data) return <LoadingSkeleton />;
 
@@ -105,6 +143,30 @@ export default function PersonSchedule() {
             <option key={code} value={code}>{code}</option>
           ))}
         </select>
+
+        {/* Status filter toggles */}
+        <div className="flex gap-1.5" data-testid="schedule-status-filter">
+          {STATUS_FILTERS.map((sf) => {
+            const isOn = activeStatusFilters.has(sf.key);
+            return (
+              <button
+                key={sf.key}
+                onClick={() => handleToggleFilter(sf.key)}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border transition-colors"
+                style={{
+                  borderColor: isOn ? "var(--pfg-yellow)" : "hsl(var(--border))",
+                  background: isOn ? "hsl(var(--accent))" : "transparent",
+                  color: isOn ? "var(--pfg-navy)" : "hsl(var(--muted-foreground))",
+                }}
+                data-testid={`schedule-filter-${sf.key}`}
+              >
+                {isOn && <Check className="w-3 h-3" />}
+                {sf.label}
+              </button>
+            );
+          })}
+        </div>
+
         <div className="ml-auto text-[13px]" style={{ color: "var(--pfg-steel)" }}>
           <strong className="text-pfg-navy">{sortedWorkers.length}</strong> people
         </div>
@@ -178,7 +240,13 @@ export default function PersonSchedule() {
                 </tr>
               ) : (
                 sortedWorkers.map((worker) => (
-                  <PersonRow key={worker.id} worker={worker} todayMonth={todayMonth} todayDayFrac={todayDayFrac} />
+                  <PersonRow
+                    key={worker.id}
+                    worker={worker}
+                    todayMonth={todayMonth}
+                    todayDayFrac={todayDayFrac}
+                    visibleProjectIds={visibleProjectIds}
+                  />
                 ))
               )}
             </tbody>
@@ -193,16 +261,21 @@ function PersonRow({
   worker,
   todayMonth,
   todayDayFrac,
+  visibleProjectIds,
 }: {
   worker: DashboardWorker;
   todayMonth: number;
   todayDayFrac: number;
+  visibleProjectIds: Set<number>;
 }) {
   const util = calcUtilisation(worker.assignments);
   const utilColor = util.pct >= 80 ? "var(--green)" : util.pct >= 50 ? "var(--amber)" : "var(--red)";
 
+  // Only show bars for assignments in visible projects
+  const visibleAssignments = worker.assignments.filter((a) => visibleProjectIds.has(a.projectId));
+
   // Build assignment bars per month
-  const assignmentBars = worker.assignments.map((a) => {
+  const assignmentBars = visibleAssignments.map((a) => {
     const startMonth = dateToMonthIndex(a.startDate);
     const endMonth = dateToMonthIndex(a.endDate);
     const color = getProjectColor(a.projectCode);
