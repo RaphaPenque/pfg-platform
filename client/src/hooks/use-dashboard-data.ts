@@ -28,6 +28,12 @@ export interface DashboardWorker {
   passportPath: string | null;
   driversLicense: string | null;
   driversLicenseUploaded: number | null;
+  // Contact information
+  personalEmail: string | null;
+  workEmail: string | null;
+  phone: string | null;
+  phoneSecondary: string | null;
+  address: string | null;
 }
 
 export interface DashboardAssignment {

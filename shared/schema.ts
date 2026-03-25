@@ -30,6 +30,12 @@ export const workers = sqliteTable("workers", {
   passportPath: text("passport_path"), // file path for passport scan
   driversLicense: text("drivers_license"), // expiry date ISO string or null
   driversLicenseUploaded: integer("drivers_license_uploaded"), // 0 or 1
+  // Contact information
+  personalEmail: text("personal_email"),
+  workEmail: text("work_email"),
+  phone: text("phone"), // primary phone number
+  phoneSecondary: text("phone_secondary"), // secondary/emergency number
+  address: text("address"), // home address
 });
 
 export const insertWorkerSchema = createInsertSchema(workers).omit({ id: true });
