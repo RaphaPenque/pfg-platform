@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useDashboardData } from "@/hooks/use-dashboard-data";
-import { getProjectColor } from "@/lib/constants";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip, Cell } from "recharts";
+import { getProjectColor, OEM_BRAND_COLORS, PROJECT_CUSTOMER } from "@/lib/constants";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip } from "recharts";
 import { Check } from "lucide-react";
 
 const FTE_BASELINE = 54;
@@ -95,21 +95,35 @@ export default function GanttChart() {
       .filter((r) => r.status === "active")
       .reduce((sum, r) => sum + r.headcount, 0);
 
-    // Demand curve: weekly headcount based on individual worker assignment overlaps
-    const weeklyDemand: { week: number; label: string; count: number }[] = [];
+    // Demand curve: weekly headcount grouped by customer
     const firstMonday = new Date(CURRENT_YEAR, 0, 5);
     const totalWeeks = 52;
 
     // Only count assignments from active projects for demand
     const activeProjectIds = new Set(activeProjects.map((p) => p.id));
+
+    // Build a project-to-customer map
+    const projectCustomerMap: Record<number, string> = {};
+    for (const p of projects) {
+      projectCustomerMap[p.id] = p.customer || PROJECT_CUSTOMER[p.code] || "Other";
+    }
+
+    // Collect all active assignments with customer info
     const allAssignments = workers.flatMap((w) =>
       w.assignments
         .filter((a) => activeProjectIds.has(a.projectId))
         .map((a) => ({
           startDate: a.startDate ? new Date(a.startDate) : null,
           endDate: a.endDate ? new Date(a.endDate) : null,
+          customer: projectCustomerMap[a.projectId] || "Other",
         }))
     );
+
+    // Get unique customers
+    const customersSet = new Set(allAssignments.map((a) => a.customer));
+    const customers = Array.from(customersSet).sort();
+
+    const weeklyDemand: Record<string, any>[] = [];
 
     for (let w = 0; w < totalWeeks; w++) {
       const weekStart = new Date(firstMonday.getTime() + w * 7 * 24 * 60 * 60 * 1000);
@@ -117,22 +131,30 @@ export default function GanttChart() {
       const weekMonth = MONTHS[weekStart.getMonth()];
       const weekDay = weekStart.getDate();
 
-      let count = 0;
-      for (const a of allAssignments) {
-        if (!a.startDate || !a.endDate) continue;
-        if (a.startDate <= weekEnd && a.endDate >= weekStart) {
-          count++;
-        }
-      }
-
-      weeklyDemand.push({
+      const entry: Record<string, any> = {
         week: w,
         label: `${weekMonth} ${weekDay}`,
-        count,
-      });
+      };
+
+      let total = 0;
+      for (const cust of customers) {
+        let count = 0;
+        for (const a of allAssignments) {
+          if (a.customer !== cust) continue;
+          if (!a.startDate || !a.endDate) continue;
+          if (a.startDate <= weekEnd && a.endDate >= weekStart) {
+            count++;
+          }
+        }
+        entry[cust] = count;
+        total += count;
+      }
+      entry._total = total;
+
+      weeklyDemand.push(entry);
     }
 
-    const peakDemand = Math.max(...weeklyDemand.map((w) => w.count), 0);
+    const peakDemand = Math.max(...weeklyDemand.map((w) => w._total), 0);
 
     return {
       projectRows,
@@ -140,6 +162,7 @@ export default function GanttChart() {
       totalPositions,
       peakDemand,
       weeklyDemand,
+      customers,
     };
   }, [data, activeFilters]);
 
@@ -362,23 +385,24 @@ export default function GanttChart() {
         </div>
       </div>
 
-      {/* Demand Curve */}
+      {/* Demand Curve — Stacked Area */}
       <div
         className="rounded-xl border overflow-hidden"
         style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--card-border))", boxShadow: "var(--shadow-sm)" }}
         data-testid="demand-curve"
       >
         <div className="px-5 py-4 border-b flex items-center justify-between" style={{ borderColor: "hsl(var(--border))" }}>
-          <h3 className="text-[15px] font-bold text-pfg-navy font-display">Demand Curve — Weekly Headcount</h3>
-          <div className="flex gap-4 text-[11px]" style={{ color: "var(--pfg-steel)" }}>
-            <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-sm" style={{ background: "rgba(99,117,140,0.75)" }} />
-              Within FTE
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-sm" style={{ background: "rgba(185,28,28,0.75)" }} />
-              Over FTE
-            </div>
+          <h3 className="text-[15px] font-bold text-pfg-navy font-display">Workforce Demand Curve — {CURRENT_YEAR}</h3>
+          <div className="flex gap-4 text-[11px] flex-wrap" style={{ color: "var(--pfg-steel)" }}>
+            {ganttData.customers.map((cust) => (
+              <div key={cust} className="flex items-center gap-1.5">
+                <div
+                  className="w-2.5 h-2.5 rounded-sm"
+                  style={{ background: OEM_BRAND_COLORS[cust] || "#64748B" }}
+                />
+                {cust}
+              </div>
+            ))}
             <div className="flex items-center gap-1.5">
               <div className="w-6 border-t-2 border-dashed" style={{ borderColor: "var(--red)" }} />
               FTE Baseline ({FTE_BASELINE})
@@ -387,8 +411,19 @@ export default function GanttChart() {
         </div>
 
         <div className="p-5">
-          <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={ganttData.weeklyDemand} margin={{ top: 10, right: 10, bottom: 0, left: 0 }}>
+          <ResponsiveContainer width="100%" height={280}>
+            <AreaChart data={ganttData.weeklyDemand} margin={{ top: 10, right: 10, bottom: 0, left: 0 }}>
+              <defs>
+                {ganttData.customers.map((cust) => {
+                  const color = OEM_BRAND_COLORS[cust] || "#64748B";
+                  return (
+                    <linearGradient key={cust} id={`grad-${cust.replace(/\s+/g, "-")}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={color} stopOpacity={0.6} />
+                      <stop offset="95%" stopColor={color} stopOpacity={0.15} />
+                    </linearGradient>
+                  );
+                })}
+              </defs>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
               <XAxis
                 dataKey="label"
@@ -409,9 +444,11 @@ export default function GanttChart() {
                   borderRadius: 8,
                   color: "#fff",
                   fontSize: 11,
+                  padding: "8px 12px",
                 }}
-                labelStyle={{ color: "#fff", fontWeight: 600 }}
-                formatter={(value: number) => [value, "Headcount"]}
+                labelStyle={{ color: "#fff", fontWeight: 600, marginBottom: 4 }}
+                formatter={(value: number, name: string) => [value, name]}
+                itemStyle={{ color: "#fff", fontSize: 11, padding: "1px 0" }}
               />
               <ReferenceLine
                 y={FTE_BASELINE}
@@ -427,21 +464,26 @@ export default function GanttChart() {
                 }}
               />
               {/* Today reference line */}
-              <ReferenceLine
-                x={ganttData.weeklyDemand[todayWeek]?.label}
-                stroke="var(--red)"
-                strokeWidth={2}
-                label={{ value: "Today", position: "top", fill: "var(--red)", fontSize: 10, fontWeight: 700 }}
-              />
-              <Bar dataKey="count" radius={[2, 2, 0, 0]} maxBarSize={18}>
-                {ganttData.weeklyDemand.map((entry, idx) => (
-                  <Cell
-                    key={idx}
-                    fill={entry.count > FTE_BASELINE ? "rgba(185,28,28,0.75)" : "rgba(99,117,140,0.75)"}
-                  />
-                ))}
-              </Bar>
-            </BarChart>
+              {todayWeek >= 0 && todayWeek < 52 && (
+                <ReferenceLine
+                  x={ganttData.weeklyDemand[todayWeek]?.label}
+                  stroke="var(--red)"
+                  strokeWidth={2}
+                  label={{ value: "Today", position: "top", fill: "var(--red)", fontSize: 10, fontWeight: 700 }}
+                />
+              )}
+              {ganttData.customers.map((cust) => (
+                <Area
+                  key={cust}
+                  type="monotone"
+                  dataKey={cust}
+                  stackId="1"
+                  stroke={OEM_BRAND_COLORS[cust] || "#64748B"}
+                  fill={`url(#grad-${cust.replace(/\s+/g, "-")})`}
+                  strokeWidth={1.5}
+                />
+              ))}
+            </AreaChart>
           </ResponsiveContainer>
         </div>
       </div>

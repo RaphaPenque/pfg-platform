@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
 import { useDashboardData, type DashboardWorker } from "@/hooks/use-dashboard-data";
 import { getProjectColor, calcUtilisation } from "@/lib/constants";
-import { Search, Check } from "lucide-react";
+import { Search, Check, Download } from "lucide-react";
+import { downloadCSV } from "@/lib/csv-export";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const CURRENT_YEAR = 2026;
@@ -166,6 +167,47 @@ export default function PersonSchedule() {
             );
           })}
         </div>
+
+        <button
+          onClick={() => {
+            const rows: Record<string, any>[] = [];
+            sortedWorkers.forEach(w => {
+              const util = calcUtilisation(w.assignments);
+              const visibleAssignments = w.assignments.filter(a => visibleProjectIds.has(a.projectId));
+              if (visibleAssignments.length === 0) {
+                rows.push({
+                  Name: w.name,
+                  Status: w.status,
+                  "Utilisation %": util.pct,
+                  "Project Code": "",
+                  "Start Date": "",
+                  "End Date": "",
+                  Role: w.role,
+                  Duration: "",
+                });
+              } else {
+                visibleAssignments.forEach(a => {
+                  rows.push({
+                    Name: w.name,
+                    Status: w.status,
+                    "Utilisation %": util.pct,
+                    "Project Code": a.projectCode,
+                    "Start Date": a.startDate || "",
+                    "End Date": a.endDate || "",
+                    Role: a.role || a.task || w.role,
+                    Duration: a.duration || "",
+                  });
+                });
+              }
+            });
+            downloadCSV(rows, `pfg-schedule-${new Date().toISOString().split("T")[0]}.csv`);
+          }}
+          className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors hover:bg-[hsl(var(--accent))]"
+          style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-navy)" }}
+          data-testid="export-csv-btn"
+        >
+          <Download className="w-3.5 h-3.5" /> Export CSV
+        </button>
 
         <div className="ml-auto text-[13px]" style={{ color: "var(--pfg-steel)" }}>
           <strong className="text-pfg-navy">{sortedWorkers.length}</strong> people

@@ -2,7 +2,8 @@ import { useState, useMemo } from "react";
 import { useDashboardData, type DashboardWorker, type DashboardProject, type DashboardAssignment, type DashboardRoleSlot } from "@/hooks/use-dashboard-data";
 import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, OEM_OPTIONS, EQUIPMENT_TYPES, PROJECT_ROLES, calcUtilisation } from "@/lib/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Plus, X, ExternalLink, Trash2, Undo2, Search, ChevronDown, ChevronUp, Check, Loader2, CheckCircle2, XCircle, Sparkles, RotateCcw, AlertTriangle } from "lucide-react";
+import { Plus, X, ExternalLink, Trash2, Undo2, Search, ChevronDown, ChevronUp, Check, Loader2, CheckCircle2, XCircle, Sparkles, RotateCcw, AlertTriangle, Download } from "lucide-react";
+import { downloadCSV } from "@/lib/csv-export";
 import { Link } from "wouter";
 
 // ─── Shared small components ───────────────────────────────────────
@@ -1838,15 +1839,39 @@ export default function ProjectAllocation() {
             {activeProjectCount} active projects · {availableWorkers.length} available
           </p>
         </div>
-        <button
-          className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold"
-          style={{ background: "var(--pfg-yellow)", color: "var(--pfg-navy)" }}
-          onClick={() => setShowAddModal(true)}
-          data-testid="add-project-btn"
-        >
-          <Plus className="w-4 h-4" />
-          Add New Project
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              const rows = projectCards.map(card => ({
+                "Project Code": card.project.code,
+                Name: card.project.name,
+                Customer: card.project.customer || PROJECT_CUSTOMER[card.project.code] || "",
+                Location: card.project.location || "",
+                Equipment: card.project.equipmentType || "",
+                "Start Date": card.project.startDate || "",
+                "End Date": card.project.endDate || "",
+                Headcount: card.project.headcount || "",
+                Status: card.project.status || "active",
+                "Team Count": card.members.length,
+              }));
+              downloadCSV(rows, `pfg-projects-${new Date().toISOString().split("T")[0]}.csv`);
+            }}
+            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border transition-colors hover:bg-[hsl(var(--accent))]"
+            style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-navy)" }}
+            data-testid="export-csv-btn"
+          >
+            <Download className="w-3.5 h-3.5" /> Export CSV
+          </button>
+          <button
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[13px] font-semibold"
+            style={{ background: "var(--pfg-yellow)", color: "var(--pfg-navy)" }}
+            onClick={() => setShowAddModal(true)}
+            data-testid="add-project-btn"
+          >
+            <Plus className="w-4 h-4" />
+            Add New Project
+          </button>
+        </div>
       </div>
 
       {/* Status Filter Toggles */}

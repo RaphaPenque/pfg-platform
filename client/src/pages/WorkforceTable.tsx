@@ -3,6 +3,7 @@ import { useDashboardData, type DashboardWorker, type DashboardAssignment } from
 import { OEM_BRAND_COLORS, CERT_DEFS, calcUtilisation, PROJECT_ROLES, COST_CENTRES, ENGLISH_LEVELS, ROLE_HIERARCHY, getHighestRole, EQUIPMENT_TYPES, OEM_OPTIONS } from "@/lib/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Search, ChevronDown, ChevronUp, Info, Upload, Download, ArrowUpDown, Pencil, Plus, X, Check, Loader2, User, FileText, Trash2 } from "lucide-react";
+import { downloadCSV } from "@/lib/csv-export";
 
 // ─── Helpers ───
 const inputCls = "px-3 py-2 text-[13px] rounded-lg border focus:outline-none focus:border-[var(--pfg-yellow)] focus:shadow-[0_0_0_3px_rgba(245,189,0,0.15)]";
@@ -1258,6 +1259,34 @@ export default function WorkforceTable() {
           <MultiSelect label="English" options={englishLevels} selected={filterEnglish} onChange={setFilterEnglish} testId="filter-english" />
           <MultiSelect label="OEM Experience" options={allOems} selected={filterOem} onChange={setFilterOem} testId="filter-oem" />
           <MultiSelect label="Assigned" options={assignedOptions} selected={filterAssigned} onChange={setFilterAssigned} testId="filter-assigned" />
+
+          {/* Export CSV button */}
+          <button
+            onClick={() => {
+              const rows = sorted.map(w => {
+                const util = calcUtilisation(w.assignments);
+                const activeAssignment = w.assignments.find(a => a.status === "active");
+                return {
+                  Name: w.name,
+                  Role: w.role,
+                  Status: w.status,
+                  Nationality: w.nationality || "",
+                  "English Level": w.englishLevel || "",
+                  "Tech Level": w.techLevel || "",
+                  "Measuring Skills": w.measuringSkills || "",
+                  "OEM Experience": w.oemExperience.map(o => o.split(" - ")[0]).join("; "),
+                  "Utilisation %": util.pct,
+                  "Current Assignment": activeAssignment ? `${activeAssignment.projectCode} — ${activeAssignment.projectName}` : "Available",
+                };
+              });
+              downloadCSV(rows, `pfg-workforce-${new Date().toISOString().split("T")[0]}.csv`);
+            }}
+            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg border transition-colors hover:bg-[hsl(var(--accent))] ml-2"
+            style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-navy)" }}
+            data-testid="export-csv-btn"
+          >
+            <Download className="w-3.5 h-3.5" /> Export CSV
+          </button>
 
           {/* Add Worker button */}
           <button onClick={() => setShowAddWorker(true)}

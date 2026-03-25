@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useDashboardData, type DashboardWorker, type DashboardProject, type DashboardRoleSlot, type DashboardAssignment } from "@/hooks/use-dashboard-data";
 import { OEM_BRAND_COLORS, PROJECT_CUSTOMER } from "@/lib/constants";
+import { downloadSqepPdf, downloadAllSqepPdfs } from "@/lib/sqep-pdf";
 import { Download, FileDown, Info } from "lucide-react";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -122,14 +123,13 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
           </span>
         </div>
         <button
-          disabled
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold opacity-40 cursor-not-allowed"
-          style={{ background: "rgba(255,255,255,0.1)", color: "#fff" }}
-          title="Coming soon"
+          onClick={() => portalData && downloadAllSqepPdfs(portalData.teamMembers, params.projectCode)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-opacity hover:opacity-90"
+          style={{ background: "rgba(245,189,0,0.9)", color: "#1A1D23" }}
           data-testid="download-all-btn"
         >
           <Download className="w-3.5 h-3.5" />
-          Download All
+          Download All SQEP
         </button>
       </header>
 
@@ -350,7 +350,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
             <table className="w-full text-[13px]" style={{ borderCollapse: "collapse" }}>
               <thead>
                 <tr>
-                  {["Name", "Role", "Shift", "Start Date", "End Date", "Status", ""].map((h) => (
+                  {["Name", "Role", "OEM Experience", "Shift", "Start Date", "End Date", "Status", ""].map((h) => (
                     <th
                       key={h}
                       className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide"
@@ -364,7 +364,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
               <tbody>
                 {teamMembers.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="text-center py-12" style={{ color: "hsl(var(--muted-foreground))" }}>
+                    <td colSpan={8} className="text-center py-12" style={{ color: "hsl(var(--muted-foreground))" }}>
                       No team members assigned
                     </td>
                   </tr>
@@ -378,6 +378,27 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                     >
                       <td className="px-4 py-2.5 font-semibold text-pfg-navy">{m.worker.name}</td>
                       <td className="px-4 py-2.5">{m.assignment.task || m.worker.role}</td>
+                      <td className="px-4 py-2.5">
+                        <div className="flex flex-wrap gap-1">
+                          {m.worker.oemExperience.length > 0 ? (
+                            m.worker.oemExperience.map((oem) => {
+                              const name = oem.split(" - ")[0];
+                              const bg = OEM_BRAND_COLORS[name] || "#64748B";
+                              return (
+                                <span
+                                  key={oem}
+                                  className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                                  style={{ background: bg + "18", color: bg, border: `1px solid ${bg}30` }}
+                                >
+                                  {name}
+                                </span>
+                              );
+                            })
+                          ) : (
+                            <span className="text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>—</span>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-4 py-2.5">
                         {m.assignment.shift ? (
                           <span className={`badge ${m.assignment.shift === "Night" ? "badge-navy" : "badge-accent"}`}>
@@ -395,22 +416,15 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                         </span>
                       </td>
                       <td className="px-4 py-2.5">
-                        <div className="relative group">
-                          <button
-                            disabled
-                            className="flex items-center gap-1 text-xs font-medium opacity-40 cursor-not-allowed"
-                            data-testid={`sqep-download-${m.worker.id}`}
-                          >
-                            <FileDown className="w-3.5 h-3.5" />
-                            SQEP Pack
-                          </button>
-                          <div
-                            className="hidden group-hover:block absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2.5 py-1.5 rounded text-[10px] whitespace-nowrap z-10"
-                            style={{ background: "var(--pfg-navy)", color: "#fff", boxShadow: "var(--shadow-md)" }}
-                          >
-                            Coming soon
-                          </div>
-                        </div>
+                        <button
+                          onClick={() => downloadSqepPdf(m.worker)}
+                          className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg border transition-colors hover:bg-[hsl(var(--accent))]"
+                          style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-navy)" }}
+                          data-testid={`sqep-download-${m.worker.id}`}
+                        >
+                          <FileDown className="w-3.5 h-3.5" />
+                          SQEP Pack
+                        </button>
                       </td>
                     </tr>
                   ))
