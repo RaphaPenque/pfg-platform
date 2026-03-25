@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useDashboardData, type DashboardWorker, type DashboardProject, type DashboardRoleSlot, type DashboardAssignment } from "@/hooks/use-dashboard-data";
 import { OEM_BRAND_COLORS, PROJECT_CUSTOMER } from "@/lib/constants";
-import { downloadSqepPdf, downloadAllSqepPdfs } from "@/lib/sqep-pdf";
+import { downloadSqepPdf, downloadCustomerPack } from "@/lib/sqep-pdf";
 import { Download, FileDown, Info } from "lucide-react";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -123,7 +123,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
           </span>
         </div>
         <button
-          onClick={() => portalData && downloadAllSqepPdfs(portalData.teamMembers, params.projectCode)}
+          onClick={() => portalData && downloadCustomerPack(portalData.project, portalData.teamMembers, portalData.customer)}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-opacity hover:opacity-90"
           style={{ background: "rgba(245,189,0,0.9)", color: "#1A1D23" }}
           data-testid="download-all-btn"

@@ -326,6 +326,213 @@ export function downloadSqepPdf(worker: DashboardWorker) {
   doc.save(`SQEP_${safeName}_${new Date().toISOString().split("T")[0]}.pdf`);
 }
 
+export function generateProjectOverviewPdf(
+  project: { code: string; name: string; customer: string | null; location: string | null; equipmentType: string | null; startDate: string | null; endDate: string | null; shift: string | null; headcount: number | null; status: string | null },
+  teamMembers: { worker: DashboardWorker; assignment: DashboardAssignment }[],
+  customerName: string
+): jsPDF {
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+
+  // ═══ PAGE 1: Project Overview ═══
+  // Navy header
+  doc.setFillColor(26, 29, 35);
+  doc.rect(0, 0, pageW, 32, "F");
+  doc.setFillColor(245, 189, 0);
+  doc.rect(0, 32, pageW, 2.5, "F");
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.setTextColor(255, 255, 255);
+  doc.text("POWERFORCE GLOBAL", 15, 14);
+  doc.setFontSize(10);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(200, 200, 200);
+  doc.text("Customer Pack — Project Overview", 15, 23);
+  doc.setFontSize(8);
+  doc.text(new Date().toLocaleDateString("en-GB"), pageW - 15, 23, { align: "right" });
+
+  let y = 44;
+
+  // Project title
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(18);
+  doc.setTextColor(26, 29, 35);
+  doc.text(`${project.code} — ${project.name}`, 15, y);
+  y += 8;
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(11);
+  doc.setTextColor(99, 117, 140);
+  doc.text(customerName || "—", 15, y);
+  y += 12;
+
+  // Project details grid
+  const detailFields = [
+    ["Customer", customerName || "—"],
+    ["Location", project.location || "—"],
+    ["Equipment", project.equipmentType || "—"],
+    ["Shift Pattern", project.shift || "—"],
+    ["Start Date", project.startDate || "—"],
+    ["End Date", project.endDate || "—"],
+    ["Headcount", String(project.headcount || teamMembers.length)],
+    ["Team Assigned", String(teamMembers.length)],
+  ];
+
+  doc.setFillColor(244, 245, 247);
+  doc.roundedRect(15, y - 4, pageW - 30, 28, 2, 2, "F");
+
+  const detailColW = (pageW - 30) / 4;
+  for (let i = 0; i < detailFields.length; i++) {
+    const col = i % 4;
+    const row = Math.floor(i / 4);
+    const dx = 20 + col * detailColW;
+    const dy = y + row * 14;
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7);
+    doc.setTextColor(99, 117, 140);
+    doc.text(detailFields[i][0].toUpperCase(), dx, dy);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(26, 29, 35);
+    doc.text(detailFields[i][1], dx, dy + 5);
+  }
+
+  y += 36;
+
+  // Team Roster table
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(12);
+  doc.setTextColor(26, 29, 35);
+  doc.text("Team Roster", 15, y);
+  y += 8;
+
+  // Table header
+  const rosterCols = [
+    { label: "Name", x: 15, w: 60 },
+    { label: "Role", x: 75, w: 40 },
+    { label: "Shift", x: 115, w: 20 },
+    { label: "Start Date", x: 135, w: 28 },
+    { label: "End Date", x: 163, w: 28 },
+    { label: "OEM Experience", x: 191, w: 80 },
+  ];
+
+  doc.setFillColor(26, 29, 35);
+  doc.rect(15, y - 4, pageW - 30, 8, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(7);
+  doc.setTextColor(255, 255, 255);
+  rosterCols.forEach((col) => doc.text(col.label.toUpperCase(), col.x, y));
+  y += 6;
+
+  // Table rows
+  // Deduplicate workers (same worker may have multiple assignments)
+  const seenWorkers = new Set<number>();
+  const uniqueMembers = teamMembers.filter((m) => {
+    if (seenWorkers.has(m.worker.id)) return false;
+    seenWorkers.add(m.worker.id);
+    return true;
+  });
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+
+  for (let i = 0; i < uniqueMembers.length; i++) {
+    const m = uniqueMembers[i];
+
+    if (y > pageH - 20) {
+      // Footer
+      doc.setFillColor(26, 29, 35);
+      doc.rect(0, pageH - 10, pageW, 10, "F");
+      doc.setFontSize(7);
+      doc.setTextColor(150, 150, 150);
+      doc.text("Confidential — PowerForce Global Customer Pack", 15, pageH - 4);
+      doc.text(`Page ${doc.getNumberOfPages()}`, pageW - 15, pageH - 4, { align: "right" });
+
+      doc.addPage("landscape");
+      // Re-draw header
+      doc.setFillColor(26, 29, 35);
+      doc.rect(0, 0, pageW, 28, "F");
+      doc.setFillColor(245, 189, 0);
+      doc.rect(0, 28, pageW, 2, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(14);
+      doc.setTextColor(255, 255, 255);
+      doc.text("POWERFORCE GLOBAL", 15, 12);
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(200, 200, 200);
+      doc.text(`Team Roster — ${project.code} (cont.)`, 15, 20);
+      y = 40;
+
+      // Re-draw table header
+      doc.setFillColor(26, 29, 35);
+      doc.rect(15, y - 4, pageW - 30, 8, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      doc.setTextColor(255, 255, 255);
+      rosterCols.forEach((col) => doc.text(col.label.toUpperCase(), col.x, y));
+      y += 6;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+    }
+
+    // Zebra striping
+    if (i % 2 === 1) {
+      doc.setFillColor(250, 250, 252);
+      doc.rect(15, y - 3.5, pageW - 30, 7, "F");
+    }
+
+    doc.setTextColor(26, 29, 35);
+    doc.setFont("helvetica", "bold");
+    doc.text(truncate(m.worker.name, 36), rosterCols[0].x, y);
+    doc.setFont("helvetica", "normal");
+    doc.text(truncate(m.assignment.role || m.assignment.task || m.worker.role, 24), rosterCols[1].x, y);
+    doc.text(m.assignment.shift || "—", rosterCols[2].x, y);
+    doc.text(m.assignment.startDate || "—", rosterCols[3].x, y);
+    doc.text(m.assignment.endDate || "—", rosterCols[4].x, y);
+
+    // OEM badges
+    doc.setFontSize(7);
+    const oemText = m.worker.oemExperience.map((o) => o.split(" - ")[0]).join(", ");
+    doc.setTextColor(99, 117, 140);
+    doc.text(truncate(oemText || "—", 50), rosterCols[5].x, y);
+    doc.setFontSize(8);
+
+    y += 7;
+  }
+
+  // Footer
+  doc.setFillColor(26, 29, 35);
+  doc.rect(0, pageH - 10, pageW, 10, "F");
+  doc.setFontSize(7);
+  doc.setTextColor(150, 150, 150);
+  doc.text("Confidential — PowerForce Global Customer Pack", 15, pageH - 4);
+  doc.text(`Page ${doc.getNumberOfPages()}`, pageW - 15, pageH - 4, { align: "right" });
+
+  return doc;
+}
+
+export function downloadCustomerPack(
+  project: { code: string; name: string; customer: string | null; location: string | null; equipmentType: string | null; startDate: string | null; endDate: string | null; shift: string | null; headcount: number | null; status: string | null },
+  teamMembers: { worker: DashboardWorker; assignment: DashboardAssignment }[],
+  customerName: string
+) {
+  // 1. Download the Project Overview PDF first
+  const overviewDoc = generateProjectOverviewPdf(project, teamMembers, customerName);
+  overviewDoc.save(`CustomerPack_${project.code}_Overview_${new Date().toISOString().split("T")[0]}.pdf`);
+
+  // 2. Download individual SQEP packs
+  // Deduplicate workers
+  const seen = new Set<number>();
+  for (const { worker } of teamMembers) {
+    if (seen.has(worker.id)) continue;
+    seen.add(worker.id);
+    downloadSqepPdf(worker);
+  }
+}
+
 export function downloadAllSqepPdfs(
   workers: { worker: DashboardWorker; assignment: DashboardAssignment }[],
   projectCode: string
