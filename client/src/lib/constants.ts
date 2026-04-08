@@ -130,3 +130,18 @@ export function calcUtilisation(assignments: any[]): { days: number; pct: number
   return { days: effectiveDays, pct: Math.round(effectiveDays / 187 * 100) };
 }
 // Auto-deploy test Wed Apr  8 16:53:59 UTC 2026
+
+// ─── Slot sort: Day shift before Night shift, then by ROLE_HIERARCHY rank ───
+const SHIFT_ORDER: Record<string, number> = { Day: 0, Night: 1 };
+export function sortSlots<T extends { role: string; shift?: string }>(slots: T[]): T[] {
+  return [...slots].sort((a, b) => {
+    const shiftA = SHIFT_ORDER[a.shift ?? 'Day'] ?? 0;
+    const shiftB = SHIFT_ORDER[b.shift ?? 'Day'] ?? 0;
+    if (shiftA !== shiftB) return shiftA - shiftB;
+    const roleA = ROLE_HIERARCHY.indexOf(a.role);
+    const roleB = ROLE_HIERARCHY.indexOf(b.role);
+    const rankA = roleA === -1 ? 99 : roleA;
+    const rankB = roleB === -1 ? 99 : roleB;
+    return rankA - rankB;
+  });
+}

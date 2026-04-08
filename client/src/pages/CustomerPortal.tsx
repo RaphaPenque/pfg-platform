@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useDashboardData, type DashboardWorker, type DashboardProject, type DashboardRoleSlot, type DashboardAssignment } from "@/hooks/use-dashboard-data";
-import { OEM_BRAND_COLORS, PROJECT_CUSTOMER } from "@/lib/constants";
+import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, sortSlots } from "@/lib/constants";
 import { downloadSqepPdf, downloadCustomerPack } from "@/lib/sqep-pdf";
 import { Download, FileDown, Info } from "lucide-react";
 
@@ -136,6 +136,18 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
         });
       }
     }
+
+    // Sort histogram rows: Day shift first, then Night; within each shift by role hierarchy
+    const SHIFT_ORDER: Record<string, number> = { Day: 0, Night: 1 };
+    const ROLE_ORDER = ["Superintendent","Foreman","Lead Technician","Technician 2","Technician 1","Rigger","Crane Driver","HSE Officer","Welder","I&C Technician","Electrician","Apprentice"];
+    histogramRows.sort((a, b) => {
+      const shiftA = SHIFT_ORDER[a.slot.shift ?? "Day"] ?? 0;
+      const shiftB = SHIFT_ORDER[b.slot.shift ?? "Day"] ?? 0;
+      if (shiftA !== shiftB) return shiftA - shiftB;
+      const roleA = ROLE_ORDER.indexOf(a.slot.role);
+      const roleB = ROLE_ORDER.indexOf(b.slot.role);
+      return (roleA === -1 ? 99 : roleA) - (roleB === -1 ? 99 : roleB);
+    });
 
     // Build weekly columns
     const weekColumns = (project.startDate && project.endDate)
@@ -299,13 +311,34 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                     const barEnd = row.filled && row.assignment?.endDate ? row.assignment.endDate : row.slot.endDate;
                     const barStartDate = new Date(barStart);
                     const barEndDate = new Date(barEnd);
-                    const shift = row.slot.shift || "—";
+                    const shift = row.slot.shift || "Day";
                     const roleName = row.slot.role;
+                    // Shift group header: show when this row starts a new shift group
+                    const prevShift = idx > 0 ? (histogramRows[idx - 1].slot.shift || "Day") : null;
+                    const showShiftHeader = prevShift !== null && shift !== prevShift;
                     const personName = row.assignedWorker?.name || null;
                     const isFilled = row.filled;
 
                     return (
-                      <tr key={idx} data-testid={`histogram-row-${idx}`}>
+                      <>
+                        {/* Day / Night shift group divider */}
+                        {(idx === 0 || showShiftHeader) && (
+                          <tr key={`shift-header-${shift}-${idx}`} data-testid={`shift-group-${shift}`}>
+                            <td
+                              colSpan={2 + weekColumns.length}
+                              className="px-4 py-1 text-[10px] font-bold uppercase tracking-widest sticky left-0"
+                              style={{
+                                background: shift === "Night" ? "#1A1D23" : "hsl(var(--muted))",
+                                color: shift === "Night" ? "#F5BD00" : "hsl(var(--muted-foreground))",
+                                borderBottom: "1px solid hsl(var(--border))",
+                                borderTop: idx !== 0 ? "2px solid hsl(var(--border))" : undefined,
+                              }}
+                            >
+                              {shift === "Night" ? "🌙 Night Shift" : "☀️ Day Shift"}
+                            </td>
+                          </tr>
+                        )}
+                        <tr key={idx} data-testid={`histogram-row-${idx}`}>
                         <td
                           className="px-4 py-1 text-xs whitespace-nowrap sticky left-0 z-[1]"
                           style={{
@@ -403,7 +436,8 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                             </td>
                           );
                         })}
-                      </tr>
+                        </tr>
+                      </>
                     );
                   })
                 )}
@@ -450,7 +484,19 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                     </td>
                   </tr>
                 ) : (
-                  teamMembers.map((m) => {
+                  // Sort team table: same order as histogram (Day first, then Night; by role rank)
+                  [...teamMembers].sort((a, b) => {
+                    const SHIFT_ORDER: Record<string, number> = { Day: 0, Night: 1 };
+                    const ROLE_ORDER = ["Superintendent","Foreman","Lead Technician","Technician 2","Technician 1","Rigger","Crane Driver","HSE Officer","Welder","I&C Technician","Electrician","Apprentice"];
+                    const slotA = projectRoleSlots.find(s => s.id === a.assignment.roleSlotId);
+                    const slotB = projectRoleSlots.find(s => s.id === b.assignment.roleSlotId);
+                    const shiftA = SHIFT_ORDER[slotA?.shift ?? a.assignment.shift ?? "Day"] ?? 0;
+                    const shiftB = SHIFT_ORDER[slotB?.shift ?? b.assignment.shift ?? "Day"] ?? 0;
+                    if (shiftA !== shiftB) return shiftA - shiftB;
+                    const roleA = ROLE_ORDER.indexOf(slotA?.role ?? a.assignment.task ?? a.worker.role);
+                    const roleB = ROLE_ORDER.indexOf(slotB?.role ?? b.assignment.task ?? b.worker.role);
+                    return (roleA === -1 ? 99 : roleA) - (roleB === -1 ? 99 : roleB);
+                  }).map((m) => {
                     // Find which role slot this assignment belongs to
                     const matchedSlot = projectRoleSlots.find((s) => s.id === m.assignment.roleSlotId);
 

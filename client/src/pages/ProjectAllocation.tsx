@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { useDashboardData, type DashboardWorker, type DashboardProject, type DashboardAssignment, type DashboardRoleSlot } from "@/hooks/use-dashboard-data";
-import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, OEM_OPTIONS, EQUIPMENT_TYPES, PROJECT_ROLES, COST_CENTRES, CERT_DEFS, calcUtilisation } from "@/lib/constants";
+import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, OEM_OPTIONS, EQUIPMENT_TYPES, PROJECT_ROLES, COST_CENTRES, CERT_DEFS, calcUtilisation, sortSlots } from "@/lib/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Plus, X, ExternalLink, Trash2, Undo2, Search, ChevronDown, ChevronUp, Check, Loader2, CheckCircle2, XCircle, Sparkles, RotateCcw, AlertTriangle, Download, Info, Mail, Save } from "lucide-react";
 import { downloadCSV } from "@/lib/csv-export";
@@ -810,7 +810,7 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {roleSlots.map((slot) => (
+                    {sortSlots(roleSlots).map((slot) => (
                       <tr key={slot.key} style={{ borderBottom: "1px solid hsl(var(--border))" }}>
                         <td className="px-3 py-1.5">
                           <select className="text-[13px] px-2 py-1 rounded border w-full" style={inputStyle} value={slot.role} onChange={(e) => updateSlot(slot.key, "role", e.target.value)} data-testid={`slot-role-${slot.key}`}>
@@ -849,7 +849,7 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
         {/* Step 3: Assign Staff */}
         {step === 3 && (
           <div className="space-y-6">
-            {roleSlots.map((slot) => {
+            {sortSlots(roleSlots).map((slot) => {
               const assigned = slotAssignments[slot.key] ?? [];
               const { filtered: available, total: totalAvailable } = getAvailableWorkers(slot);
               const oemMatch = oem && equipmentType ? `${oem} - ${equipmentType}` : null;
@@ -1086,7 +1086,7 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
                 <div className="text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>No role slots defined</div>
               ) : (
                 <div className="space-y-2">
-                  {roleSlots.map((s) => {
+                  {sortSlots(roleSlots).map((s) => {
                     const assigned = slotAssignments[s.key] ?? [];
                     const unfilled = s.quantity - assigned.length;
                     return (
@@ -2121,7 +2121,7 @@ function EditProjectModal({
                     </tr>
                   </thead>
                   <tbody>
-                    {roleSlotEdits.map((slot) => (
+                    {sortSlots(roleSlotEdits).map((slot) => (
                       <tr key={slot.key}>
                         <td className="px-3 py-1.5" style={{ borderBottom: "1px solid hsl(var(--border))" }}>
                           <select className="text-[13px] px-2 py-1 rounded border w-full" style={inputStyle} value={slot.role} onChange={(e) => updateEditSlot(slot.key, "role", e.target.value)} data-testid={`edit-slot-role-${slot.key}`}>
@@ -2217,7 +2217,7 @@ function EditProjectModal({
               </div>
             ) : (
               <div className="space-y-5">
-                {roleSlotEdits.map((slot) => {
+                {sortSlots(roleSlotEdits).map((slot) => {
                   const slotMembers = getSlotMembers(slot.key);
                   const addedWorkerIds = slotAdditions[slot.key] ?? [];
                   const filledCount = slotMembers.filter(m => !removedIds.has(m.assignment.id)).length + addedWorkerIds.length;
