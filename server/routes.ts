@@ -196,6 +196,38 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(allUsers.map(u => ({ id: u.id, email: u.email, name: u.name, role: u.role, isActive: u.isActive, lastLoginAt: u.lastLoginAt })));
   });
 
+  app.post("/api/users", requireRole("admin"), async (req: Request, res: Response) => {
+    const { email, name, role } = req.body;
+    if (!email || !name || !role) return res.status(400).json({ error: "email, name and role required" });
+    const validRoles = ["admin", "resource_manager", "project_manager", "finance", "observer"];
+    if (!validRoles.includes(role)) return res.status(400).json({ error: "Invalid role" });
+    try {
+      const existing = await storage.getUserByEmail(email.toLowerCase());
+      let user;
+      if (existing) {
+        user = await storage.updateUser(existing.id, { name, role, isActive: true } as any);
+      } else {
+        user = await storage.createUser({ email: email.toLowerCase(), name, role, isActive: true } as any);
+      }
+      // Generate a 7-day invite token
+      const token = crypto.randomUUID();
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      await storage.createMagicLink({ email: email.toLowerCase(), token, expiresAt });
+      const inviteLink = `https://pfg-platform.onrender.com/#/auth/verify?token=${token}`;
+      console.log(`[INVITE] ${name} (${role}): ${inviteLink}`);
+      res.json({ user, inviteLink });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.patch("/api/users/:id", requireRole("admin"), async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const updates = req.body;
+    const user = await storage.updateUser(id, updates);
+    res.json(user);
+  });
+
   app.get("/api/users/resource-managers", async (_req: Request, res: Response) => {
     const allUsers = await storage.getUsers();
     res.json(allUsers.filter(u => u.role === "resource_manager" && u.isActive).map(u => ({ id: u.id, name: u.name, email: u.email })));
