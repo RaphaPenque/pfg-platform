@@ -78,7 +78,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
   // Public endpoint — no auth required
   const { data, isLoading } = useQuery({
     queryKey: ["/api/portal", params.projectCode],
-    queryFn: () => apiRequest("GET", `/api/portal/${params.projectCode}`),
+    queryFn: () => apiRequest("GET", `/api/portal/${params.projectCode}`).then(r => (r as any).json()),
     retry: false,
   });
 
