@@ -17,6 +17,14 @@ import {
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 10000,
+});
+
+// Prevent unhandled error events from crashing the process
+pool.on('error', (err) => {
+  console.error('PostgreSQL pool error:', err.message);
 });
 
 export const db = drizzle(pool);
