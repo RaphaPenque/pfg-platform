@@ -1442,11 +1442,10 @@ function EditProjectModal({
     const oemMatch = editOem && editEquipment ? `${editOem} - ${editEquipment}` : null;
 
     const base = allWorkers.filter(w => {
-      // Already on project
-      if (projectWorkerIds.has(w.id)) return false;
-      // Already added to another slot in edit session
+      // Already added to another slot in this edit session
       if (allAddedIds.has(w.id)) return false;
-      // Check date availability (exclude this project's assignments)
+      // Check date availability — excludes same-project assignments so workers
+      // can be on multiple non-overlapping slots of the same project
       if (!workerIsAvailable(w, slot.startDate, slot.endDate, card.project.id)) return false;
       return true;
     });
