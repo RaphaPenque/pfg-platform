@@ -1463,13 +1463,13 @@ function EditProjectModal({
   const leadChanged = editLeadUserId !== initialLeadId;
 
   // rolesChanged: new slots, deleted slots, OR any existing slot that differs from original
-  const originalSlots = card.project.roleSlots || [];
+  // Use existingSlots (fresh from allRoleSlots) as the reference — always available
   const existingSlotChanged = roleSlotEdits.some(s => {
     if (s.key > 0) return false; // new slot, handled separately
-    const orig = originalSlots.find((o: any) => o.id === Math.abs(s.key));
+    const orig = existingSlots.find(o => o.id === Math.abs(s.key));
     if (!orig) return false;
     return orig.role !== s.role || orig.startDate !== s.startDate ||
-           orig.endDate !== s.endDate || orig.quantity !== s.quantity || orig.shift !== s.shift;
+           orig.endDate !== s.endDate || orig.quantity !== s.quantity || (orig.shift || "Day") !== s.shift;
   });
   const rolesChanged = deletedSlotIds.length > 0 || roleSlotEdits.some((s) => s.key > 0) || existingSlotChanged;
   const teamChanged = removedIds.size > 0 || Object.values(slotAdditions).some(ids => ids.length > 0);
@@ -1523,10 +1523,10 @@ function EditProjectModal({
         } else {
           // Existing slot — patch if changed
           const slotId = Math.abs(slot.key);
-          const orig = originalSlots.find((o: any) => o.id === slotId);
+          const orig = existingSlots.find(o => o.id === slotId);
           if (orig && (
             orig.role !== slot.role || orig.startDate !== slot.startDate ||
-            orig.endDate !== slot.endDate || orig.quantity !== slot.quantity || orig.shift !== slot.shift
+            orig.endDate !== slot.endDate || orig.quantity !== slot.quantity || (orig.shift || "Day") !== slot.shift
           )) {
             await apiRequest("PATCH", `/api/role-slots/${slotId}`, {
               role: slot.role, startDate: slot.startDate,
