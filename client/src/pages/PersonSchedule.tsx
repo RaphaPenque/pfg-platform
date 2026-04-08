@@ -42,7 +42,7 @@ export default function PersonSchedule() {
   const { data, isLoading } = useDashboardData();
   const [search, setSearch] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
-  const [activeStatusFilters, setActiveStatusFilters] = useState<Set<ProjectStatus>>(new Set(["active"]));
+  const [activeStatusFilters, setActiveStatusFilters] = useState<Set<ProjectStatus>>(() => new Set<ProjectStatus>(["active"]));
 
   const handleToggleFilter = (status: ProjectStatus) => {
     setActiveStatusFilters((prev) => {
@@ -349,6 +349,7 @@ function PersonRow({
         }}
       >
         {worker.name}
+        {worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}
       </td>
 
       {/* Status */}

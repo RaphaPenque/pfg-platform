@@ -333,6 +333,10 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
   const [phone, setPhone] = useState(worker.phone || "");
   const [phoneSecondary, setPhoneSecondary] = useState(worker.phoneSecondary || "");
   const [address, setAddress] = useState(worker.address || "");
+  // Field kit / logistics
+  const [coverallSize, setCoverallSize] = useState(worker.coverallSize || "");
+  const [bootSize, setBootSize] = useState(worker.bootSize || "");
+  const [localAirport, setLocalAirport] = useState(worker.localAirport || "");
 
   // Step 2: Certs
   const [certData, setCertData] = useState<Record<string, { completionDate: string; validityDate: string; file: File | null; uploaded: boolean }>>(() => {
@@ -442,6 +446,9 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
         phone: phone || null,
         phoneSecondary: phoneSecondary || null,
         address: address || null,
+        coverallSize: coverallSize || null,
+        bootSize: bootSize || null,
+        localAirport: localAirport || null,
       });
 
       await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
@@ -572,6 +579,24 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
             </FormGroup>
             <FormGroup label="Address" full>
               <input className={inputCls} style={inputStyle} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Home address" data-testid="edit-address" />
+            </FormGroup>
+
+            {/* Field Kit & Logistics */}
+            <div className="col-span-2 mt-2 mb-1">
+              <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>Field Kit &amp; Logistics</div>
+              <div className="border-b mt-1" style={{ borderColor: "hsl(var(--border))" }} />
+            </div>
+            <FormGroup label="Coverall Size">
+              <select className={inputCls} style={inputStyle} value={coverallSize} onChange={(e) => setCoverallSize(e.target.value)} data-testid="edit-coverall-size">
+                <option value="">Select...</option>
+                {["XS", "S", "M", "L", "XL", "XXL", "XXXL"].map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </FormGroup>
+            <FormGroup label="Boot Size (EU)">
+              <input className={inputCls} style={inputStyle} value={bootSize} onChange={(e) => setBootSize(e.target.value)} placeholder="42" data-testid="edit-boot-size" />
+            </FormGroup>
+            <FormGroup label="Local Airport">
+              <input className={inputCls} style={inputStyle} value={localAirport} onChange={(e) => setLocalAirport(e.target.value)} placeholder="e.g. LHR, MAD, LIS, OPO" data-testid="edit-local-airport" />
             </FormGroup>
           </div>
         )}
@@ -866,9 +891,31 @@ function CertificatesTab({ worker }: { worker: DashboardWorker }) {
 function WorkerDetail({ worker }: { worker: DashboardWorker }) {
   const [tab, setTab] = useState<"summary" | "certs" | "experience">("summary");
   const [showEditWizard, setShowEditWizard] = useState(false);
+  const [deleteState, setDeleteState] = useState<"idle" | "confirming" | "deleting" | "error">("idle");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const util = calcUtilisation(worker.assignments);
   const workerRoles = parseRoles(worker);
   const age = worker.dateOfBirth ? calcAge(worker.dateOfBirth) : (worker.age || "—");
+
+  const handleDelete = async () => {
+    setDeleteState("deleting");
+    setDeleteError(null);
+    try {
+      await apiRequest("DELETE", `/api/workers/${worker.id}`);
+      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+    } catch (e: any) {
+      // Parse 409 response for active assignments
+      let msg = e.message || "Failed to delete";
+      try {
+        if (msg.includes("409")) {
+          const body = JSON.parse(msg.split(": ").slice(1).join(": "));
+          msg = `Cannot delete — ${worker.name} is currently assigned to ${body.projects.join(", ")}. Remove them from all projects first.`;
+        }
+      } catch { /* use original message */ }
+      setDeleteError(msg);
+      setDeleteState("error");
+    }
+  };
 
   return (
     <div style={{ background: "hsl(var(--muted))" }}>
@@ -883,13 +930,41 @@ function WorkerDetail({ worker }: { worker: DashboardWorker }) {
             </button>
           ))}
         </div>
-        <button onClick={() => setShowEditWizard(true)}
-          className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors hover:bg-white/80"
-          style={{ background: "hsl(var(--card))", color: "var(--pfg-navy)", border: "1px solid hsl(var(--border))" }}
-          data-testid={`edit-worker-${worker.id}`}>
-          <Pencil className="w-3.5 h-3.5" /> Edit Profile
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowEditWizard(true)}
+            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors hover:bg-white/80"
+            style={{ background: "hsl(var(--card))", color: "var(--pfg-navy)", border: "1px solid hsl(var(--border))" }}
+            data-testid={`edit-worker-${worker.id}`}>
+            <Pencil className="w-3.5 h-3.5" /> Edit Profile
+          </button>
+          {deleteState === "idle" && (
+            <button onClick={() => setDeleteState("confirming")}
+              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors hover:bg-red-50"
+              style={{ background: "hsl(var(--card))", color: "var(--red)", border: "1px solid var(--red)" }}
+              data-testid={`delete-worker-${worker.id}`}>
+              <Trash2 className="w-3.5 h-3.5" /> Delete Profile
+            </button>
+          )}
+          {deleteState === "confirming" && (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs" style={{ borderColor: "var(--red)", background: "var(--red-bg)" }}>
+              <span style={{ color: "var(--red)" }}>Delete {worker.name}? This cannot be undone.</span>
+              <button onClick={handleDelete} className="font-bold px-2 py-0.5 rounded text-white" style={{ background: "var(--red)" }} data-testid={`confirm-delete-${worker.id}`}>Delete</button>
+              <button onClick={() => setDeleteState("idle")} className="font-medium px-2 py-0.5 rounded" style={{ color: "var(--pfg-steel)" }} data-testid={`cancel-delete-${worker.id}`}>Cancel</button>
+            </div>
+          )}
+          {deleteState === "deleting" && (
+            <span className="flex items-center gap-1.5 text-xs" style={{ color: "var(--pfg-steel)" }}>
+              <Loader2 className="w-3.5 h-3.5 animate-spin" /> Deleting...
+            </span>
+          )}
+        </div>
       </div>
+
+      {deleteError && (
+        <div className="mx-5 mt-2 px-3 py-2 rounded-lg text-xs font-medium" style={{ background: "var(--red-bg)", color: "var(--red)" }} data-testid="delete-error">
+          {deleteError}
+        </div>
+      )}
 
       <div className="border-t" style={{ borderColor: "hsl(var(--border))" }} />
 
@@ -924,6 +999,9 @@ function WorkerDetail({ worker }: { worker: DashboardWorker }) {
                   ["English", <EnglishBadge key="e" level={worker.englishLevel} />],
                   ...(worker.status === "FTE" && worker.costCentre ? [["Cost Centre", worker.costCentre]] : []),
                   ...(worker.driversLicense || worker.driversLicenseUploaded ? [["Driver's License", <span key="dl" className="badge badge-green">Yes</span>]] : []),
+                  ...(worker.coverallSize ? [["Coverall", worker.coverallSize]] : []),
+                  ...(worker.bootSize ? [["Boots", `EU ${worker.bootSize}`]] : []),
+                  ...(worker.localAirport ? [["Airport", worker.localAirport]] : []),
                 ].map(([label, val], idx) => (
                   <div key={idx} className="flex flex-col gap-0.5">
                     <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "hsl(var(--muted-foreground))" }}>{label as string}</span>
@@ -1360,7 +1438,10 @@ export default function WorkforceTable() {
                         style={{ borderBottom: isExpanded ? "none" : "1px solid hsl(var(--border))", background: isExpanded ? "hsl(var(--accent))" : undefined }}
                         onMouseEnter={(e) => { if (!isExpanded) (e.currentTarget.style.background = "hsl(var(--accent))"); }}
                         onMouseLeave={(e) => { if (!isExpanded) (e.currentTarget.style.background = ""); }}>
-                        <td className="px-2.5 py-2.5 font-semibold whitespace-nowrap text-pfg-navy">{w.name}</td>
+                        <td className="px-2.5 py-2.5 font-semibold whitespace-nowrap text-pfg-navy">
+                          {w.name}
+                          {w.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}
+                        </td>
                         <td className="px-2.5 py-2.5">{w.role}</td>
                         <td className="px-2.5 py-2.5"><StatusBadge status={w.status} /></td>
                         <td className="px-2.5 py-2.5">

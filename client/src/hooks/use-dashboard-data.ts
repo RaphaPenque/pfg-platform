@@ -34,6 +34,10 @@ export interface DashboardWorker {
   phone: string | null;
   phoneSecondary: string | null;
   address: string | null;
+  // Field kit / logistics
+  coverallSize: string | null;
+  bootSize: string | null;
+  localAirport: string | null;
 }
 
 export interface DashboardAssignment {

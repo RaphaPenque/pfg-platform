@@ -47,7 +47,7 @@ const STATUS_FILTERS: { key: ProjectStatus; label: string; defaultOn: boolean }[
 
 export default function GanttChart() {
   const { data, isLoading } = useDashboardData();
-  const [activeFilters, setActiveFilters] = useState<Set<ProjectStatus>>(new Set(["active", "potential"]));
+  const [activeFilters, setActiveFilters] = useState<Set<ProjectStatus>>(() => new Set<ProjectStatus>(["active", "potential"]));
 
   const handleToggleFilter = (status: ProjectStatus) => {
     setActiveFilters((prev) => {

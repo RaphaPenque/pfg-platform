@@ -54,7 +54,30 @@ export function registerRoutes(server: Server, app: Express) {
   });
 
   app.delete("/api/workers/:id", (req, res) => {
-    storage.deleteWorker(parseInt(req.params.id));
+    const id = parseInt(req.params.id);
+    const worker = storage.getWorker(id);
+    if (!worker) return res.status(404).json({ error: "Worker not found" });
+
+    // Check for active assignments (end_date >= today)
+    const today = new Date().toISOString().split("T")[0];
+    const workerAssignments = storage.getAssignmentsByWorker(id);
+    const activeAssignments = workerAssignments.filter(a => a.endDate && a.endDate >= today && a.status === "active");
+    if (activeAssignments.length > 0) {
+      const allProjects = storage.getProjects();
+      const projectMap = Object.fromEntries(allProjects.map(p => [p.id, p]));
+      const projectNames = Array.from(new Set(activeAssignments.map(a => projectMap[a.projectId]?.name || "Unknown")));
+      return res.status(409).json({ message: "Worker has active assignments", projects: projectNames });
+    }
+
+    // Cascade: delete assignments and documents first, then worker
+    for (const a of workerAssignments) {
+      storage.deleteAssignment(a.id);
+    }
+    const docs = storage.getDocumentsByWorker(id);
+    for (const d of docs) {
+      storage.deleteDocument(d.id);
+    }
+    storage.deleteWorker(id);
     res.status(204).send();
   });
 

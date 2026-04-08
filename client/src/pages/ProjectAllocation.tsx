@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useDashboardData, type DashboardWorker, type DashboardProject, type DashboardAssignment, type DashboardRoleSlot } from "@/hooks/use-dashboard-data";
 import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, OEM_OPTIONS, EQUIPMENT_TYPES, PROJECT_ROLES, calcUtilisation } from "@/lib/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Plus, X, ExternalLink, Trash2, Undo2, Search, ChevronDown, ChevronUp, Check, Loader2, CheckCircle2, XCircle, Sparkles, RotateCcw, AlertTriangle, Download } from "lucide-react";
+import { Plus, X, ExternalLink, Trash2, Undo2, Search, ChevronDown, ChevronUp, Check, Loader2, CheckCircle2, XCircle, Sparkles, RotateCcw, AlertTriangle, Download, Info } from "lucide-react";
 import { downloadCSV } from "@/lib/csv-export";
 import { Link } from "wouter";
 
@@ -247,7 +247,7 @@ function ProjectCard({ card, onClick, effectiveStatus }: { card: ProjectCardData
           card.members.map((m) => (
             <div key={m.assignment.id} className="flex items-center justify-between px-5 py-2.5 text-[13px] transition-colors hover:bg-[hsl(var(--muted))]" style={{ borderBottom: "1px solid hsl(var(--border))" }}>
               <div>
-                <div className="font-medium text-pfg-navy">{m.worker.name}</div>
+                <div className="font-medium text-pfg-navy">{m.worker.name}{m.worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
                 {m.assignment.task && <div className="text-[11px] mt-0.5 truncate max-w-[260px]" style={{ color: "var(--pfg-steel)" }}>{m.assignment.task}</div>}
               </div>
               <div className="flex items-center gap-1.5">
@@ -332,6 +332,10 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
 
   // Step 3: Assignments — Map<slotKey, workerId[]>
   const [slotAssignments, setSlotAssignments] = useState<Record<number, number[]>>({});
+  // Step 3: Search/filter per slot
+  const [slotSearch, setSlotSearch] = useState<Record<number, string>>({});
+  const [slotFteOnly, setSlotFteOnly] = useState<Record<number, boolean>>({});
+  const [expandedWorkers, setExpandedWorkers] = useState<Set<number>>(new Set());
 
   const addRoleSlot = () => {
     setRoleSlots((prev) => [
@@ -376,10 +380,9 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
     return aStart <= bEnd && aEnd >= bStart;
   }
 
-  // Available workers for a given slot
-  function getAvailableWorkers(slot: RoleSlotDraft): DashboardWorker[] {
+  // Available workers for a given slot (base list, no search/FTE filter)
+  function getAvailableWorkersBase(slot: RoleSlotDraft): DashboardWorker[] {
     const currentSlotWorkers = slotAssignments[slot.key] ?? [];
-    const oemMatch = oem && equipmentType ? `${oem} - ${equipmentType}` : null;
 
     return allWorkers
       .filter((w) => {
@@ -391,6 +394,22 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
         for (const a of w.assignments) {
           if (datesOverlap(slot.startDate, slot.endDate, a.startDate, a.endDate)) return false;
         }
+        return true;
+      });
+  }
+
+  // Available workers for a given slot (with search + FTE filter applied, then sorted)
+  function getAvailableWorkers(slot: RoleSlotDraft): { filtered: DashboardWorker[]; total: number } {
+    const base = getAvailableWorkersBase(slot);
+    const total = base.length;
+    const searchTerm = (slotSearch[slot.key] || "").toLowerCase();
+    const fteOnly = slotFteOnly[slot.key] || false;
+    const oemMatch = oem && equipmentType ? `${oem} - ${equipmentType}` : null;
+
+    const filtered = base
+      .filter((w) => {
+        if (searchTerm && !w.name.toLowerCase().includes(searchTerm)) return false;
+        if (fteOnly && w.status !== "FTE") return false;
         return true;
       })
       .sort((a, b) => {
@@ -409,6 +428,16 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
         const bUtil = calcUtilisation(b.assignments).pct;
         return aUtil - bUtil;
       });
+
+    return { filtered, total };
+  }
+
+  function toggleExpandedWorker(wid: number) {
+    setExpandedWorkers(prev => {
+      const next = new Set(prev);
+      if (next.has(wid)) next.delete(wid); else next.add(wid);
+      return next;
+    });
   }
 
   function assignWorkerToSlot(slotKey: number, workerId: number) {
@@ -729,8 +758,10 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
           <div className="space-y-6">
             {roleSlots.map((slot) => {
               const assigned = slotAssignments[slot.key] ?? [];
-              const available = getAvailableWorkers(slot);
+              const { filtered: available, total: totalAvailable } = getAvailableWorkers(slot);
               const oemMatch = oem && equipmentType ? `${oem} - ${equipmentType}` : null;
+              const isFteOnly = slotFteOnly[slot.key] || false;
+              const searchVal = slotSearch[slot.key] || "";
               return (
                 <div key={slot.key} className="rounded-lg border" style={{ borderColor: "hsl(var(--border))" }}>
                   {/* Slot header */}
@@ -759,7 +790,7 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
                             data-testid={`assigned-${slot.key}-${wid}`}
                           >
                             <div className="flex-1 min-w-0">
-                              <span className="font-semibold text-pfg-navy">{worker.name}</span>
+                              <span className="font-semibold text-pfg-navy">{worker.name}{worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</span>
                               <span className="ml-2 text-[11px]" style={{ color: "var(--pfg-steel)" }}>{worker.role}</span>
                             </div>
                             <div className="flex items-center gap-1.5 shrink-0">
@@ -778,42 +809,115 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
                     </div>
                   )}
 
-                  {/* Available workers */}
+                  {/* Available workers with search/filter */}
                   {assigned.length < slot.quantity && (
                     <div className="px-4 py-2">
-                      <div className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: "var(--pfg-steel)" }}>
-                        Available ({available.length})
+                      {/* Search + filter bar */}
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="relative flex-1">
+                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: "hsl(var(--muted-foreground))" }} />
+                          <input
+                            type="text"
+                            placeholder="Search by name..."
+                            value={searchVal}
+                            onChange={(e) => setSlotSearch(prev => ({ ...prev, [slot.key]: e.target.value }))}
+                            className="w-full pl-8 pr-3 py-1.5 text-[12px] rounded-lg border"
+                            style={inputStyle}
+                            data-testid={`slot-search-${slot.key}`}
+                          />
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => setSlotFteOnly(prev => ({ ...prev, [slot.key]: false }))}
+                            className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border"
+                            style={{
+                              borderColor: !isFteOnly ? "var(--pfg-yellow)" : "hsl(var(--border))",
+                              background: !isFteOnly ? "hsl(var(--accent))" : "transparent",
+                              color: !isFteOnly ? "var(--pfg-navy)" : "hsl(var(--muted-foreground))",
+                            }}
+                            data-testid={`slot-filter-all-${slot.key}`}
+                          >All</button>
+                          <button
+                            onClick={() => setSlotFteOnly(prev => ({ ...prev, [slot.key]: true }))}
+                            className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border"
+                            style={{
+                              borderColor: isFteOnly ? "var(--pfg-yellow)" : "hsl(var(--border))",
+                              background: isFteOnly ? "hsl(var(--accent))" : "transparent",
+                              color: isFteOnly ? "var(--pfg-navy)" : "hsl(var(--muted-foreground))",
+                            }}
+                            data-testid={`slot-filter-fte-${slot.key}`}
+                          >FTE only</button>
+                        </div>
+                        <span className="text-[11px] font-medium shrink-0" style={{ color: "var(--pfg-steel)" }}>
+                          {available.length} of {totalAvailable} workers
+                        </span>
                       </div>
-                      <div className="max-h-[200px] overflow-y-auto space-y-0.5">
+                      <div className="max-h-[250px] overflow-y-auto space-y-0.5">
                         {available.length === 0 ? (
-                          <div className="text-center py-4 text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>No available workers without date conflicts</div>
+                          <div className="text-center py-4 text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>No available workers{searchVal || isFteOnly ? " matching filters" : " without date conflicts"}</div>
                         ) : (
                           available.map((w) => {
                             const util = calcUtilisation(w.assignments);
                             const hasOemMatch = oemMatch ? w.oemExperience.includes(oemMatch) : false;
+                            const isExpanded = expandedWorkers.has(w.id);
+                            const activeAssignment = w.assignments.find(a => a.status === "active");
                             return (
-                              <div
-                                key={w.id}
-                                className="flex items-center gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-colors hover:border-[var(--pfg-yellow)] hover:bg-[hsl(var(--accent))]"
-                                style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}
-                                onClick={() => assignWorkerToSlot(slot.key, w.id)}
-                                data-testid={`available-${slot.key}-${w.id}`}
-                              >
-                                <div className="flex-1 min-w-0">
-                                  <div className="text-[13px] font-semibold text-pfg-navy">{w.name}</div>
-                                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                                    <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>{w.role}</span>
-                                    {w.oemExperience.slice(0, 3).map((exp) => (
-                                      <span key={exp} className={`badge text-[10px] ${exp === oemMatch ? "badge-green" : "badge-grey"}`}>{exp}</span>
-                                    ))}
+                              <div key={w.id}>
+                                <div
+                                  className="flex items-center gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-colors hover:border-[var(--pfg-yellow)] hover:bg-[hsl(var(--accent))]"
+                                  style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}
+                                  data-testid={`available-${slot.key}-${w.id}`}
+                                >
+                                  <div className="flex-1 min-w-0" onClick={() => assignWorkerToSlot(slot.key, w.id)}>
+                                    <div className="text-[13px] font-semibold text-pfg-navy">{w.name}{w.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
+                                    <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                      <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>{w.role}</span>
+                                      {w.oemExperience.slice(0, 3).map((exp) => (
+                                        <span key={exp} className={`badge text-[10px] ${exp === oemMatch ? "badge-green" : "badge-grey"}`}>{exp}</span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <span className="text-[11px] tabular-nums font-medium" style={{ color: util.pct > 80 ? "var(--red)" : "var(--pfg-steel)" }}>{util.pct}%</span>
+                                    <StatusBadge status={w.status} />
+                                    {hasOemMatch && <span className="badge badge-green text-[10px]">OEM</span>}
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); toggleExpandedWorker(w.id); }}
+                                      className="p-0.5 rounded hover:bg-black/5"
+                                      data-testid={`expand-worker-${slot.key}-${w.id}`}
+                                      title="Preview worker details"
+                                    >
+                                      {isExpanded ? <ChevronUp className="w-3.5 h-3.5" style={{ color: "var(--pfg-steel)" }} /> : <Info className="w-3.5 h-3.5" style={{ color: "var(--pfg-steel)" }} />}
+                                    </button>
+                                    <button
+                                      onClick={(e) => { e.stopPropagation(); assignWorkerToSlot(slot.key, w.id); }}
+                                      className="p-0.5"
+                                      data-testid={`assign-btn-${slot.key}-${w.id}`}
+                                    >
+                                      <Plus className="w-4 h-4" style={{ color: "var(--pfg-yellow)" }} />
+                                    </button>
                                   </div>
                                 </div>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  <span className="text-[11px] tabular-nums font-medium" style={{ color: util.pct > 80 ? "var(--red)" : "var(--pfg-steel)" }}>{util.pct}%</span>
-                                  <StatusBadge status={w.status} />
-                                  {hasOemMatch && <span className="badge badge-green text-[10px]">OEM</span>}
-                                  <Plus className="w-4 h-4" style={{ color: "var(--pfg-yellow)" }} />
-                                </div>
+                                {/* Expanded preview panel */}
+                                {isExpanded && (
+                                  <div className="ml-3 mr-3 mb-1 px-3 py-2 rounded-b-lg border border-t-0 text-[12px]" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--muted))" }} data-testid={`preview-${w.id}`}>
+                                    <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                                      <div><span style={{ color: "var(--pfg-steel)" }}>Status:</span> <StatusBadge status={w.status} /></div>
+                                      <div><span style={{ color: "var(--pfg-steel)" }}>English:</span> <span className="font-medium">{w.englishLevel || "\u2014"}</span></div>
+                                      <div><span style={{ color: "var(--pfg-steel)" }}>Utilisation:</span> <span className="font-medium tabular-nums" style={{ color: util.pct > 80 ? "var(--red)" : undefined }}>{util.pct}%</span></div>
+                                      {activeAssignment && (
+                                        <div><span style={{ color: "var(--pfg-steel)" }}>Current:</span> <span className="font-medium">{activeAssignment.projectCode} &mdash; {activeAssignment.projectName}</span></div>
+                                      )}
+                                    </div>
+                                    {w.oemExperience.length > 0 && (
+                                      <div className="flex flex-wrap gap-1 mt-1.5">
+                                        {w.oemExperience.map((exp) => (
+                                          <span key={exp} className={`badge text-[10px] ${exp === oemMatch ? "badge-green" : "badge-grey"}`}>{exp}</span>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
                               </div>
                             );
                           })
@@ -1478,7 +1582,7 @@ function EditProjectModal({
                       data-testid={`member-row-${m.assignment.id}`}
                     >
                       <div className="flex-1 min-w-0">
-                        <div className="text-[13px] font-semibold text-pfg-navy">{m.worker.name}</div>
+                        <div className="text-[13px] font-semibold text-pfg-navy">{m.worker.name}{m.worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
                         <div className="flex items-center gap-2 mt-0.5">
                           <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>
                             {m.assignment.role || m.worker.role} · {m.assignment.startDate || "—"} →
@@ -1540,7 +1644,7 @@ function EditProjectModal({
                       data-testid={`addition-row-${add.workerId}`}
                     >
                       <div className="flex-1 min-w-0">
-                        <div className="text-[13px] font-semibold text-pfg-navy">{worker.name}</div>
+                        <div className="text-[13px] font-semibold text-pfg-navy">{worker.name}{worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
                         <div className="text-[11px] mt-0.5" style={{ color: "var(--pfg-steel)" }}>
                           {worker.role} · New addition
                         </div>
@@ -1603,7 +1707,7 @@ function EditProjectModal({
                           data-testid={`add-worker-${w.id}`}
                         >
                           <div className="flex-1 min-w-0">
-                            <div className="text-[13px] font-semibold text-pfg-navy">{w.name}</div>
+                            <div className="text-[13px] font-semibold text-pfg-navy">{w.name}{w.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
                             <div className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>{w.role} · {w.nationality || "—"}</div>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
@@ -1771,7 +1875,7 @@ export default function ProjectAllocation() {
   const { data, isLoading } = useDashboardData();
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [activeFilters, setActiveFilters] = useState<Set<ProjectStatus>>(new Set(["active", "potential"]));
+  const [activeFilters, setActiveFilters] = useState<Set<ProjectStatus>>(() => new Set<ProjectStatus>(["active", "potential"]));
 
   const handleToggleFilter = (status: ProjectStatus) => {
     setActiveFilters((prev) => {

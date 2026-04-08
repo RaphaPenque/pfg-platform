@@ -36,6 +36,10 @@ export const workers = sqliteTable("workers", {
   phone: text("phone"), // primary phone number
   phoneSecondary: text("phone_secondary"), // secondary/emergency number
   address: text("address"), // home address
+  // Field kit / logistics
+  coverallSize: text("coverall_size"), // e.g. S, M, L, XL, XXL
+  bootSize: text("boot_size"), // European shoe size e.g. 42, 43
+  localAirport: text("local_airport"), // e.g. LHR, MAD, LIS
 });
 
 export const insertWorkerSchema = createInsertSchema(workers).omit({ id: true });
