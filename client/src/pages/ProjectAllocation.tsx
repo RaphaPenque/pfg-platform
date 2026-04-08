@@ -490,7 +490,7 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
     setError(null);
     try {
       // 1. Create the project
-      const projRes = await apiRequest("POST", "/api/projects", {
+      const project = await apiRequest("POST", "/api/projects", {
         code: code.trim().toUpperCase(),
         name: projectName.trim(),
         customer: customer.trim() || oem || null,
@@ -499,16 +499,15 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
         startDate: startDate || null,
         endDate: endDate || null,
         shift: shift || null,
-        headcount: headcount || null,
+        headcount: (roleSlots.length > 0 ? totalSlots : headcount) || null,
         notes: notes.trim() || null,
         status: createAsStatus,
       });
-      const project = await projRes.json();
 
       // 2. Create role slots and collect their server IDs
       const slotIdMap: Record<number, number> = {}; // key -> server id
       for (const slot of roleSlots) {
-        const slotRes = await apiRequest("POST", "/api/role-slots", {
+        const created = await apiRequest("POST", "/api/role-slots", {
           projectId: project.id,
           role: slot.role,
           startDate: slot.startDate,
@@ -516,7 +515,6 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
           quantity: slot.quantity,
           shift: slot.shift,
         });
-        const created = await slotRes.json();
         slotIdMap[slot.key] = created.id;
       }
 
@@ -530,7 +528,7 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
           ? Math.max(1, Math.ceil((new Date(slot.endDate).getTime() - new Date(slot.startDate).getTime()) / 86400000))
           : null;
         for (const wid of workerIds) {
-          const aRes = await apiRequest("POST", "/api/assignments", {
+          const created = await apiRequest("POST", "/api/assignments", {
             workerId: wid,
             projectId: project.id,
             roleSlotId: serverId ?? null,
@@ -541,7 +539,6 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
             duration: durationDays,
             status: "active",
           });
-          const created = await aRes.json();
           if (tempWorkerIds.has(wid)) createdAssignmentIds.push(created.id);
         }
       }
@@ -722,8 +719,11 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
               <FormGroup label="End Date *">
                 <input type="date" className={inputCls} style={inputStyle} value={endDate} onChange={(e) => setEndDate(e.target.value)} data-testid="input-end" />
               </FormGroup>
-              <FormGroup label="Headcount *">
-                <input type="number" min={1} max={100} className={inputCls} style={inputStyle} value={headcount} onChange={(e) => setHeadcount(parseInt(e.target.value) || 6)} data-testid="input-headcount" />
+              <FormGroup label="Headcount">
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg border text-[13px] font-semibold" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--muted))" }}>
+                  <span>{roleSlots.length > 0 ? totalSlots : headcount}</span>
+                  {roleSlots.length > 0 && <span className="text-[11px] font-normal" style={{ color: "hsl(var(--muted-foreground))" }}>calculated from role slots</span>}
+                </div>
               </FormGroup>
               <FormGroup label="Shift Pattern">
                 <select className={inputCls} style={inputStyle} value={shift} onChange={(e) => setShift(e.target.value)} data-testid="input-shift">
@@ -1234,6 +1234,8 @@ function EditProjectModal({
   const [editStart, setEditStart] = useState(card.project.startDate || "");
   const [editEnd, setEditEnd] = useState(card.project.endDate || "");
   const [editShift, setEditShift] = useState(card.project.shift || "Day");
+  // Headcount is always the sum of role slot quantities — computed, not manually entered
+  const computedHeadcount = roleSlotEdits.reduce((sum, s) => sum + (s.quantity || 0), 0) || (card.project.headcount || 0);
   const [editHeadcount, setEditHeadcount] = useState(card.project.headcount || 6);
   const [editNotes, setEditNotes] = useState(card.project.notes || "");
 
@@ -1459,7 +1461,8 @@ function EditProjectModal({
     editEnd !== (card.project.endDate || "") ||
     editShift !== (card.project.shift || "Day") ||
     editHeadcount !== (card.project.headcount || 6) ||
-    editNotes !== (card.project.notes || "");
+    editNotes !== (card.project.notes || "") ||
+    computedHeadcount !== (card.project.headcount || 0);
   const leadChanged = editLeadUserId !== initialLeadId;
 
   // rolesChanged: new slots, deleted slots, OR any existing slot that differs from original
@@ -1491,7 +1494,7 @@ function EditProjectModal({
           startDate: editStart || null,
           endDate: editEnd || null,
           shift: editShift || null,
-          headcount: editHeadcount || null,
+          headcount: computedHeadcount || editHeadcount || null,
           notes: editNotes.trim() || null,
         });
       }
@@ -1711,7 +1714,10 @@ function EditProjectModal({
               <input type="date" className={inputCls} style={inputStyle} value={editEnd} onChange={(e) => setEditEnd(e.target.value)} data-testid="edit-end" />
             </FormGroup>
             <FormGroup label="Headcount">
-              <input type="number" min={1} max={100} className={inputCls} style={inputStyle} value={editHeadcount} onChange={(e) => setEditHeadcount(parseInt(e.target.value) || 6)} data-testid="edit-headcount" />
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg border text-[13px] font-semibold" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--muted))" }}>
+                <span>{computedHeadcount}</span>
+                <span className="text-[11px] font-normal" style={{ color: "hsl(var(--muted-foreground))" }}>auto-calculated from role slots</span>
+              </div>
             </FormGroup>
             <FormGroup label="Status">
               <div className="px-3 py-2 text-[13px] rounded-lg border capitalize" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--muted))", color: "var(--pfg-navy)" }}>
