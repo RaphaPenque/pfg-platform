@@ -1285,8 +1285,6 @@ function EditProjectModal({
   const [editStart, setEditStart] = useState(card.project.startDate || "");
   const [editEnd, setEditEnd] = useState(card.project.endDate || "");
   const [editShift, setEditShift] = useState(card.project.shift || "Day");
-  // Headcount is always the sum of role slot quantities — computed, not manually entered
-  const computedHeadcount = roleSlotEdits.reduce((sum, s) => sum + (s.quantity || 0), 0) || (card.project.headcount || 0);
   const [editHeadcount, setEditHeadcount] = useState(card.project.headcount || 6);
   const [editNotes, setEditNotes] = useState(card.project.notes || "");
 
@@ -1316,6 +1314,8 @@ function EditProjectModal({
   );
   const [nextRoleKey, setNextRoleKey] = useState(1);
   const [deletedSlotIds, setDeletedSlotIds] = useState<number[]>([]);
+  // Headcount auto-calculated from role slot quantities
+  const computedHeadcount = roleSlotEdits.reduce((sum, s) => sum + (s.quantity || 0), 0) || (card.project.headcount || 0);
   const [slotSaving, setSlotSaving] = useState<number | null>(null);
   const [slotConflicts, setSlotConflicts] = useState<Record<number, string[]>>({});
 
