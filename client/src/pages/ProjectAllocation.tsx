@@ -1636,7 +1636,10 @@ function EditProjectModal({
         }
         await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
       }
-    } catch { /* silent */ }
+    } catch (e: any) {
+      console.error("saveEditSlot error:", e);
+      toast({ title: "Error saving slot", description: e.message || "Unknown error", variant: "destructive" });
+    }
     setSlotSaving(null);
   };
 
