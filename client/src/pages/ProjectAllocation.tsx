@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useDashboardData, type DashboardWorker, type DashboardProject, type DashboardAssignment, type DashboardRoleSlot } from "@/hooks/use-dashboard-data";
 import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, OEM_OPTIONS, EQUIPMENT_TYPES, PROJECT_ROLES, calcUtilisation } from "@/lib/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Plus, X, ExternalLink, Trash2, Undo2, Search, ChevronDown, ChevronUp, Check, Loader2, CheckCircle2, XCircle, Sparkles, RotateCcw, AlertTriangle, Download, Info } from "lucide-react";
+import { Plus, X, ExternalLink, Trash2, Undo2, Search, ChevronDown, ChevronUp, Check, Loader2, CheckCircle2, XCircle, Sparkles, RotateCcw, AlertTriangle, Download, Info, Mail, Save } from "lucide-react";
 import { downloadCSV } from "@/lib/csv-export";
 import { Link } from "wouter";
 
@@ -299,6 +299,29 @@ function AvailablePoolCard({ workers }: { workers: DashboardWorker[] }) {
   );
 }
 
+// ─── Shared availability helpers ──────────────────────────────────
+
+function datesOverlap(aStart: string, aEnd: string, bStart: string | null, bEnd: string | null): boolean {
+  if (!bStart || !bEnd) return false;
+  return aStart <= bEnd && aEnd >= bStart;
+}
+
+function workerIsAvailable(
+  worker: DashboardWorker,
+  slotStart: string,
+  slotEnd: string,
+  excludeProjectId?: number,
+  excludeAssignmentId?: number,
+): boolean {
+  for (const a of worker.assignments) {
+    if (a.status !== "active") continue;
+    if (excludeAssignmentId && a.id === excludeAssignmentId) continue;
+    if (excludeProjectId && a.projectId === excludeProjectId) continue;
+    if (datesOverlap(slotStart, slotEnd, a.startDate, a.endDate)) return false;
+  }
+  return true;
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // ADD NEW PROJECT MODAL (5 steps)
 // ═══════════════════════════════════════════════════════════════════
@@ -374,12 +397,6 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
     return ids;
   }, [slotAssignments]);
 
-  // Check date overlap
-  function datesOverlap(aStart: string, aEnd: string, bStart: string | null, bEnd: string | null): boolean {
-    if (!bStart || !bEnd) return false;
-    return aStart <= bEnd && aEnd >= bStart;
-  }
-
   // Available workers for a given slot (base list, no search/FTE filter)
   function getAvailableWorkersBase(slot: RoleSlotDraft): DashboardWorker[] {
     const currentSlotWorkers = slotAssignments[slot.key] ?? [];
@@ -391,9 +408,7 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
         // Already assigned to another slot in this wizard
         if (allAssignedWorkerIds.has(w.id) && !currentSlotWorkers.includes(w.id)) return false;
         // Check existing assignment date overlaps
-        for (const a of w.assignments) {
-          if (datesOverlap(slot.startDate, slot.endDate, a.startDate, a.endDate)) return false;
-        }
+        if (!workerIsAvailable(w, slot.startDate, slot.endDate)) return false;
         return true;
       });
   }
@@ -493,7 +508,9 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
         slotIdMap[slot.key] = created.id;
       }
 
-      // 3. Create assignments
+      // 3. Create assignments and collect IDs for temp notification
+      const createdAssignmentIds: number[] = [];
+      const tempWorkerIds = new Set(assignedTemps.filter(t => t.worker.personalEmail).map(t => t.worker.id));
       for (const slot of roleSlots) {
         const workerIds = slotAssignments[slot.key] ?? [];
         const serverId = slotIdMap[slot.key];
@@ -501,7 +518,7 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
           ? Math.max(1, Math.ceil((new Date(slot.endDate).getTime() - new Date(slot.startDate).getTime()) / 86400000))
           : null;
         for (const wid of workerIds) {
-          await apiRequest("POST", "/api/assignments", {
+          const aRes = await apiRequest("POST", "/api/assignments", {
             workerId: wid,
             projectId: project.id,
             roleSlotId: serverId ?? null,
@@ -512,10 +529,22 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
             duration: durationDays,
             status: "active",
           });
+          const created = await aRes.json();
+          if (tempWorkerIds.has(wid)) createdAssignmentIds.push(created.id);
         }
       }
 
-      // 4. Invalidate cache
+      // 4. Notify temps (if user previewed the email panel)
+      if (showEmailPreview && createdAssignmentIds.length > 0) {
+        try {
+          await apiRequest("POST", "/api/projects/notify-temps", {
+            projectId: project.id,
+            assignmentIds: createdAssignmentIds,
+          });
+        } catch { /* notification failure shouldn't block project creation */ }
+      }
+
+      // 5. Invalidate cache
       await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
       onClose();
     } catch (e: any) {
@@ -524,6 +553,25 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
       setSaving(false);
     }
   };
+
+  // Email temps state (Step 4)
+  const [showEmailPreview, setShowEmailPreview] = useState(false);
+
+  // Compute temps assigned in wizard
+  const assignedTemps = useMemo(() => {
+    const temps: { worker: DashboardWorker; slotKey: number; slot: RoleSlotDraft }[] = [];
+    for (const slot of roleSlots) {
+      const workerIds = slotAssignments[slot.key] ?? [];
+      for (const wid of workerIds) {
+        const w = allWorkers.find((x) => x.id === wid);
+        if (w && w.status === "Temp") temps.push({ worker: w, slotKey: slot.key, slot });
+      }
+    }
+    return temps;
+  }, [roleSlots, slotAssignments, allWorkers]);
+
+  const tempsWithEmail = assignedTemps.filter((t) => t.worker.personalEmail);
+  const tempsNoEmail = assignedTemps.filter((t) => !t.worker.personalEmail);
 
   const stepLabels = ["Project Details", "Role Planning", "Assign Staff", "Summary", "Create"];
 
@@ -1004,6 +1052,53 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
                 </div>
               )}
             </div>
+
+            {/* Email Temp Workers */}
+            {assignedTemps.length > 0 && (
+              <div className="rounded-lg border p-4" style={{ borderColor: "hsl(var(--border))" }}>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-xs font-bold uppercase tracking-wide text-pfg-navy">
+                    Email Temp Workers
+                  </div>
+                  <button
+                    onClick={() => setShowEmailPreview(!showEmailPreview)}
+                    className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border"
+                    style={{ borderColor: "var(--pfg-yellow)", color: "var(--pfg-navy)" }}
+                    data-testid="toggle-email-preview"
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    {showEmailPreview ? "Hide Preview" : `Email ${tempsWithEmail.length} Temp${tempsWithEmail.length !== 1 ? "s" : ""}`}
+                  </button>
+                </div>
+                {tempsNoEmail.length > 0 && (
+                  <div className="text-[12px] font-medium px-3 py-2 rounded-lg mb-2" style={{ background: "var(--amber-bg, hsl(var(--accent)))", color: "var(--amber, #D97706)" }} data-testid="email-no-email-warning">
+                    <AlertTriangle className="w-3.5 h-3.5 inline mr-1" />
+                    {tempsNoEmail.length} worker{tempsNoEmail.length !== 1 ? "s have" : " has"} no email — add contact info first: {tempsNoEmail.map(t => t.worker.name).join(", ")}
+                  </div>
+                )}
+                {showEmailPreview && (
+                  <div className="space-y-1.5" data-testid="email-preview-list">
+                    {tempsWithEmail.length === 0 ? (
+                      <div className="text-xs text-center py-3" style={{ color: "hsl(var(--muted-foreground))" }}>No Temp workers with email to notify</div>
+                    ) : (
+                      tempsWithEmail.map(({ worker, slot }) => (
+                        <div key={worker.id} className="flex items-center gap-3 px-3 py-2 rounded-lg border text-[12px]" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}>
+                          <Mail className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--pfg-steel)" }} />
+                          <div className="flex-1 min-w-0">
+                            <span className="font-semibold text-pfg-navy">{worker.name}</span>
+                            <span className="ml-2" style={{ color: "var(--pfg-steel)" }}>{worker.personalEmail}</span>
+                          </div>
+                          <span className="text-[11px] shrink-0" style={{ color: "var(--pfg-steel)" }}>{slot.role} · {slot.startDate} → {slot.endDate}</span>
+                        </div>
+                      ))
+                    )}
+                    <div className="text-[11px] mt-1" style={{ color: "var(--pfg-steel)" }}>
+                      Emails will be sent after project creation in the next step.
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -1134,7 +1229,7 @@ function EditProjectModal({
   // ── Role Planning tab state ──
   const existingSlots = allRoleSlots.filter((s) => s.projectId === card.project.id);
   const [roleSlotEdits, setRoleSlotEdits] = useState<RoleSlotDraft[]>(
-    existingSlots.map((s, i) => ({
+    existingSlots.map((s) => ({
       key: -(s.id), // negative keys for existing
       role: s.role,
       startDate: s.startDate,
@@ -1145,6 +1240,8 @@ function EditProjectModal({
   );
   const [nextRoleKey, setNextRoleKey] = useState(1);
   const [deletedSlotIds, setDeletedSlotIds] = useState<number[]>([]);
+  const [slotSaving, setSlotSaving] = useState<number | null>(null);
+  const [slotConflicts, setSlotConflicts] = useState<Record<number, string[]>>({});
 
   const addEditRoleSlot = () => {
     setRoleSlotEdits((prev) => [
@@ -1154,13 +1251,52 @@ function EditProjectModal({
     setNextRoleKey((k) => k + 1);
   };
 
+  // Save existing role slot changes via PATCH and check assignment conflicts
+  const saveEditSlot = async (key: number) => {
+    if (key >= 0) return; // new slots saved at final save
+    const slotId = Math.abs(key);
+    const slot = roleSlotEdits.find(s => s.key === key);
+    if (!slot) return;
+    setSlotSaving(key);
+    try {
+      await apiRequest("PATCH", `/api/role-slots/${slotId}`, {
+        role: slot.role,
+        startDate: slot.startDate,
+        endDate: slot.endDate,
+        quantity: slot.quantity,
+        shift: slot.shift,
+      });
+      // Check for assignment conflicts with new dates
+      const slotAssignments = card.members.filter(m => m.assignment.roleSlotId === slotId || (
+        // Legacy: match by role if no roleSlotId
+        !m.assignment.roleSlotId && m.assignment.role === slot.role
+      ));
+      const conflicting = slotAssignments.filter(m => {
+        const aStart = m.assignment.startDate;
+        const aEnd = m.assignment.endDate;
+        if (!aStart || !aEnd) return false;
+        return aStart < slot.startDate || aEnd > slot.endDate;
+      }).map(m => m.worker.name);
+      if (conflicting.length > 0) {
+        setSlotConflicts(prev => ({ ...prev, [key]: conflicting }));
+      } else {
+        setSlotConflicts(prev => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+      }
+      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+    } catch { /* silent */ }
+    setSlotSaving(null);
+  };
+
   const updateEditSlot = (key: number, field: keyof RoleSlotDraft, value: string | number) => {
     setRoleSlotEdits((prev) => prev.map((s) => (s.key === key ? { ...s, [field]: value } : s)));
   };
 
   const removeEditSlot = (key: number) => {
     if (key < 0) {
-      // Existing slot — mark for deletion
       const slotId = Math.abs(key);
       setDeletedSlotIds((prev) => [...prev, slotId]);
     }
@@ -1169,9 +1305,12 @@ function EditProjectModal({
 
   // ── Team tab state ──
   const [removedIds, setRemovedIds] = useState<Set<number>>(new Set());
-  const [additions, setAdditions] = useState<{ workerId: number; task: string; shift: string }[]>([]);
-  const [showAddPanel, setShowAddPanel] = useState(false);
-  const [addSearch, setAddSearch] = useState("");
+  // Role-slot-based additions: map from role slot key -> worker ids
+  const [slotAdditions, setSlotAdditions] = useState<Record<number, number[]>>({});
+  // Per-slot search/filter state for edit modal
+  const [editSlotSearch, setEditSlotSearch] = useState<Record<number, string>>({});
+  const [editSlotFteOnly, setEditSlotFteOnly] = useState<Record<number, boolean>>({});
+  const [editExpandedWorkers, setEditExpandedWorkers] = useState<Set<number>>(new Set());
 
   const handleRemove = (assignmentId: number) => {
     setRemovedIds((prev) => new Set(prev).add(assignmentId));
@@ -1185,47 +1324,106 @@ function EditProjectModal({
     });
   };
 
-  const handleAddWorker = (workerId: number) => {
-    if (additions.some((a) => a.workerId === workerId)) return;
-    setAdditions((prev) => [...prev, { workerId, task: "", shift: "Day" }]);
-  };
-
-  const handleRemoveAddition = (workerId: number) => {
-    setAdditions((prev) => prev.filter((a) => a.workerId !== workerId));
-  };
-
-  const currentMemberWorkerIds = new Set(
-    card.members.filter((m) => !removedIds.has(m.assignment.id)).map((m) => m.worker.id)
-  );
-  const additionWorkerIds = new Set(additions.map((a) => a.workerId));
-
-  const availableToAdd = useMemo(() => {
-    return allWorkers.filter((w) => {
-      if (currentMemberWorkerIds.has(w.id) && !removedIds.has(
-        card.members.find((m) => m.worker.id === w.id)?.assignment.id ?? -1
-      )) return false;
-      if (additionWorkerIds.has(w.id)) return false;
-      if (addSearch) {
-        const q = addSearch.toLowerCase();
-        if (!w.name.toLowerCase().includes(q) && !w.role.toLowerCase().includes(q)) return false;
-      }
-      return true;
-    }).sort((a, b) => {
-      // FTE first
-      if (a.status !== b.status) return a.status === "FTE" ? -1 : 1;
-      // OEM match
-      const oemMatch = editOem && editEquipment ? `${editOem} - ${editEquipment}` : null;
-      if (oemMatch) {
-        const aMatch = a.oemExperience.includes(oemMatch) ? 0 : 1;
-        const bMatch = b.oemExperience.includes(oemMatch) ? 0 : 1;
-        if (aMatch !== bMatch) return aMatch - bMatch;
-      }
-      // Lowest utilisation
-      return calcUtilisation(a.assignments).pct - calcUtilisation(b.assignments).pct;
+  // Get workers assigned to a role slot (existing team members)
+  const getSlotMembers = (slotKey: number) => {
+    const slotId = slotKey < 0 ? Math.abs(slotKey) : undefined;
+    const slot = roleSlotEdits.find(s => s.key === slotKey);
+    if (!slot) return [];
+    return card.members.filter(m => {
+      if (slotId && m.assignment.roleSlotId === slotId) return true;
+      // Legacy match by role if no roleSlotId
+      if (!m.assignment.roleSlotId && slotId && m.assignment.role === slot.role) return true;
+      return false;
     });
-  }, [allWorkers, currentMemberWorkerIds, additionWorkerIds, addSearch, removedIds]);
+  };
 
-  const activeCount = card.members.filter((m) => !removedIds.has(m.assignment.id)).length + additions.length;
+  // Get unmatched members (those not associated with any current role slot)
+  const unmatchedMembers = useMemo(() => {
+    const slotIds = new Set(existingSlots.map(s => s.id));
+    const slotRoles = new Set(roleSlotEdits.map(s => s.role));
+    return card.members.filter(m => {
+      if (m.assignment.roleSlotId && slotIds.has(m.assignment.roleSlotId)) return false;
+      if (!m.assignment.roleSlotId && m.assignment.role && slotRoles.has(m.assignment.role)) return false;
+      return true;
+    });
+  }, [card.members, existingSlots, roleSlotEdits]);
+
+  // Available workers for a role slot in edit modal
+  function getEditAvailableWorkers(slotKey: number): { filtered: DashboardWorker[]; total: number } {
+    const slot = roleSlotEdits.find(s => s.key === slotKey);
+    if (!slot) return { filtered: [], total: 0 };
+
+    // Worker IDs already on the project (not removed)
+    const projectWorkerIds = new Set(
+      card.members.filter(m => !removedIds.has(m.assignment.id)).map(m => m.worker.id)
+    );
+    // Worker IDs added in this session across all slots
+    const allAddedIds = new Set<number>();
+    for (const ids of Object.values(slotAdditions)) {
+      for (const id of ids) allAddedIds.add(id);
+    }
+
+    const oemMatch = editOem && editEquipment ? `${editOem} - ${editEquipment}` : null;
+
+    const base = allWorkers.filter(w => {
+      // Already on project
+      if (projectWorkerIds.has(w.id)) return false;
+      // Already added to another slot in edit session
+      if (allAddedIds.has(w.id)) return false;
+      // Check date availability (exclude this project's assignments)
+      if (!workerIsAvailable(w, slot.startDate, slot.endDate, card.project.id)) return false;
+      return true;
+    });
+    const total = base.length;
+
+    const searchTerm = (editSlotSearch[slotKey] || "").toLowerCase();
+    const fteOnly = editSlotFteOnly[slotKey] || false;
+
+    const filtered = base
+      .filter(w => {
+        if (searchTerm && !w.name.toLowerCase().includes(searchTerm)) return false;
+        if (fteOnly && w.status !== "FTE") return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const statusOrder = (s: string) => (s === "FTE" ? 0 : 1);
+        const sd = statusOrder(a.status) - statusOrder(b.status);
+        if (sd !== 0) return sd;
+        if (oemMatch) {
+          const aMatch = a.oemExperience.includes(oemMatch) ? 0 : 1;
+          const bMatch = b.oemExperience.includes(oemMatch) ? 0 : 1;
+          if (aMatch !== bMatch) return aMatch - bMatch;
+        }
+        return calcUtilisation(a.assignments).pct - calcUtilisation(b.assignments).pct;
+      });
+
+    return { filtered, total };
+  }
+
+  function toggleEditExpandedWorker(wid: number) {
+    setEditExpandedWorkers(prev => {
+      const next = new Set(prev);
+      if (next.has(wid)) next.delete(wid); else next.add(wid);
+      return next;
+    });
+  }
+
+  function assignWorkerToEditSlot(slotKey: number, workerId: number) {
+    setSlotAdditions(prev => ({
+      ...prev,
+      [slotKey]: [...(prev[slotKey] ?? []), workerId],
+    }));
+  }
+
+  function unassignWorkerFromEditSlot(slotKey: number, workerId: number) {
+    setSlotAdditions(prev => ({
+      ...prev,
+      [slotKey]: (prev[slotKey] ?? []).filter(id => id !== workerId),
+    }));
+  }
+
+  const activeCount = card.members.filter((m) => !removedIds.has(m.assignment.id)).length +
+    Object.values(slotAdditions).reduce((sum, ids) => sum + ids.length, 0);
 
   // ── Track changes ──
   const detailsChanged =
@@ -1241,7 +1439,7 @@ function EditProjectModal({
     editNotes !== (card.project.notes || "");
 
   const rolesChanged = deletedSlotIds.length > 0 || roleSlotEdits.some((s) => s.key > 0);
-  const teamChanged = removedIds.size > 0 || additions.length > 0;
+  const teamChanged = removedIds.size > 0 || Object.values(slotAdditions).some(ids => ids.length > 0);
   const hasChanges = detailsChanged || rolesChanged || teamChanged;
 
   // ── Save handler ──
@@ -1270,10 +1468,11 @@ function EditProjectModal({
         await apiRequest("DELETE", `/api/role-slots/${slotId}`);
       }
 
-      // Create new role slots (key > 0)
+      // Create new role slots (key > 0) and capture IDs
+      const newSlotIdMap: Record<number, number> = {};
       for (const slot of roleSlotEdits) {
         if (slot.key > 0) {
-          await apiRequest("POST", "/api/role-slots", {
+          const slotRes = await apiRequest("POST", "/api/role-slots", {
             projectId: card.project.id,
             role: slot.role,
             startDate: slot.startDate,
@@ -1281,6 +1480,8 @@ function EditProjectModal({
             quantity: slot.quantity,
             shift: slot.shift,
           });
+          const created = await slotRes.json();
+          newSlotIdMap[slot.key] = created.id;
         }
       }
 
@@ -1289,17 +1490,28 @@ function EditProjectModal({
         await apiRequest("DELETE", `/api/assignments/${id}`);
       }
 
-      // Process team additions
-      for (const add of additions) {
-        await apiRequest("POST", "/api/assignments", {
-          workerId: add.workerId,
-          projectId: card.project.id,
-          task: add.task || null,
-          shift: add.shift,
-          startDate: editStart,
-          endDate: editEnd,
-          status: "active",
-        });
+      // Process team additions (role-slot-based)
+      for (const slot of roleSlotEdits) {
+        const addedWorkerIds = slotAdditions[slot.key] ?? [];
+        if (addedWorkerIds.length === 0) continue;
+        // For existing slots (key < 0), use their server ID
+        const roleSlotId = slot.key < 0 ? Math.abs(slot.key) : (newSlotIdMap[slot.key] ?? null);
+        const durationDays = slot.startDate && slot.endDate
+          ? Math.max(1, Math.ceil((new Date(slot.endDate).getTime() - new Date(slot.startDate).getTime()) / 86400000))
+          : null;
+        for (const wid of addedWorkerIds) {
+          await apiRequest("POST", "/api/assignments", {
+            workerId: wid,
+            projectId: card.project.id,
+            roleSlotId,
+            role: slot.role,
+            shift: slot.shift,
+            startDate: slot.startDate,
+            endDate: slot.endDate,
+            duration: durationDays,
+            status: "active",
+          });
+        }
       }
 
       await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
@@ -1500,31 +1712,44 @@ function EditProjectModal({
                   </thead>
                   <tbody>
                     {roleSlotEdits.map((slot) => (
-                      <tr key={slot.key} style={{ borderBottom: "1px solid hsl(var(--border))" }}>
-                        <td className="px-3 py-1.5">
+                      <tr key={slot.key}>
+                        <td className="px-3 py-1.5" style={{ borderBottom: "1px solid hsl(var(--border))" }}>
                           <select className="text-[13px] px-2 py-1 rounded border w-full" style={inputStyle} value={slot.role} onChange={(e) => updateEditSlot(slot.key, "role", e.target.value)} data-testid={`edit-slot-role-${slot.key}`}>
                             {PROJECT_ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
                           </select>
                         </td>
-                        <td className="px-3 py-1.5">
+                        <td className="px-3 py-1.5" style={{ borderBottom: "1px solid hsl(var(--border))" }}>
                           <input type="date" className="text-[13px] px-2 py-1 rounded border" style={inputStyle} value={slot.startDate} onChange={(e) => updateEditSlot(slot.key, "startDate", e.target.value)} data-testid={`edit-slot-start-${slot.key}`} />
                         </td>
-                        <td className="px-3 py-1.5">
+                        <td className="px-3 py-1.5" style={{ borderBottom: "1px solid hsl(var(--border))" }}>
                           <input type="date" className="text-[13px] px-2 py-1 rounded border" style={inputStyle} value={slot.endDate} onChange={(e) => updateEditSlot(slot.key, "endDate", e.target.value)} data-testid={`edit-slot-end-${slot.key}`} />
                         </td>
-                        <td className="px-3 py-1.5">
+                        <td className="px-3 py-1.5" style={{ borderBottom: "1px solid hsl(var(--border))" }}>
                           <input type="number" min={1} max={50} className="text-[13px] px-2 py-1 rounded border w-16 tabular-nums" style={inputStyle} value={slot.quantity} onChange={(e) => updateEditSlot(slot.key, "quantity", parseInt(e.target.value) || 1)} data-testid={`edit-slot-qty-${slot.key}`} />
                         </td>
-                        <td className="px-3 py-1.5">
+                        <td className="px-3 py-1.5" style={{ borderBottom: "1px solid hsl(var(--border))" }}>
                           <select className="text-[13px] px-2 py-1 rounded border" style={inputStyle} value={slot.shift} onChange={(e) => updateEditSlot(slot.key, "shift", e.target.value)} data-testid={`edit-slot-shift-${slot.key}`}>
                             <option value="Day">Day</option>
                             <option value="Night">Night</option>
                           </select>
                         </td>
-                        <td className="px-3 py-1.5 text-center">
-                          <button onClick={() => removeEditSlot(slot.key)} className="p-1 rounded hover:bg-[var(--red-bg)]" data-testid={`edit-slot-delete-${slot.key}`}>
-                            <Trash2 className="w-3.5 h-3.5" style={{ color: "var(--red)" }} />
-                          </button>
+                        <td className="px-3 py-1.5 text-center" style={{ borderBottom: "1px solid hsl(var(--border))" }}>
+                          <div className="flex items-center gap-1 justify-center">
+                            {slot.key < 0 && (
+                              <button
+                                onClick={() => saveEditSlot(slot.key)}
+                                disabled={slotSaving === slot.key}
+                                className="p-1 rounded hover:bg-[var(--green-bg)]"
+                                title="Save changes to this role slot"
+                                data-testid={`edit-slot-save-${slot.key}`}
+                              >
+                                {slotSaving === slot.key ? <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: "var(--pfg-steel)" }} /> : <Save className="w-3.5 h-3.5" style={{ color: "var(--green)" }} />}
+                              </button>
+                            )}
+                            <button onClick={() => removeEditSlot(slot.key)} className="p-1 rounded hover:bg-[var(--red-bg)]" data-testid={`edit-slot-delete-${slot.key}`}>
+                              <Trash2 className="w-3.5 h-3.5" style={{ color: "var(--red)" }} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1532,195 +1757,332 @@ function EditProjectModal({
                 </table>
               </div>
             )}
+            {/* Conflict warnings */}
+            {Object.keys(slotConflicts).length > 0 && (
+              <div className="mt-3 space-y-1">
+                {Object.entries(slotConflicts).map(([key, names]) => (
+                  <div key={key} className="flex items-start gap-2 text-[12px] font-medium px-3 py-2 rounded-lg" style={{ background: "var(--amber-bg, hsl(var(--accent)))", color: "var(--amber, #D97706)" }} data-testid={`slot-conflict-${key}`}>
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <span>Warning: {names.join(", ")} {names.length === 1 ? "is" : "are"} assigned outside these new dates. Update their assignment dates in the Team tab.</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
-        {/* Team Tab */}
+        {/* Team Tab — Role-slot-based assignment */}
         {activeTab === "team" && (
           <div>
-            {/* Current Team */}
-            <div className="mb-5">
-              <div className="flex items-center justify-between mb-3">
-                <div className="text-sm font-bold text-pfg-navy font-display flex items-center gap-2">
-                  Team Members
-                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "hsl(var(--accent))", color: "#8B6E00" }}>
-                    {activeCount}
-                  </span>
-                </div>
-                {editEnd && card.members.some(m => !removedIds.has(m.assignment.id) && m.assignment.endDate && m.assignment.endDate < editEnd) && (
-                  <button
-                    onClick={async () => {
-                      if (!confirm(`Extend all assignments to ${editEnd}?`)) return;
-                      for (const m of card.members) {
-                        if (!removedIds.has(m.assignment.id) && m.assignment.endDate && m.assignment.endDate < editEnd) {
-                          await apiRequest("PATCH", `/api/assignments/${m.assignment.id}`, { endDate: editEnd });
-                        }
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-sm font-bold text-pfg-navy font-display flex items-center gap-2">
+                Team Members
+                <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "hsl(var(--accent))", color: "#8B6E00" }}>
+                  {activeCount}
+                </span>
+              </div>
+              {editEnd && card.members.some(m => !removedIds.has(m.assignment.id) && m.assignment.endDate && m.assignment.endDate < editEnd) && (
+                <button
+                  onClick={async () => {
+                    if (!confirm(`Extend all assignments to ${editEnd}?`)) return;
+                    for (const m of card.members) {
+                      if (!removedIds.has(m.assignment.id) && m.assignment.endDate && m.assignment.endDate < editEnd) {
+                        await apiRequest("PATCH", `/api/assignments/${m.assignment.id}`, { endDate: editEnd });
                       }
-                      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
-                    }}
-                    className="text-xs font-semibold px-3 py-1.5 rounded-lg border"
-                    style={{ borderColor: "var(--pfg-yellow)", color: "var(--pfg-navy)" }}
-                    data-testid="extend-all-assignments">
-                    Extend All to {editEnd}
-                  </button>
-                )}
-              </div>
-
-              <div className="space-y-1">
-                {card.members.map((m) => {
-                  const isRemoved = removedIds.has(m.assignment.id);
-                  return (
-                    <div
-                      key={m.assignment.id}
-                      className="flex items-center gap-3 px-3.5 py-2.5 rounded-lg border transition-colors"
-                      style={{
-                        borderColor: "hsl(var(--border))",
-                        opacity: isRemoved ? 0.45 : 1,
-                        background: isRemoved ? "hsl(var(--muted))" : undefined,
-                        textDecoration: isRemoved ? "line-through" : undefined,
-                      }}
-                      data-testid={`member-row-${m.assignment.id}`}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[13px] font-semibold text-pfg-navy">{m.worker.name}{m.worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>
-                            {m.assignment.role || m.worker.role} · {m.assignment.startDate || "—"} →
-                          </span>
-                          <input
-                            type="date"
-                            value={m.assignment.endDate || ""}
-                            onChange={async (e) => {
-                              try {
-                                await apiRequest("PATCH", `/api/assignments/${m.assignment.id}`, { endDate: e.target.value });
-                                await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
-                              } catch (err) { /* silent */ }
-                            }}
-                            className="text-[11px] px-1.5 py-0.5 border rounded"
-                            style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--background))", width: "120px" }}
-                            data-testid={`assignment-end-date-${m.assignment.id}`}
-                          />
-                          {m.assignment.endDate && editEnd && m.assignment.endDate < editEnd && (
-                            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: "var(--amber-bg, hsl(var(--accent)))", color: "var(--amber, #D97706)" }}>ends early</span>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <ShiftBadge shift={m.assignment.shift} />
-                        <StatusBadge status={m.worker.status} />
-                        {isRemoved ? (
-                          <button
-                            onClick={() => handleUndo(m.assignment.id)}
-                            className="ml-1 p-1 rounded hover:bg-[var(--green-bg)]"
-                            title="Undo removal"
-                            data-testid={`undo-remove-${m.assignment.id}`}
-                          >
-                            <Undo2 className="w-3.5 h-3.5" style={{ color: "var(--green)" }} />
-                          </button>
-                        ) : (
-                          <button
-                            onClick={() => handleRemove(m.assignment.id)}
-                            className="ml-1 p-1 rounded hover:bg-[var(--red-bg)]"
-                            title="Remove from project"
-                            data-testid={`remove-member-${m.assignment.id}`}
-                          >
-                            <X className="w-3.5 h-3.5" style={{ color: "var(--red)" }} />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {/* Newly added workers */}
-                {additions.map((add) => {
-                  const worker = allWorkers.find((w) => w.id === add.workerId);
-                  if (!worker) return null;
-                  return (
-                    <div
-                      key={`add-${add.workerId}`}
-                      className="flex items-center gap-3 px-3.5 py-2.5 rounded-lg border"
-                      style={{ borderColor: "var(--green)", background: "var(--green-bg)" }}
-                      data-testid={`addition-row-${add.workerId}`}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="text-[13px] font-semibold text-pfg-navy">{worker.name}{worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
-                        <div className="text-[11px] mt-0.5" style={{ color: "var(--pfg-steel)" }}>
-                          {worker.role} · New addition
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <StatusBadge status={worker.status} />
-                        <button
-                          onClick={() => handleRemoveAddition(add.workerId)}
-                          className="ml-1 p-1 rounded hover:bg-[var(--red-bg)]"
-                          data-testid={`remove-addition-${add.workerId}`}
-                        >
-                          <X className="w-3.5 h-3.5" style={{ color: "var(--red)" }} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Add Person Panel */}
-            <div>
-              <button
-                onClick={() => setShowAddPanel(!showAddPanel)}
-                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border mb-3"
-                style={{ borderColor: "var(--pfg-yellow)", color: "var(--pfg-navy)" }}
-                data-testid="toggle-add-panel"
-              >
-                {showAddPanel ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                Add Person
-              </button>
-
-              {showAddPanel && (
-                <div className="rounded-lg border p-3" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--muted))" }}>
-                  <div className="relative mb-3">
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: "hsl(var(--muted-foreground))" }} />
-                    <input
-                      type="text"
-                      placeholder="Search available workers..."
-                      value={addSearch}
-                      onChange={(e) => setAddSearch(e.target.value)}
-                      className="w-full pl-8 pr-3 py-2 text-[13px] rounded-lg border"
-                      style={inputStyle}
-                      data-testid="add-person-search"
-                    />
-                  </div>
-
-                  <div className="max-h-[250px] overflow-y-auto space-y-0.5">
-                    {availableToAdd.length === 0 ? (
-                      <div className="text-center py-6 text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>
-                        No available workers found
-                      </div>
-                    ) : (
-                      availableToAdd.map((w) => (
-                        <div
-                          key={w.id}
-                          className="flex items-center gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-colors hover:border-[var(--pfg-yellow)] hover:bg-[hsl(var(--accent))]"
-                          style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}
-                          onClick={() => handleAddWorker(w.id)}
-                          data-testid={`add-worker-${w.id}`}
-                        >
-                          <div className="flex-1 min-w-0">
-                            <div className="text-[13px] font-semibold text-pfg-navy">{w.name}{w.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
-                            <div className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>{w.role} · {w.nationality || "—"}</div>
-                          </div>
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <StatusBadge status={w.status} />
-                            <Plus className="w-4 h-4" style={{ color: "var(--pfg-yellow)" }} />
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
+                    }
+                    await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+                  }}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-lg border"
+                  style={{ borderColor: "var(--pfg-yellow)", color: "var(--pfg-navy)" }}
+                  data-testid="extend-all-assignments">
+                  Extend All to {editEnd}
+                </button>
               )}
             </div>
+
+            {roleSlotEdits.length === 0 ? (
+              <div className="text-center py-8 rounded-lg border" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--muted))" }} data-testid="no-slots-message">
+                <div className="text-sm font-medium text-pfg-navy mb-1">No role slots defined</div>
+                <div className="text-[12px]" style={{ color: "var(--pfg-steel)" }}>Go to the Role Planning tab to define role slots first.</div>
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {roleSlotEdits.map((slot) => {
+                  const slotMembers = getSlotMembers(slot.key);
+                  const addedWorkerIds = slotAdditions[slot.key] ?? [];
+                  const filledCount = slotMembers.filter(m => !removedIds.has(m.assignment.id)).length + addedWorkerIds.length;
+                  const { filtered: available, total: totalAvailable } = getEditAvailableWorkers(slot.key);
+                  const isFteOnly = editSlotFteOnly[slot.key] || false;
+                  const searchVal = editSlotSearch[slot.key] || "";
+                  const oemMatch = editOem && editEquipment ? `${editOem} - ${editEquipment}` : null;
+
+                  return (
+                    <div key={slot.key} className="rounded-lg border" style={{ borderColor: "hsl(var(--border))" }} data-testid={`edit-team-slot-${slot.key}`}>
+                      {/* Slot header */}
+                      <div className="px-4 py-3 text-[13px] font-semibold" style={{ background: "hsl(var(--muted))", borderBottom: "1px solid hsl(var(--border))" }}>
+                        <span className="text-pfg-navy">{slot.role}</span>
+                        <span className="mx-1.5" style={{ color: "var(--pfg-steel)" }}>&mdash;</span>
+                        <span style={{ color: "var(--pfg-steel)" }}>{slot.shift} shift</span>
+                        <span className="mx-1.5" style={{ color: "var(--pfg-steel)" }}>&mdash;</span>
+                        <span style={{ color: "var(--pfg-steel)" }}>{slot.startDate} to {slot.endDate}</span>
+                        <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: filledCount >= slot.quantity ? "var(--green-bg)" : "hsl(var(--accent))", color: filledCount >= slot.quantity ? "var(--green)" : "#8B6E00" }}>
+                          {filledCount}/{slot.quantity}
+                        </span>
+                      </div>
+
+                      {/* Existing members for this slot */}
+                      {slotMembers.length > 0 && (
+                        <div className="px-4 py-2 space-y-1">
+                          {slotMembers.map((m) => {
+                            const isRemoved = removedIds.has(m.assignment.id);
+                            return (
+                              <div
+                                key={m.assignment.id}
+                                className="flex items-center gap-3 px-3 py-2 rounded-lg border transition-colors"
+                                style={{
+                                  borderColor: "hsl(var(--border))",
+                                  opacity: isRemoved ? 0.45 : 1,
+                                  background: isRemoved ? "hsl(var(--muted))" : undefined,
+                                  textDecoration: isRemoved ? "line-through" : undefined,
+                                }}
+                                data-testid={`member-row-${m.assignment.id}`}
+                              >
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-[13px] font-semibold text-pfg-navy">{m.worker.name}{m.worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
+                                  <div className="flex items-center gap-2 mt-0.5">
+                                    <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>
+                                      {m.assignment.role || m.worker.role} · {m.assignment.startDate || "—"} →
+                                    </span>
+                                    <input
+                                      type="date"
+                                      value={m.assignment.endDate || ""}
+                                      onChange={async (e) => {
+                                        try {
+                                          await apiRequest("PATCH", `/api/assignments/${m.assignment.id}`, { endDate: e.target.value });
+                                          await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+                                        } catch { /* silent */ }
+                                      }}
+                                      className="text-[11px] px-1.5 py-0.5 border rounded"
+                                      style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--background))", width: "120px" }}
+                                      data-testid={`assignment-end-date-${m.assignment.id}`}
+                                    />
+                                    {m.assignment.endDate && editEnd && m.assignment.endDate < editEnd && (
+                                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded" style={{ background: "var(--amber-bg, hsl(var(--accent)))", color: "var(--amber, #D97706)" }}>ends early</span>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <ShiftBadge shift={m.assignment.shift} />
+                                  <StatusBadge status={m.worker.status} />
+                                  {isRemoved ? (
+                                    <button onClick={() => handleUndo(m.assignment.id)} className="ml-1 p-1 rounded hover:bg-[var(--green-bg)]" title="Undo removal" data-testid={`undo-remove-${m.assignment.id}`}>
+                                      <Undo2 className="w-3.5 h-3.5" style={{ color: "var(--green)" }} />
+                                    </button>
+                                  ) : (
+                                    <button onClick={() => handleRemove(m.assignment.id)} className="ml-1 p-1 rounded hover:bg-[var(--red-bg)]" title="Remove from project" data-testid={`remove-member-${m.assignment.id}`}>
+                                      <X className="w-3.5 h-3.5" style={{ color: "var(--red)" }} />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Newly added workers for this slot */}
+                      {addedWorkerIds.length > 0 && (
+                        <div className="px-4 py-2 space-y-1">
+                          {addedWorkerIds.map((wid) => {
+                            const worker = allWorkers.find(w => w.id === wid);
+                            if (!worker) return null;
+                            return (
+                              <div key={`add-${wid}`} className="flex items-center gap-3 px-3 py-2 rounded-lg border" style={{ borderColor: "var(--green)", background: "var(--green-bg)" }} data-testid={`edit-addition-${slot.key}-${wid}`}>
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-[13px] font-semibold text-pfg-navy">{worker.name}{worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
+                                  <div className="text-[11px] mt-0.5" style={{ color: "var(--pfg-steel)" }}>{worker.role} · New addition</div>
+                                </div>
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <StatusBadge status={worker.status} />
+                                  <button onClick={() => unassignWorkerFromEditSlot(slot.key, wid)} className="ml-1 p-1 rounded hover:bg-[var(--red-bg)]" data-testid={`edit-unassign-${slot.key}-${wid}`}>
+                                    <X className="w-3.5 h-3.5" style={{ color: "var(--red)" }} />
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Available workers search/filter panel */}
+                      {filledCount < slot.quantity && (
+                        <div className="px-4 py-2">
+                          <div className="flex items-center gap-2 mb-2">
+                            <div className="relative flex-1">
+                              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: "hsl(var(--muted-foreground))" }} />
+                              <input
+                                type="text"
+                                placeholder="Search by name..."
+                                value={searchVal}
+                                onChange={(e) => setEditSlotSearch(prev => ({ ...prev, [slot.key]: e.target.value }))}
+                                className="w-full pl-8 pr-3 py-1.5 text-[12px] rounded-lg border"
+                                style={inputStyle}
+                                data-testid={`edit-slot-search-${slot.key}`}
+                              />
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={() => setEditSlotFteOnly(prev => ({ ...prev, [slot.key]: false }))}
+                                className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border"
+                                style={{
+                                  borderColor: !isFteOnly ? "var(--pfg-yellow)" : "hsl(var(--border))",
+                                  background: !isFteOnly ? "hsl(var(--accent))" : "transparent",
+                                  color: !isFteOnly ? "var(--pfg-navy)" : "hsl(var(--muted-foreground))",
+                                }}
+                                data-testid={`edit-filter-all-${slot.key}`}
+                              >All</button>
+                              <button
+                                onClick={() => setEditSlotFteOnly(prev => ({ ...prev, [slot.key]: true }))}
+                                className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border"
+                                style={{
+                                  borderColor: isFteOnly ? "var(--pfg-yellow)" : "hsl(var(--border))",
+                                  background: isFteOnly ? "hsl(var(--accent))" : "transparent",
+                                  color: isFteOnly ? "var(--pfg-navy)" : "hsl(var(--muted-foreground))",
+                                }}
+                                data-testid={`edit-filter-fte-${slot.key}`}
+                              >FTE only</button>
+                            </div>
+                            <span className="text-[11px] font-medium shrink-0" style={{ color: "var(--pfg-steel)" }}>
+                              {available.length} of {totalAvailable} workers
+                            </span>
+                          </div>
+                          <div className="max-h-[200px] overflow-y-auto space-y-0.5">
+                            {available.length === 0 ? (
+                              <div className="text-center py-4 text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>No available workers{searchVal || isFteOnly ? " matching filters" : " without date conflicts"}</div>
+                            ) : (
+                              available.map((w) => {
+                                const util = calcUtilisation(w.assignments);
+                                const hasOemMatch = oemMatch ? w.oemExperience.includes(oemMatch) : false;
+                                const isExpanded = editExpandedWorkers.has(w.id);
+                                const activeAssignment = w.assignments.find(a => a.status === "active");
+                                return (
+                                  <div key={w.id}>
+                                    <div
+                                      className="flex items-center gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-colors hover:border-[var(--pfg-yellow)] hover:bg-[hsl(var(--accent))]"
+                                      style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}
+                                      data-testid={`edit-available-${slot.key}-${w.id}`}
+                                    >
+                                      <div className="flex-1 min-w-0" onClick={() => assignWorkerToEditSlot(slot.key, w.id)}>
+                                        <div className="text-[13px] font-semibold text-pfg-navy">{w.name}{w.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
+                                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                          <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>{w.role}</span>
+                                          {w.oemExperience.slice(0, 3).map((exp) => (
+                                            <span key={exp} className={`badge text-[10px] ${exp === oemMatch ? "badge-green" : "badge-grey"}`}>{exp}</span>
+                                          ))}
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-2 shrink-0">
+                                        <span className="text-[11px] tabular-nums font-medium" style={{ color: util.pct > 80 ? "var(--red)" : "var(--pfg-steel)" }}>{util.pct}%</span>
+                                        <StatusBadge status={w.status} />
+                                        {hasOemMatch && <span className="badge badge-green text-[10px]">OEM</span>}
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); toggleEditExpandedWorker(w.id); }}
+                                          className="p-0.5 rounded hover:bg-black/5"
+                                          data-testid={`edit-expand-${slot.key}-${w.id}`}
+                                          title="Preview worker details"
+                                        >
+                                          {isExpanded ? <ChevronUp className="w-3.5 h-3.5" style={{ color: "var(--pfg-steel)" }} /> : <Info className="w-3.5 h-3.5" style={{ color: "var(--pfg-steel)" }} />}
+                                        </button>
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); assignWorkerToEditSlot(slot.key, w.id); }}
+                                          className="p-0.5"
+                                          data-testid={`edit-assign-btn-${slot.key}-${w.id}`}
+                                        >
+                                          <Plus className="w-4 h-4" style={{ color: "var(--pfg-yellow)" }} />
+                                        </button>
+                                      </div>
+                                    </div>
+                                    {isExpanded && (
+                                      <div className="ml-3 mr-3 mb-1 px-3 py-2 rounded-b-lg border border-t-0 text-[12px]" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--muted))" }} data-testid={`edit-preview-${w.id}`}>
+                                        <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+                                          <div><span style={{ color: "var(--pfg-steel)" }}>Status:</span> <StatusBadge status={w.status} /></div>
+                                          <div><span style={{ color: "var(--pfg-steel)" }}>English:</span> <span className="font-medium">{w.englishLevel || "\u2014"}</span></div>
+                                          <div><span style={{ color: "var(--pfg-steel)" }}>Utilisation:</span> <span className="font-medium tabular-nums" style={{ color: util.pct > 80 ? "var(--red)" : undefined }}>{util.pct}%</span></div>
+                                          {activeAssignment && (
+                                            <div><span style={{ color: "var(--pfg-steel)" }}>Current:</span> <span className="font-medium">{activeAssignment.projectCode} &mdash; {activeAssignment.projectName}</span></div>
+                                          )}
+                                        </div>
+                                        {w.oemExperience.length > 0 && (
+                                          <div className="flex flex-wrap gap-1 mt-1.5">
+                                            {w.oemExperience.map((exp) => (
+                                              <span key={exp} className={`badge text-[10px] ${exp === oemMatch ? "badge-green" : "badge-grey"}`}>{exp}</span>
+                                            ))}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {/* Unmatched members (no role slot) */}
+                {unmatchedMembers.length > 0 && (
+                  <div className="rounded-lg border" style={{ borderColor: "hsl(var(--border))" }} data-testid="unmatched-members">
+                    <div className="px-4 py-3 text-[13px] font-semibold" style={{ background: "hsl(var(--muted))", borderBottom: "1px solid hsl(var(--border))" }}>
+                      <span className="text-pfg-navy">Unslotted Members</span>
+                      <span className="ml-2 text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "var(--amber-bg, hsl(var(--accent)))", color: "var(--amber, #D97706)" }}>
+                        {unmatchedMembers.length}
+                      </span>
+                    </div>
+                    <div className="px-4 py-2 space-y-1">
+                      {unmatchedMembers.map((m) => {
+                        const isRemoved = removedIds.has(m.assignment.id);
+                        return (
+                          <div
+                            key={m.assignment.id}
+                            className="flex items-center gap-3 px-3 py-2 rounded-lg border transition-colors"
+                            style={{
+                              borderColor: "hsl(var(--border))",
+                              opacity: isRemoved ? 0.45 : 1,
+                              background: isRemoved ? "hsl(var(--muted))" : undefined,
+                              textDecoration: isRemoved ? "line-through" : undefined,
+                            }}
+                            data-testid={`member-row-${m.assignment.id}`}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="text-[13px] font-semibold text-pfg-navy">{m.worker.name}{m.worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>{m.assignment.role || m.worker.role} · {m.assignment.startDate || "—"} → {m.assignment.endDate || "—"}</span>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <ShiftBadge shift={m.assignment.shift} />
+                              <StatusBadge status={m.worker.status} />
+                              {isRemoved ? (
+                                <button onClick={() => handleUndo(m.assignment.id)} className="ml-1 p-1 rounded hover:bg-[var(--green-bg)]" title="Undo removal" data-testid={`undo-remove-${m.assignment.id}`}>
+                                  <Undo2 className="w-3.5 h-3.5" style={{ color: "var(--green)" }} />
+                                </button>
+                              ) : (
+                                <button onClick={() => handleRemove(m.assignment.id)} className="ml-1 p-1 rounded hover:bg-[var(--red-bg)]" title="Remove from project" data-testid={`remove-member-${m.assignment.id}`}>
+                                  <X className="w-3.5 h-3.5" style={{ color: "var(--red)" }} />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

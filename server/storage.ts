@@ -70,7 +70,9 @@ export interface IStorage {
 
   // Role Slots
   getRoleSlotsByProject(projectId: number): RoleSlot[];
+  getRoleSlot(id: number): RoleSlot | undefined;
   createRoleSlot(data: InsertRoleSlot): RoleSlot;
+  updateRoleSlot(id: number, data: Partial<InsertRoleSlot>): RoleSlot | undefined;
   deleteRoleSlot(id: number): void;
 
   // OEM Types
@@ -175,8 +177,16 @@ export class SqliteStorage implements IStorage {
     return db.select().from(roleSlots).where(eq(roleSlots.projectId, projectId)).all();
   }
 
+  getRoleSlot(id: number): RoleSlot | undefined {
+    return db.select().from(roleSlots).where(eq(roleSlots.id, id)).get();
+  }
+
   createRoleSlot(data: InsertRoleSlot): RoleSlot {
     return db.insert(roleSlots).values(data).returning().get();
+  }
+
+  updateRoleSlot(id: number, data: Partial<InsertRoleSlot>): RoleSlot | undefined {
+    return db.update(roleSlots).set(data).where(eq(roleSlots.id, id)).returning().get();
   }
 
   deleteRoleSlot(id: number): void {

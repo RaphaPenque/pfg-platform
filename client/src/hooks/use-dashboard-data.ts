@@ -44,6 +44,7 @@ export interface DashboardAssignment {
   id: number;
   workerId: number;
   projectId: number;
+  roleSlotId: number | null;
   task: string | null;
   role: string | null;
   shift: string | null;

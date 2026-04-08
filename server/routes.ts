@@ -170,6 +170,59 @@ export function registerRoutes(server: Server, app: Express) {
     res.json({ ...project, team });
   });
 
+  // ===== NOTIFY TEMPS =====
+  app.post("/api/projects/notify-temps", (req, res) => {
+    const { projectId, assignmentIds } = req.body;
+    if (!projectId || !Array.isArray(assignmentIds)) {
+      return res.status(400).json({ error: "projectId and assignmentIds[] required" });
+    }
+    const project = storage.getProject(projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    let sent = 0;
+    let skipped = 0;
+    const noEmail: string[] = [];
+
+    for (const aId of assignmentIds) {
+      const allAssignments = storage.getAssignments();
+      const assignment = allAssignments.find(a => a.id === aId);
+      if (!assignment) { skipped++; continue; }
+
+      const worker = storage.getWorker(assignment.workerId);
+      if (!worker) { skipped++; continue; }
+      if (worker.status !== "Temp") { skipped++; continue; }
+
+      if (!worker.personalEmail) {
+        noEmail.push(worker.name);
+        skipped++;
+        continue;
+      }
+
+      // Log the email that would be sent (Outlook integration wired separately)
+      const firstName = worker.name.split(" ")[0];
+      console.log(`[NOTIFY-TEMP] Would send email to ${worker.personalEmail}:
+Subject: Project Assignment — ${project.name}
+
+Dear ${firstName},
+
+We would like to allocate you to the following project with Powerforce Global.
+
+Project: ${project.name}
+Location: ${project.location || "TBC"}
+Role: ${assignment.role || "TBC"}
+Start Date: ${assignment.startDate || "TBC"}
+End Date: ${assignment.endDate || "TBC"}
+
+If you are available and would be interested in joining us on this project, please reply as soon as possible.
+
+Kind regards,
+Powerforce Global`);
+      sent++;
+    }
+
+    res.json({ sent, skipped, noEmail });
+  });
+
   // ===== ASSIGNMENTS =====
   app.get("/api/assignments", (_req, res) => {
     res.json(storage.getAssignments());
@@ -222,6 +275,12 @@ export function registerRoutes(server: Server, app: Express) {
     if (!parsed.success) return res.status(400).json({ error: parsed.error });
     const slot = storage.createRoleSlot(parsed.data);
     res.status(201).json(slot);
+  });
+
+  app.patch("/api/role-slots/:id", (req, res) => {
+    const slot = storage.updateRoleSlot(parseInt(req.params.id), req.body);
+    if (!slot) return res.status(404).json({ error: "Role slot not found" });
+    res.json(slot);
   });
 
   app.delete("/api/role-slots/:id", (req, res) => {
