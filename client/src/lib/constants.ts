@@ -129,3 +129,4 @@ export function calcUtilisation(assignments: any[]): { days: number; pct: number
   const effectiveDays = Math.max(0, rawDays - mobDemob);
   return { days: effectiveDays, pct: Math.round(effectiveDays / 187 * 100) };
 }
+// Auto-deploy test Wed Apr  8 16:53:59 UTC 2026
