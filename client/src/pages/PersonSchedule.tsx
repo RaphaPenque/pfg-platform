@@ -323,6 +323,7 @@ function PersonRow({
     const color = getProjectColor(a.projectCode);
     const startFrac = a.startDate ? dateToDayFraction(a.startDate) : 0;
     const endFrac = a.endDate ? dateToDayFraction(a.endDate) : 1;
+    const isFlagged = a.status === "flagged";
 
     return {
       assignment: a,
@@ -331,6 +332,7 @@ function PersonRow({
       startFrac,
       endFrac,
       color,
+      isFlagged,
     };
   });
 
@@ -349,6 +351,7 @@ function PersonRow({
         }}
       >
         {worker.name}
+        {worker.assignments.some(a => a.status === "flagged") && <span className="text-[10px] ml-1" style={{ color: "var(--red, #dc2626)" }} title="Flagged assignment" data-testid={`schedule-flagged-${worker.id}`}>&#9888;&#xFE0F;</span>}
         {worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}
       </td>
 
@@ -415,6 +418,7 @@ function PersonRow({
                     borderRadius:
                       isStart && isEnd ? 2 : isStart ? "2px 0 0 2px" : isEnd ? "0 2px 2px 0" : 0,
                     zIndex: 2,
+                    ...(bar.isFlagged ? { border: "1.5px dashed var(--red, #dc2626)", boxSizing: "border-box" as const } : {}),
                   }}
                 >
                   {/* Tooltip */}

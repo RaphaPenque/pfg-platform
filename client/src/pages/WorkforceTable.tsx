@@ -1241,7 +1241,7 @@ export default function WorkforceTable() {
         if (!filterOem.some(o => workerOems.includes(o))) return false;
       }
       if (filterAssigned.length > 0) {
-        const hasActive = w.assignments.some(a => a.status === "active");
+        const hasActive = w.assignments.some(a => a.status === "active" || a.status === "flagged");
         if (filterAssigned.includes("Assigned") && !hasActive) return false;
         if (filterAssigned.includes("Available") && hasActive) return false;
       }
@@ -1281,10 +1281,11 @@ export default function WorkforceTable() {
   // Summary stats
   const totalFte = workers.filter(w => w.status === "FTE").length;
   const totalTemp = workers.filter(w => w.status === "Temp").length;
-  const fteWithActive = workers.filter(w => w.status === "FTE" && w.assignments.some(a => a.status === "active")).length;
+  const isAssigned = (a: DashboardAssignment) => a.status === "active" || a.status === "flagged";
+  const fteWithActive = workers.filter(w => w.status === "FTE" && w.assignments.some(isAssigned)).length;
   const fteUtilPct = totalFte > 0 ? Math.round((fteWithActive / totalFte) * 100) : 0;
-  const availFte = workers.filter(w => w.status === "FTE" && !w.assignments.some(a => a.status === "active")).length;
-  const availTemp = workers.filter(w => w.status === "Temp" && !w.assignments.some(a => a.status === "active")).length;
+  const availFte = workers.filter(w => w.status === "FTE" && !w.assignments.some(isAssigned)).length;
+  const availTemp = workers.filter(w => w.status === "Temp" && !w.assignments.some(isAssigned)).length;
 
   const ccCounts = workers.reduce<Record<string, number>>((acc, w) => {
     const cc = w.status === "FTE" ? (w.costCentre || "Unassigned") : "Temp";
@@ -1379,7 +1380,7 @@ export default function WorkforceTable() {
             onClick={() => {
               const rows = sorted.map(w => {
                 const util = calcUtilisation(w.assignments);
-                const activeAssignment = w.assignments.find(a => a.status === "active");
+                const activeAssignment = w.assignments.find(a => a.status === "active" || a.status === "flagged");
                 return {
                   Name: w.name,
                   Role: w.role,
@@ -1466,7 +1467,8 @@ export default function WorkforceTable() {
               ) : (
                 sorted.map(w => {
                   const isExpanded = expandedId === w.id;
-                  const activeAssignment = w.assignments.find(a => a.status === "active");
+                  const activeAssignment = w.assignments.find(a => a.status === "active" || a.status === "flagged");
+                  const hasFlagged = w.assignments.some(a => a.status === "flagged");
                   return (
                     <Fragment key={w.id}>
                       <tr data-testid={`worker-row-${w.id}`} onClick={() => setExpandedId(isExpanded ? null : w.id)}
@@ -1499,7 +1501,10 @@ export default function WorkforceTable() {
                         <td className="px-2.5 py-2.5"><UtilBar assignments={w.assignments} /></td>
                         <td className="px-2.5 py-2.5 whitespace-nowrap">
                           {activeAssignment ? (
-                            <span className="text-xs font-medium">{activeAssignment.projectCode} — {activeAssignment.projectName}</span>
+                            <span className="text-xs font-medium">
+                              {hasFlagged && <span style={{ color: "var(--red, #dc2626)" }} title="Flagged for review" data-testid={`flagged-badge-${w.id}`}>&#9888;&#xFE0F; </span>}
+                              {activeAssignment.projectCode} — {activeAssignment.projectName}
+                            </span>
                           ) : (
                             <span className="badge badge-green">Available</span>
                           )}

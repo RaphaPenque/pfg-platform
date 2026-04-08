@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
+import { useToast } from "@/hooks/use-toast";
 import { useDashboardData, type DashboardWorker, type DashboardProject, type DashboardAssignment, type DashboardRoleSlot } from "@/hooks/use-dashboard-data";
 import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, OEM_OPTIONS, EQUIPMENT_TYPES, PROJECT_ROLES, COST_CENTRES, CERT_DEFS, calcUtilisation } from "@/lib/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -326,7 +327,7 @@ function workerIsAvailable(
   excludeAssignmentId?: number,
 ): boolean {
   for (const a of worker.assignments) {
-    if (a.status !== "active") continue;
+    if (a.status !== "active" && a.status !== "flagged") continue;
     if (excludeAssignmentId && a.id === excludeAssignmentId) continue;
     if (excludeProjectId && a.projectId === excludeProjectId) continue;
     if (datesOverlap(slotStart, slotEnd, a.startDate, a.endDate)) return false;
@@ -1249,6 +1250,227 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// CONFLICT RESOLUTION MODAL — shown after a role slot date change
+// ═══════════════════════════════════════════════════════════════════
+
+interface ConflictItem {
+  worker: DashboardWorker;
+  thisAssignment: DashboardAssignment;
+  otherAssignment: DashboardAssignment;
+  resolution: "shorten" | "delay" | "flag" | null;
+}
+
+interface ConflictModalState {
+  slotId: number;
+  newStart: string;
+  newEnd: string;
+  projectCode: string;
+  conflicts: ConflictItem[];
+}
+
+function ConflictResolutionModal({
+  data,
+  onResolve,
+  onClose,
+}: {
+  data: ConflictModalState;
+  onResolve: (updated: ConflictItem[]) => void;
+  onClose: () => void;
+}) {
+  const [conflicts, setConflicts] = useState<ConflictItem[]>(data.conflicts);
+  const [saving, setSaving] = useState(false);
+
+  const allResolved = conflicts.every((c) => c.resolution !== null);
+
+  const setResolution = (idx: number, res: "shorten" | "delay" | "flag") => {
+    setConflicts((prev) => prev.map((c, i) => (i === idx ? { ...c, resolution: res } : c)));
+  };
+
+  const handleApply = async () => {
+    if (!allResolved) return;
+    setSaving(true);
+    try {
+      for (const c of conflicts) {
+        if (c.resolution === "shorten") {
+          // End this assignment 1 day before the other project starts
+          const dayBefore = new Date(c.otherAssignment.startDate!);
+          dayBefore.setDate(dayBefore.getDate() - 1);
+          const newEnd = dayBefore.toISOString().split("T")[0];
+          await apiRequest("PATCH", `/api/assignments/${c.thisAssignment.id}`, { startDate: data.newStart, endDate: newEnd });
+        } else if (c.resolution === "delay") {
+          // Delay the other project assignment to start 1 day after this slot ends
+          const dayAfter = new Date(data.newEnd);
+          dayAfter.setDate(dayAfter.getDate() + 1);
+          const newStart = dayAfter.toISOString().split("T")[0];
+          await apiRequest("PATCH", `/api/assignments/${c.otherAssignment.id}`, { startDate: newStart });
+        } else if (c.resolution === "flag") {
+          // Flag this assignment for review
+          await apiRequest("PATCH", `/api/assignments/${c.thisAssignment.id}`, { status: "flagged" });
+        }
+      }
+      onResolve(conflicts);
+    } catch {
+      /* silent */
+    }
+    setSaving(false);
+  };
+
+  // Helper: compute date strings for button labels
+  const shortenDate = (c: ConflictItem) => {
+    const d = new Date(c.otherAssignment.startDate!);
+    d.setDate(d.getDate() - 1);
+    return d.toISOString().split("T")[0];
+  };
+  const delayDate = () => {
+    const d = new Date(data.newEnd);
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split("T")[0];
+  };
+
+  // Simple timeline bar
+  const TimelineBar = ({ c }: { c: ConflictItem }) => {
+    // Compute relative positions for a mini timeline
+    const allDates = [data.newStart, data.newEnd, c.otherAssignment.startDate!, c.otherAssignment.endDate!].map(d => new Date(d).getTime());
+    const min = Math.min(...allDates);
+    const max = Math.max(...allDates);
+    const range = max - min || 1;
+    const pct = (d: string) => ((new Date(d).getTime() - min) / range) * 100;
+
+    const thisLeft = pct(data.newStart);
+    const thisRight = 100 - pct(data.newEnd);
+    const otherLeft = pct(c.otherAssignment.startDate!);
+    const otherRight = 100 - pct(c.otherAssignment.endDate!);
+
+    // Overlap zone
+    const overlapStart = Math.max(new Date(data.newStart).getTime(), new Date(c.otherAssignment.startDate!).getTime());
+    const overlapEnd = Math.min(new Date(data.newEnd).getTime(), new Date(c.otherAssignment.endDate!).getTime());
+    const overlapLeft = ((overlapStart - min) / range) * 100;
+    const overlapRight = 100 - ((overlapEnd - min) / range) * 100;
+
+    return (
+      <div className="relative h-6 rounded" style={{ background: "hsl(var(--muted))" }} data-testid="conflict-timeline">
+        {/* This project bar */}
+        <div className="absolute top-0.5 h-2 rounded-sm" style={{ left: `${thisLeft}%`, right: `${thisRight}%`, background: "var(--pfg-navy, #1A1D23)" }} />
+        {/* Other project bar */}
+        <div className="absolute bottom-0.5 h-2 rounded-sm" style={{ left: `${otherLeft}%`, right: `${otherRight}%`, background: "var(--pfg-steel, #64748B)" }} />
+        {/* Overlap zone */}
+        <div className="absolute top-0 bottom-0 rounded-sm opacity-30" style={{ left: `${overlapLeft}%`, right: `${overlapRight}%`, background: "var(--red, #dc2626)" }} />
+      </div>
+    );
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[300] flex items-center justify-center"
+      style={{ background: "rgba(27,42,74,0.6)", backdropFilter: "blur(2px)" }}
+      data-testid="conflict-resolution-modal"
+    >
+      <div
+        className="rounded-xl overflow-hidden w-[640px] max-w-[95vw] max-h-[85vh] flex flex-col"
+        style={{ background: "hsl(var(--card))", boxShadow: "0 20px 60px rgba(27,42,74,0.3)" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-6 py-4 border-b flex items-center gap-3" style={{ borderColor: "hsl(var(--border))", background: "var(--pfg-navy, #1A1D23)" }}>
+          <AlertTriangle className="w-5 h-5" style={{ color: "var(--pfg-yellow, #F5BD00)" }} />
+          <div>
+            <h2 className="font-display font-bold text-white text-base">Scheduling Conflicts Detected</h2>
+            <p className="text-[12px] text-white/60 mt-0.5">The following workers have overlapping assignments. Choose how to resolve each one.</p>
+          </div>
+        </div>
+
+        {/* Conflict cards */}
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+          {conflicts.map((c, idx) => (
+            <div
+              key={c.thisAssignment.id}
+              className="rounded-lg border overflow-hidden"
+              style={{
+                borderColor: c.resolution ? "var(--green, #16a34a)" : "var(--amber, #D97706)",
+                borderLeftWidth: 3,
+                background: "hsl(var(--card))",
+              }}
+              data-testid={`conflict-card-${c.worker.id}`}
+            >
+              <div className="px-4 py-3">
+                {/* Worker name + status */}
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="font-semibold text-sm text-pfg-navy">{c.worker.name}</span>
+                  <span className={`badge text-[10px] ${c.worker.status === "FTE" ? "badge-navy" : "badge-grey"}`}>{c.worker.status}</span>
+                  {c.resolution && (
+                    <span className="ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full text-white" style={{ background: "var(--green, #16a34a)" }} data-testid={`resolution-badge-${c.worker.id}`}>
+                      {c.resolution === "shorten" ? "Shortened" : c.resolution === "delay" ? "Delayed" : "Flagged"}
+                    </span>
+                  )}
+                </div>
+
+                {/* Date comparison */}
+                <div className="flex items-center gap-2 text-[11px] mb-2" style={{ color: "var(--pfg-steel)" }}>
+                  <span className="font-semibold" style={{ color: "var(--pfg-navy)" }}>{data.projectCode}:</span>
+                  <span>{data.newStart} → {data.newEnd}</span>
+                  <span style={{ color: "var(--red, #dc2626)" }}>↔</span>
+                  <span className="font-semibold" style={{ color: "var(--pfg-navy)" }}>{c.otherAssignment.projectCode}:</span>
+                  <span>{c.otherAssignment.startDate} → {c.otherAssignment.endDate}</span>
+                </div>
+
+                {/* Timeline visual */}
+                <TimelineBar c={c} />
+
+                {/* Resolution buttons */}
+                {!c.resolution && (
+                  <div className="flex items-center gap-2 mt-3">
+                    <button
+                      onClick={() => setResolution(idx, "shorten")}
+                      className="text-[11px] font-bold px-3 py-1.5 rounded-lg"
+                      style={{ background: "var(--pfg-yellow, #F5BD00)", color: "var(--pfg-navy, #1A1D23)" }}
+                      data-testid={`resolve-shorten-${c.worker.id}`}
+                    >
+                      Shorten to {shortenDate(c)}
+                    </button>
+                    <button
+                      onClick={() => setResolution(idx, "delay")}
+                      className="text-[11px] font-semibold px-3 py-1.5 rounded-lg border"
+                      style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-navy)" }}
+                      data-testid={`resolve-delay-${c.worker.id}`}
+                    >
+                      Delay {c.otherAssignment.projectCode} to {delayDate()}
+                    </button>
+                    <button
+                      onClick={() => setResolution(idx, "flag")}
+                      className="text-[11px] font-medium px-3 py-1.5 rounded-lg"
+                      style={{ background: "hsl(var(--muted))", color: "var(--pfg-steel)" }}
+                      data-testid={`resolve-flag-${c.worker.id}`}
+                    >
+                      Flag for Review
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t flex items-center justify-between" style={{ borderColor: "hsl(var(--border))" }}>
+          <span className="text-[12px]" style={{ color: "var(--pfg-steel)" }}>
+            {conflicts.filter(c => c.resolution).length} of {conflicts.length} resolved
+          </span>
+          <button
+            onClick={handleApply}
+            disabled={!allResolved || saving}
+            className="text-[13px] font-bold px-5 py-2 rounded-lg disabled:opacity-40"
+            style={{ background: "var(--pfg-yellow, #F5BD00)", color: "var(--pfg-navy, #1A1D23)" }}
+            data-testid="conflict-apply-btn"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : "Apply Resolutions"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // EDIT PROJECT MODAL (Tabbed: Details, Role Planning, Team)
 // ═══════════════════════════════════════════════════════════════════
 
@@ -1318,6 +1540,8 @@ function EditProjectModal({
   const computedHeadcount = roleSlotEdits.reduce((sum, s) => sum + (s.quantity || 0), 0) || (card.project.headcount || 0);
   const [slotSaving, setSlotSaving] = useState<number | null>(null);
   const [slotConflicts, setSlotConflicts] = useState<Record<number, string[]>>({});
+  const [conflictModalData, setConflictModalData] = useState<ConflictModalState | null>(null);
+  const { toast } = useToast();
 
   const addEditRoleSlot = () => {
     setRoleSlotEdits((prev) => [
@@ -1327,7 +1551,7 @@ function EditProjectModal({
     setNextRoleKey((k) => k + 1);
   };
 
-  // Save existing role slot changes via PATCH and check assignment conflicts
+  // Save existing role slot changes via PATCH, auto-update clean workers, show conflict modal for others
   const saveEditSlot = async (key: number) => {
     if (key >= 0) return; // new slots saved at final save
     const slotId = Math.abs(key);
@@ -1335,6 +1559,7 @@ function EditProjectModal({
     if (!slot) return;
     setSlotSaving(key);
     try {
+      // 1. Save the role slot
       await apiRequest("PATCH", `/api/role-slots/${slotId}`, {
         role: slot.role,
         startDate: slot.startDate,
@@ -1342,29 +1567,90 @@ function EditProjectModal({
         quantity: slot.quantity,
         shift: slot.shift,
       });
-      // Check for assignment conflicts with new dates
+
+      // 2. Find all workers assigned to this slot
       const slotAssignments = card.members.filter(m => m.assignment.roleSlotId === slotId || (
-        // Legacy: match by role if no roleSlotId
         !m.assignment.roleSlotId && m.assignment.role === slot.role
       ));
-      const conflicting = slotAssignments.filter(m => {
-        const aStart = m.assignment.startDate;
-        const aEnd = m.assignment.endDate;
-        if (!aStart || !aEnd) return false;
-        return aStart < slot.startDate || aEnd > slot.endDate;
-      }).map(m => m.worker.name);
-      if (conflicting.length > 0) {
-        setSlotConflicts(prev => ({ ...prev, [key]: conflicting }));
-      } else {
-        setSlotConflicts(prev => {
-          const next = { ...prev };
-          delete next[key];
-          return next;
-        });
+
+      // 3. Check each worker for conflicts with OTHER project assignments
+      const cleanWorkers: { member: typeof slotAssignments[0] }[] = [];
+      const conflictItems: ConflictItem[] = [];
+
+      for (const m of slotAssignments) {
+        // Find this worker's full data with all assignments
+        const fullWorker = allWorkers.find(w => w.id === m.worker.id);
+        if (!fullWorker) continue;
+
+        // Check for overlapping assignments on OTHER projects
+        const otherConflict = fullWorker.assignments.find(a =>
+          a.projectId !== card.project.id &&
+          (a.status === "active" || a.status === "flagged") &&
+          a.startDate && a.endDate &&
+          datesOverlap(slot.startDate, slot.endDate, a.startDate, a.endDate)
+        );
+
+        if (otherConflict) {
+          conflictItems.push({
+            worker: fullWorker,
+            thisAssignment: m.assignment,
+            otherAssignment: otherConflict,
+            resolution: null,
+          });
+        } else {
+          cleanWorkers.push({ member: m });
+        }
       }
-      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+
+      // 4. Auto-update clean workers
+      let autoUpdated = 0;
+      for (const { member } of cleanWorkers) {
+        try {
+          await apiRequest("PATCH", `/api/assignments/${member.assignment.id}`, {
+            startDate: slot.startDate,
+            endDate: slot.endDate,
+          });
+          autoUpdated++;
+        } catch { /* silent */ }
+      }
+
+      // Clear old warning-style conflicts for this slot
+      setSlotConflicts(prev => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+
+      // 5. Show conflict modal or just toast
+      if (conflictItems.length > 0) {
+        setConflictModalData({
+          slotId,
+          newStart: slot.startDate,
+          newEnd: slot.endDate,
+          projectCode: card.project.code,
+          conflicts: conflictItems,
+        });
+      } else {
+        if (autoUpdated > 0) {
+          toast({ title: "Role slot updated", description: `${autoUpdated} worker${autoUpdated === 1 ? "" : "s"} updated automatically.` });
+        }
+        await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      }
     } catch { /* silent */ }
     setSlotSaving(null);
+  };
+
+  // Handle conflict resolution modal completion
+  const handleConflictResolved = async (resolved: ConflictItem[]) => {
+    const shortened = resolved.filter(c => c.resolution === "shorten").length;
+    const delayed = resolved.filter(c => c.resolution === "delay").length;
+    const flagged = resolved.filter(c => c.resolution === "flag").length;
+    setConflictModalData(null);
+    await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+    toast({
+      title: "Role slot updated",
+      description: `${shortened + delayed > 0 ? `${shortened + delayed} resolved manually` : ""}${flagged > 0 ? `${shortened + delayed > 0 ? ", " : ""}${flagged} flagged` : ""}.`,
+    });
   };
 
   const updateEditSlot = (key: number, field: keyof RoleSlotDraft, value: string | number) => {
@@ -2346,6 +2632,15 @@ function EditProjectModal({
             setConfirmAction(null);
           }}
           onCancel={() => setConfirmAction(null)}
+        />
+      )}
+
+      {/* Conflict Resolution Modal */}
+      {conflictModalData && (
+        <ConflictResolutionModal
+          data={conflictModalData}
+          onResolve={handleConflictResolved}
+          onClose={() => setConflictModalData(null)}
         />
       )}
     </ModalOverlay>
