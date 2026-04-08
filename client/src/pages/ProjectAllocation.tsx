@@ -67,7 +67,7 @@ const inputStyle = { borderColor: "hsl(var(--border))", background: "hsl(var(--c
 // ─── Types ─────────────────────────────────────────────────────────
 
 interface ProjectCardData {
-  project: DashboardProject;
+  project: DashboardProject & { roleSlots?: DashboardRoleSlot[] };
   members: { worker: DashboardWorker; assignment: DashboardAssignment }[];
 }
 
@@ -1462,7 +1462,16 @@ function EditProjectModal({
     editNotes !== (card.project.notes || "");
   const leadChanged = editLeadUserId !== initialLeadId;
 
-  const rolesChanged = deletedSlotIds.length > 0 || roleSlotEdits.some((s) => s.key > 0);
+  // rolesChanged: new slots, deleted slots, OR any existing slot that differs from original
+  const originalSlots = card.project.roleSlots || [];
+  const existingSlotChanged = roleSlotEdits.some(s => {
+    if (s.key > 0) return false; // new slot, handled separately
+    const orig = originalSlots.find((o: any) => o.id === Math.abs(s.key));
+    if (!orig) return false;
+    return orig.role !== s.role || orig.startDate !== s.startDate ||
+           orig.endDate !== s.endDate || orig.quantity !== s.quantity || orig.shift !== s.shift;
+  });
+  const rolesChanged = deletedSlotIds.length > 0 || roleSlotEdits.some((s) => s.key > 0) || existingSlotChanged;
   const teamChanged = removedIds.size > 0 || Object.values(slotAdditions).some(ids => ids.length > 0);
   const hasChanges = detailsChanged || leadChanged || rolesChanged || teamChanged;
 
@@ -1497,11 +1506,12 @@ function EditProjectModal({
         await apiRequest("DELETE", `/api/role-slots/${slotId}`);
       }
 
-      // Create new role slots (key > 0) and capture IDs
+      // Create new role slots (key > 0), update changed existing slots (key < 0)
       const newSlotIdMap: Record<number, number> = {};
       for (const slot of roleSlotEdits) {
         if (slot.key > 0) {
-          const slotRes = await apiRequest("POST", "/api/role-slots", {
+          // New slot — create
+          const created = await apiRequest("POST", "/api/role-slots", {
             projectId: card.project.id,
             role: slot.role,
             startDate: slot.startDate,
@@ -1509,8 +1519,20 @@ function EditProjectModal({
             quantity: slot.quantity,
             shift: slot.shift,
           });
-          const created = await slotRes.json();
           newSlotIdMap[slot.key] = created.id;
+        } else {
+          // Existing slot — patch if changed
+          const slotId = Math.abs(slot.key);
+          const orig = originalSlots.find((o: any) => o.id === slotId);
+          if (orig && (
+            orig.role !== slot.role || orig.startDate !== slot.startDate ||
+            orig.endDate !== slot.endDate || orig.quantity !== slot.quantity || orig.shift !== slot.shift
+          )) {
+            await apiRequest("PATCH", `/api/role-slots/${slotId}`, {
+              role: slot.role, startDate: slot.startDate,
+              endDate: slot.endDate, quantity: slot.quantity, shift: slot.shift,
+            });
+          }
         }
       }
 
@@ -2320,7 +2342,9 @@ export default function ProjectAllocation() {
           }
         }
       }
-      return { project, members };
+      // Attach the project's role slots
+      const projRoleSlots = allRoleSlots.filter((rs) => rs.projectId === project.id);
+      return { project: { ...project, roleSlots: projRoleSlots }, members };
     })
     .sort((a, b) => {
       // Sort: active first, then potential, then completed, then cancelled
