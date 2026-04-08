@@ -3,6 +3,7 @@ import type { Server } from "http";
 import { storage } from "./storage";
 import { insertWorkerSchema, insertProjectSchema, insertAssignmentSchema, insertDocumentSchema, insertOemTypeSchema, insertRoleSlotSchema } from "@shared/schema";
 import type { User } from "@shared/schema";
+import { sendMail, magicLinkEmail, welcomeEmail } from "./email";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -98,11 +99,16 @@ export function registerRoutes(server: Server, app: Express) {
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
     await storage.createMagicLink({ email: email.toLowerCase(), token, expiresAt });
 
-    // Log the magic link (Outlook integration wired separately)
-    const devLink = `${req.protocol}://${req.get("host")}/#/auth/verify?token=${token}`;
-    console.log(`[MAGIC-LINK] Login link for ${email}: ${devLink}`);
+    const loginUrl = `https://pfg-platform.onrender.com/#/auth/verify?token=${token}`;
+    // Always log for fallback/debugging
+    console.log(`[MAGIC-LINK] Login link for ${email}: ${loginUrl}`);
 
-    res.json({ message: "Magic link sent", devLink: process.env.NODE_ENV !== "production" ? token : undefined });
+    // Send via Microsoft Graph
+    const tmpl = magicLinkEmail(user.name, loginUrl);
+    sendMail({ to: email, subject: tmpl.subject, html: tmpl.html, text: tmpl.text })
+      .catch(err => console.error("[email] Magic link send error:", err));
+
+    res.json({ message: "Magic link sent" });
   });
 
   app.get("/api/auth/verify", async (req: Request, res: Response) => {
@@ -246,6 +252,12 @@ export function registerRoutes(server: Server, app: Express) {
       await storage.createMagicLink({ email: email.toLowerCase(), token, expiresAt });
       const inviteLink = `https://pfg-platform.onrender.com/#/auth/verify?token=${token}`;
       console.log(`[INVITE] ${name} (${role}): ${inviteLink}`);
+
+      // Send welcome email via Microsoft Graph
+      const tmpl = welcomeEmail(name, role, inviteLink);
+      sendMail({ to: email, subject: tmpl.subject, html: tmpl.html, text: tmpl.text })
+        .catch(err => console.error("[email] Invite send error:", err));
+
       res.json({ user, inviteLink });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
