@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
 import { useDashboardData, type DashboardWorker, type DashboardProject, type DashboardAssignment, type DashboardRoleSlot } from "@/hooks/use-dashboard-data";
-import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, OEM_OPTIONS, EQUIPMENT_TYPES, PROJECT_ROLES, calcUtilisation } from "@/lib/constants";
+import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, OEM_OPTIONS, EQUIPMENT_TYPES, PROJECT_ROLES, COST_CENTRES, CERT_DEFS, calcUtilisation } from "@/lib/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Plus, X, ExternalLink, Trash2, Undo2, Search, ChevronDown, ChevronUp, Check, Loader2, CheckCircle2, XCircle, Sparkles, RotateCcw, AlertTriangle, Download, Info, Mail, Save } from "lucide-react";
 import { downloadCSV } from "@/lib/csv-export";
@@ -370,6 +370,10 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
   // Step 3: Search/filter per slot
   const [slotSearch, setSlotSearch] = useState<Record<number, string>>({});
   const [slotFteOnly, setSlotFteOnly] = useState<Record<number, boolean>>({});
+  const [slotRoleFilter, setSlotRoleFilter] = useState<Record<number, string>>({});
+  const [slotCostCentreFilter, setSlotCostCentreFilter] = useState<Record<number, string>>({});
+  const [slotOemFilter, setSlotOemFilter] = useState<Record<number, string>>({});
+  const [slotCertFilter, setSlotCertFilter] = useState<Record<number, string>>({});
   const [expandedWorkers, setExpandedWorkers] = useState<Set<number>>(new Set());
 
   const addRoleSlot = () => {
@@ -425,32 +429,60 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
       });
   }
 
-  // Available workers for a given slot (with search + FTE filter applied, then sorted)
+  // Role hierarchy for matching priority
+  const ROLE_HIERARCHY = ["Superintendent","Foreman","Lead Technician","Technician 2","Technician 1","Rigger","Crane Driver","HSE Officer","Welder","I&C Technician","Electrician","Apprentice"];
+
+  // Available workers for a given slot (with all filters applied, then sorted)
   function getAvailableWorkers(slot: RoleSlotDraft): { filtered: DashboardWorker[]; total: number } {
     const base = getAvailableWorkersBase(slot);
     const total = base.length;
     const searchTerm = (slotSearch[slot.key] || "").toLowerCase();
     const fteOnly = slotFteOnly[slot.key] || false;
+    const roleFilter = slotRoleFilter[slot.key] || "";
+    const costCentreFilter = slotCostCentreFilter[slot.key] || "";
+    const oemFilter = slotOemFilter[slot.key] || "";
+    const certFilter = slotCertFilter[slot.key] || "";
     const oemMatch = oem && equipmentType ? `${oem} - ${equipmentType}` : null;
 
     const filtered = base
       .filter((w) => {
         if (searchTerm && !w.name.toLowerCase().includes(searchTerm)) return false;
         if (fteOnly && w.status !== "FTE") return false;
+        if (roleFilter && w.role !== roleFilter) return false;
+        if (costCentreFilter) {
+          if (costCentreFilter === "Temp" && w.status !== "Temp") return false;
+          if (costCentreFilter !== "Temp" && w.costCentre !== costCentreFilter) return false;
+        }
+        if (oemFilter && !w.oemExperience.some(exp => exp.toLowerCase().includes(oemFilter.toLowerCase()))) return false;
+        if (certFilter) {
+          const certType = "cert_" + certFilter.toLowerCase().replace(/[^a-z0-9]/g, "_");
+          const hasCert = (w as any).documents?.some((d: any) => d.type === certType && d.filePath);
+          if (!hasCert) return false;
+        }
         return true;
       })
       .sort((a, b) => {
-        // FTE before Temp
+        // 1. FTE before Temp
         const statusOrder = (s: string) => (s === "FTE" ? 0 : 1);
         const sd = statusOrder(a.status) - statusOrder(b.status);
         if (sd !== 0) return sd;
-        // OEM match first
+        // 2. Role match: exact match first, then higher role that can cover, then others
+        const roleMatchScore = (w: DashboardWorker) => {
+          if (w.role === slot.role) return 0; // exact match
+          const workerRank = ROLE_HIERARCHY.indexOf(w.role);
+          const slotRank = ROLE_HIERARCHY.indexOf(slot.role);
+          if (workerRank !== -1 && slotRank !== -1 && workerRank <= slotRank) return 1; // senior can cover
+          return 2; // no match
+        };
+        const rm = roleMatchScore(a) - roleMatchScore(b);
+        if (rm !== 0) return rm;
+        // 3. OEM match
         if (oemMatch) {
           const aMatch = a.oemExperience.includes(oemMatch) ? 0 : 1;
           const bMatch = b.oemExperience.includes(oemMatch) ? 0 : 1;
           if (aMatch !== bMatch) return aMatch - bMatch;
         }
-        // Lowest utilisation
+        // 4. Lowest utilisation
         const aUtil = calcUtilisation(a.assignments).pct;
         const bUtil = calcUtilisation(b.assignments).pct;
         return aUtil - bUtil;
@@ -873,44 +905,63 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
                   {assigned.length < slot.quantity && (
                     <div className="px-4 py-2">
                       {/* Search + filter bar */}
-                      <div className="flex items-center gap-2 mb-2">
-                        <div className="relative flex-1">
-                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: "hsl(var(--muted-foreground))" }} />
-                          <input
-                            type="text"
-                            placeholder="Search by name..."
-                            value={searchVal}
-                            onChange={(e) => setSlotSearch(prev => ({ ...prev, [slot.key]: e.target.value }))}
-                            className="w-full pl-8 pr-3 py-1.5 text-[12px] rounded-lg border"
-                            style={inputStyle}
-                            data-testid={`slot-search-${slot.key}`}
-                          />
+                      <div className="space-y-1.5 mb-2">
+                        <div className="flex items-center gap-2">
+                          <div className="relative flex-1">
+                            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: "hsl(var(--muted-foreground))" }} />
+                            <input type="text" placeholder="Search by name..."
+                              value={searchVal}
+                              onChange={(e) => setSlotSearch(prev => ({ ...prev, [slot.key]: e.target.value }))}
+                              className="w-full pl-8 pr-3 py-1.5 text-[12px] rounded-lg border" style={inputStyle}
+                              data-testid={`slot-search-${slot.key}`} />
+                          </div>
+                          <span className="text-[11px] font-medium shrink-0" style={{ color: "var(--pfg-steel)" }}>
+                            {available.length} of {totalAvailable}
+                          </span>
                         </div>
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => setSlotFteOnly(prev => ({ ...prev, [slot.key]: false }))}
-                            className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border"
-                            style={{
-                              borderColor: !isFteOnly ? "var(--pfg-yellow)" : "hsl(var(--border))",
-                              background: !isFteOnly ? "hsl(var(--accent))" : "transparent",
-                              color: !isFteOnly ? "var(--pfg-navy)" : "hsl(var(--muted-foreground))",
-                            }}
-                            data-testid={`slot-filter-all-${slot.key}`}
-                          >All</button>
-                          <button
-                            onClick={() => setSlotFteOnly(prev => ({ ...prev, [slot.key]: true }))}
-                            className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border"
-                            style={{
-                              borderColor: isFteOnly ? "var(--pfg-yellow)" : "hsl(var(--border))",
-                              background: isFteOnly ? "hsl(var(--accent))" : "transparent",
-                              color: isFteOnly ? "var(--pfg-navy)" : "hsl(var(--muted-foreground))",
-                            }}
-                            data-testid={`slot-filter-fte-${slot.key}`}
-                          >FTE only</button>
+                        <div className="flex flex-wrap gap-1.5">
+                          {/* FTE/Temp filter */}
+                          <select className="text-[11px] px-2 py-1 rounded-lg border" style={{ ...inputStyle, maxWidth: "90px" }}
+                            value={isFteOnly ? "FTE" : ""}
+                            onChange={(e) => setSlotFteOnly(prev => ({ ...prev, [slot.key]: e.target.value === "FTE" }))}
+                            data-testid={`slot-filter-status-${slot.key}`}>
+                            <option value="">All</option>
+                            <option value="FTE">FTE</option>
+                          </select>
+                          {/* Job Title filter */}
+                          <select className="text-[11px] px-2 py-1 rounded-lg border" style={{ ...inputStyle, maxWidth: "130px" }}
+                            value={slotRoleFilter[slot.key] || ""}
+                            onChange={(e) => setSlotRoleFilter(prev => ({ ...prev, [slot.key]: e.target.value }))}
+                            data-testid={`slot-filter-role-${slot.key}`}>
+                            <option value="">All Roles</option>
+                            {PROJECT_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                          </select>
+                          {/* Cost Centre filter */}
+                          <select className="text-[11px] px-2 py-1 rounded-lg border" style={{ ...inputStyle, maxWidth: "130px" }}
+                            value={slotCostCentreFilter[slot.key] || ""}
+                            onChange={(e) => setSlotCostCentreFilter(prev => ({ ...prev, [slot.key]: e.target.value }))}
+                            data-testid={`slot-filter-cc-${slot.key}`}>
+                            <option value="">All Entities</option>
+                            {COST_CENTRES.map(c => <option key={c} value={c}>{c.split(" ").slice(0,2).join(" ")}</option>)}
+                            <option value="Temp">Temp</option>
+                          </select>
+                          {/* OEM filter */}
+                          <select className="text-[11px] px-2 py-1 rounded-lg border" style={{ ...inputStyle, maxWidth: "120px" }}
+                            value={slotOemFilter[slot.key] || ""}
+                            onChange={(e) => setSlotOemFilter(prev => ({ ...prev, [slot.key]: e.target.value }))}
+                            data-testid={`slot-filter-oem-${slot.key}`}>
+                            <option value="">All OEMs</option>
+                            {Array.from(new Set(allWorkers.flatMap(w => w.oemExperience.map(e => e.split(" - ")[0])))).sort().map(o => <option key={o} value={o}>{o}</option>)}
+                          </select>
+                          {/* Certificate filter */}
+                          <select className="text-[11px] px-2 py-1 rounded-lg border" style={{ ...inputStyle, maxWidth: "130px" }}
+                            value={slotCertFilter[slot.key] || ""}
+                            onChange={(e) => setSlotCertFilter(prev => ({ ...prev, [slot.key]: e.target.value }))}
+                            data-testid={`slot-filter-cert-${slot.key}`}>
+                            <option value="">All Certs</option>
+                            {CERT_DEFS.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                          </select>
                         </div>
-                        <span className="text-[11px] font-medium shrink-0" style={{ color: "var(--pfg-steel)" }}>
-                          {available.length} of {totalAvailable} workers
-                        </span>
                       </div>
                       <div className="max-h-[250px] overflow-y-auto space-y-0.5">
                         {available.length === 0 ? (
