@@ -1,6 +1,23 @@
 import jsPDF from "jspdf";
+import JSZip from "jszip";
 import type { DashboardWorker, DashboardAssignment } from "@/hooks/use-dashboard-data";
 import { CERT_DEFS } from "@/lib/constants";
+
+// ─── Logo loader (cached promise) ─────────────────────────────────────────────
+let _logoDataUrl: string | null = null;
+async function getLogoDataUrl(): Promise<string | null> {
+  if (_logoDataUrl) return _logoDataUrl;
+  try {
+    const res = await fetch("/logo-gold.png");
+    const blob = await res.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => { _logoDataUrl = reader.result as string; resolve(_logoDataUrl); };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch { return null; }
+}
 
 // PFG brand colors
 const NAVY = "#1A1D23";
@@ -326,34 +343,70 @@ export function downloadSqepPdf(worker: DashboardWorker) {
   doc.save(`SQEP_${safeName}_${new Date().toISOString().split("T")[0]}.pdf`);
 }
 
-export function generateProjectOverviewPdf(
+// ─── Role sort order for roster (mirrors portal) ────────────────────────────────
+const ROSTER_ROLE_ORDER = ["Superintendent","Foreman","Lead Technician","Technician 2","Technician 1","Rigger","Crane Driver","HSE Officer","Welder","I&C Technician","Electrician","Apprentice"];
+const ROSTER_SHIFT_ORDER: Record<string,number> = { Day: 0, Night: 1 };
+
+function sortRosterMembers(members: { worker: DashboardWorker; assignment: DashboardAssignment }[]) {
+  return [...members].sort((a, b) => {
+    const shA = ROSTER_SHIFT_ORDER[a.assignment.shift ?? "Day"] ?? 0;
+    const shB = ROSTER_SHIFT_ORDER[b.assignment.shift ?? "Day"] ?? 0;
+    if (shA !== shB) return shA - shB;
+    const rA = ROSTER_ROLE_ORDER.indexOf(a.assignment.task || a.worker.role);
+    const rB = ROSTER_ROLE_ORDER.indexOf(b.assignment.task || b.worker.role);
+    return (rA === -1 ? 99 : rA) - (rB === -1 ? 99 : rB);
+  });
+}
+
+export async function generateProjectOverviewPdf(
   project: { code: string; name: string; customer: string | null; location: string | null; equipmentType: string | null; startDate: string | null; endDate: string | null; shift: string | null; headcount: number | null; status: string | null },
   teamMembers: { worker: DashboardWorker; assignment: DashboardAssignment }[],
   customerName: string
-): jsPDF {
+): Promise<jsPDF> {
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
+  const logoUrl = await getLogoDataUrl();
+
+  // ─── Helper: draw page header ───────────────────────────────────────────────
+const HEADER_H = 36;
+  function drawPageHeader(subtitle: string) {
+    doc.setFillColor(26, 29, 35);
+    doc.rect(0, 0, pageW, HEADER_H, "F");
+    doc.setFillColor(245, 189, 0);
+    doc.rect(0, HEADER_H, pageW, 2.5, "F");
+    // Logo image (or fallback text)
+    if (logoUrl) {
+      doc.addImage(logoUrl, "PNG", 12, 6, 48, 22);
+    } else {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(14);
+      doc.setTextColor(245, 189, 0);
+      doc.text("POWERFORCE GLOBAL", 15, 18);
+    }
+    // Subtitle + date on the right
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(200, 200, 200);
+    doc.text(subtitle, logoUrl ? 68 : 15, 26);
+    doc.setFontSize(8);
+    doc.text(new Date().toLocaleDateString("en-GB"), pageW - 15, 26, { align: "right" });
+  }
+
+  // ─── Helper: draw page footer ───────────────────────────────────────────────
+  function drawPageFooter() {
+    doc.setFillColor(26, 29, 35);
+    doc.rect(0, pageH - 10, pageW, 10, "F");
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(150, 150, 150);
+    doc.text("Confidential — PowerForce Global Customer Pack", 15, pageH - 4);
+    doc.text(`Page ${doc.getNumberOfPages()}`, pageW - 15, pageH - 4, { align: "right" });
+  }
 
   // ═══ PAGE 1: Project Overview ═══
-  // Navy header
-  doc.setFillColor(26, 29, 35);
-  doc.rect(0, 0, pageW, 32, "F");
-  doc.setFillColor(245, 189, 0);
-  doc.rect(0, 32, pageW, 2.5, "F");
-
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
-  doc.setTextColor(255, 255, 255);
-  doc.text("POWERFORCE GLOBAL", 15, 14);
-  doc.setFontSize(10);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(200, 200, 200);
-  doc.text("Customer Pack — Project Overview", 15, 23);
-  doc.setFontSize(8);
-  doc.text(new Date().toLocaleDateString("en-GB"), pageW - 15, 23, { align: "right" });
-
-  let y = 44;
+  drawPageHeader("Customer Pack — Project Overview");
+  let y = HEADER_H + 14; // well below header + yellow bar
 
   // Project title
   doc.setFont("helvetica", "bold");
@@ -418,84 +471,77 @@ export function generateProjectOverviewPdf(
     { label: "OEM Experience", x: 191, w: 80 },
   ];
 
-  doc.setFillColor(26, 29, 35);
-  doc.rect(15, y - 4, pageW - 30, 8, "F");
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(7);
-  doc.setTextColor(255, 255, 255);
-  rosterCols.forEach((col) => doc.text(col.label.toUpperCase(), col.x, y));
-  y += 6;
+  // ─── Draw table header row ───────────────────────────────────────────────
+  function drawTableHeader(atY: number) {
+    doc.setFillColor(26, 29, 35);
+    doc.rect(15, atY - 4, pageW - 30, 8, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7);
+    doc.setTextColor(255, 255, 255);
+    rosterCols.forEach((col) => doc.text(col.label.toUpperCase(), col.x, atY));
+  }
 
-  // Table rows
-  // Deduplicate workers (same worker may have multiple assignments)
-  const seenWorkers = new Set<number>();
-  const uniqueMembers = teamMembers.filter((m) => {
-    if (seenWorkers.has(m.worker.id)) return false;
-    seenWorkers.add(m.worker.id);
-    return true;
-  });
+  // Sort all assignments: Day first then Night, then by role hierarchy
+  const sortedMembers = sortRosterMembers(teamMembers);
+
+  drawTableHeader(y);
+  y += 6;
 
   doc.setFont("helvetica", "normal");
   doc.setFontSize(8);
 
-  for (let i = 0; i < uniqueMembers.length; i++) {
-    const m = uniqueMembers[i];
+  let prevShift: string | null = null;
 
-    if (y > pageH - 20) {
-      // Footer
-      doc.setFillColor(26, 29, 35);
-      doc.rect(0, pageH - 10, pageW, 10, "F");
-      doc.setFontSize(7);
-      doc.setTextColor(150, 150, 150);
-      doc.text("Confidential — PowerForce Global Customer Pack", 15, pageH - 4);
-      doc.text(`Page ${doc.getNumberOfPages()}`, pageW - 15, pageH - 4, { align: "right" });
+  for (let i = 0; i < sortedMembers.length; i++) {
+    const m = sortedMembers[i];
+    const rowShift = m.assignment.shift || "Day";
 
+    // Page break
+    if (y > pageH - 18) {
+      drawPageFooter();
       doc.addPage("landscape");
-      // Re-draw header
-      doc.setFillColor(26, 29, 35);
-      doc.rect(0, 0, pageW, 28, "F");
-      doc.setFillColor(245, 189, 0);
-      doc.rect(0, 28, pageW, 2, "F");
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(14);
-      doc.setTextColor(255, 255, 255);
-      doc.text("POWERFORCE GLOBAL", 15, 12);
-      doc.setFontSize(9);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(200, 200, 200);
-      doc.text(`Team Roster — ${project.code} (cont.)`, 15, 20);
-      y = 40;
-
-      // Re-draw table header
-      doc.setFillColor(26, 29, 35);
-      doc.rect(15, y - 4, pageW - 30, 8, "F");
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(7);
-      doc.setTextColor(255, 255, 255);
-      rosterCols.forEach((col) => doc.text(col.label.toUpperCase(), col.x, y));
+      drawPageHeader(`Team Roster — ${project.code} (cont.)`);
+      y = HEADER_H + 14;
+      prevShift = null; // reset shift group on new page
+      drawTableHeader(y);
       y += 6;
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8);
     }
 
-    // Zebra striping
+    // Shift group divider row
+    if (rowShift !== prevShift) {
+      if (y > HEADER_H + 20) y += 1; // small gap before divider
+      doc.setFillColor(rowShift === "Night" ? 26 : 244, rowShift === "Night" ? 29 : 245, rowShift === "Night" ? 35 : 247);
+      doc.rect(15, y - 3, pageW - 30, 6, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7);
+      doc.setTextColor(rowShift === "Night" ? 245 : 99, rowShift === "Night" ? 189 : 117, rowShift === "Night" ? 0 : 140);
+      doc.text((rowShift === "Night" ? "● Night Shift" : "○ Day Shift").toUpperCase(), 20, y + 0.5);
+      y += 7;
+      prevShift = rowShift;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+    }
+
+    // Zebra striping (within group)
     if (i % 2 === 1) {
       doc.setFillColor(250, 250, 252);
       doc.rect(15, y - 3.5, pageW - 30, 7, "F");
     }
 
+    const roleLabel = m.assignment.task || m.assignment.role || m.worker.role;
+    const oemText = m.worker.oemExperience.map((o: string) => o.split(" - ")[0]).join(", ");
+
     doc.setTextColor(26, 29, 35);
     doc.setFont("helvetica", "bold");
     doc.text(truncate(m.worker.name, 36), rosterCols[0].x, y);
     doc.setFont("helvetica", "normal");
-    doc.text(truncate(m.assignment.role || m.assignment.task || m.worker.role, 24), rosterCols[1].x, y);
-    doc.text(m.assignment.shift || "—", rosterCols[2].x, y);
+    doc.text(truncate(roleLabel, 24), rosterCols[1].x, y);
+    doc.text(rowShift, rosterCols[2].x, y);
     doc.text(m.assignment.startDate || "—", rosterCols[3].x, y);
     doc.text(m.assignment.endDate || "—", rosterCols[4].x, y);
-
-    // OEM badges
     doc.setFontSize(7);
-    const oemText = m.worker.oemExperience.map((o) => o.split(" - ")[0]).join(", ");
     doc.setTextColor(99, 117, 140);
     doc.text(truncate(oemText || "—", 50), rosterCols[5].x, y);
     doc.setFontSize(8);
@@ -503,34 +549,65 @@ export function generateProjectOverviewPdf(
     y += 7;
   }
 
-  // Footer
-  doc.setFillColor(26, 29, 35);
-  doc.rect(0, pageH - 10, pageW, 10, "F");
-  doc.setFontSize(7);
-  doc.setTextColor(150, 150, 150);
-  doc.text("Confidential — PowerForce Global Customer Pack", 15, pageH - 4);
-  doc.text(`Page ${doc.getNumberOfPages()}`, pageW - 15, pageH - 4, { align: "right" });
-
+  drawPageFooter();
   return doc;
 }
 
-export function downloadCustomerPack(
+export async function downloadCustomerPack(
   project: { code: string; name: string; customer: string | null; location: string | null; equipmentType: string | null; startDate: string | null; endDate: string | null; shift: string | null; headcount: number | null; status: string | null },
   teamMembers: { worker: DashboardWorker; assignment: DashboardAssignment }[],
   customerName: string
 ) {
-  // 1. Download the Project Overview PDF first
-  const overviewDoc = generateProjectOverviewPdf(project, teamMembers, customerName);
-  overviewDoc.save(`CustomerPack_${project.code}_Overview_${new Date().toISOString().split("T")[0]}.pdf`);
+  const zip = new JSZip();
+  const date = new Date().toISOString().split("T")[0];
+  const projectFolder = zip.folder(`${project.code}_CustomerPack_${date}`)!;
 
-  // 2. Download individual SQEP packs
-  // Deduplicate workers
-  const seen = new Set<number>();
+  // 1. Project overview PDF
+  const overviewDoc = await generateProjectOverviewPdf(project, teamMembers, customerName);
+  const overviewBlob = overviewDoc.output("blob");
+  projectFolder.file(`${project.code}_ProjectOverview.pdf`, overviewBlob);
+
+  // 2. One folder per unique worker with their SQEP PDF + certificate files
+  const seenWorkers = new Set<number>();
   for (const { worker } of teamMembers) {
-    if (seen.has(worker.id)) continue;
-    seen.add(worker.id);
-    downloadSqepPdf(worker);
+    if (seenWorkers.has(worker.id)) continue;
+    seenWorkers.add(worker.id);
+
+    const safeName = worker.name.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "");
+    const workerFolder = projectFolder.folder(safeName)!;
+
+    // SQEP PDF
+    const sqepDoc = generateSqepPdf(worker);
+    workerFolder.file(`SQEP_${safeName}.pdf`, sqepDoc.output("blob"));
+
+    // Certificate files (from their documents)
+    const docs = (worker as any).documents as Array<{ type: string; name: string; fileName: string | null; filePath: string | null; mimeType: string | null }> | undefined;
+    if (docs && docs.length > 0) {
+      const certsFolder = workerFolder.folder("Certificates")!;
+      for (const d of docs) {
+        if (!d.filePath) continue;
+        try {
+          // filePath is like /api/uploads/123/filename.pdf
+          const res = await fetch(d.filePath, { credentials: "include" });
+          if (!res.ok) continue;
+          const blob = await res.blob();
+          // Use a clean filename: type_name.ext
+          const ext = d.fileName?.split(".").pop() || "pdf";
+          const cleanName = `${d.type}_${d.name}`.replace(/[^a-zA-Z0-9_\-\.]/g, "_").substring(0, 60);
+          certsFolder.file(`${cleanName}.${ext}`, blob);
+        } catch { /* skip failed fetches */ }
+      }
+    }
   }
+
+  // 3. Generate and trigger ZIP download
+  const zipBlob = await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
+  const url = URL.createObjectURL(zipBlob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${project.code}_CustomerPack_${date}.zip`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 export function downloadAllSqepPdfs(

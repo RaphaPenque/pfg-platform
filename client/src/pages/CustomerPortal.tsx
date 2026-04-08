@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import type { DashboardWorker, DashboardRoleSlot, DashboardAssignment } from "@/hooks/use-dashboard-data";
@@ -188,6 +188,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
 
   const { project, customer, color, teamMembers, histogramRows, weekColumns, projectRoleSlots } = portalData;
   const today = new Date();
+  const [downloading, setDownloading] = useState(false);
 
   return (
     <div className="min-h-screen" style={{ background: "hsl(var(--background))" }}>
@@ -203,13 +204,22 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
           </span>
         </div>
         <button
-          onClick={() => portalData && downloadCustomerPack(portalData.project, portalData.teamMembers, portalData.customer)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-opacity hover:opacity-90"
+          onClick={async () => {
+            if (!portalData || downloading) return;
+            setDownloading(true);
+            try {
+              await downloadCustomerPack(portalData.project, portalData.teamMembers, portalData.customer);
+            } finally {
+              setDownloading(false);
+            }
+          }}
+          disabled={downloading}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-semibold transition-opacity hover:opacity-90 disabled:opacity-60"
           style={{ background: "rgba(245,189,0,0.9)", color: "#1A1D23" }}
           data-testid="download-all-btn"
         >
           <Download className="w-3.5 h-3.5" />
-          Download Customer Pack
+          {downloading ? "Preparing ZIP…" : "Download Customer Pack"}
         </button>
       </header>
 
