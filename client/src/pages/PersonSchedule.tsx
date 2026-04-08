@@ -403,18 +403,24 @@ function PersonRow({
               const isEnd = monthIdx === bar.endMonth;
               const left = isStart ? `${bar.startFrac * 100}%` : "0";
               const right = isEnd ? `${(1 - bar.endFrac) * 100}%` : "0";
+              // Stack bars vertically when multiple exist in same month
+              const total = barsInMonth.length;
+              const barH = total > 1 ? `${Math.floor(96 / total)}%` : "calc(100% - 4px)";
+              const barTop = total > 1 ? `${2 + bIdx * Math.floor(96 / total)}%` : "2px";
 
               return (
                 <div
                   key={bIdx}
-                  className="absolute top-0.5 bottom-0.5 cursor-pointer transition-opacity hover:opacity-80 group/bar"
+                  className="absolute cursor-pointer transition-opacity hover:opacity-80 group/bar"
                   style={{
                     background: bar.color,
                     left,
                     right,
+                    top: barTop,
+                    height: barH,
                     borderRadius:
                       isStart && isEnd ? 2 : isStart ? "2px 0 0 2px" : isEnd ? "0 2px 2px 0" : 0,
-                    zIndex: 2,
+                    zIndex: 2 + bIdx,
                   }}
                 >
                   {/* Tooltip */}
