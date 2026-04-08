@@ -4,7 +4,47 @@ import { OEM_BRAND_COLORS, PROJECT_CUSTOMER } from "@/lib/constants";
 import { downloadSqepPdf, downloadCustomerPack } from "@/lib/sqep-pdf";
 import { Download, FileDown, Info } from "lucide-react";
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// ─── Weekly timeline helpers ───────────────────────────────────────
+
+interface WeekColumn {
+  label: string;
+  startDay: Date;
+  endDay: Date;
+}
+
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function buildWeekColumns(startDate: string, endDate: string): WeekColumn[] {
+  const start = new Date(startDate);
+  start.setDate(start.getDate() - 1); // 1 day before project start
+  const end = new Date(endDate);
+
+  const cols: WeekColumn[] = [];
+  const d = new Date(start);
+  // Align to Monday
+  while (d.getDay() !== 1) d.setDate(d.getDate() - 1);
+
+  while (d <= end) {
+    const weekEnd = new Date(d);
+    weekEnd.setDate(weekEnd.getDate() + 6);
+    cols.push({
+      label: `${d.getDate()} ${SHORT_MONTHS[d.getMonth()]}`,
+      startDay: new Date(d),
+      endDay: new Date(weekEnd),
+    });
+    d.setDate(d.getDate() + 7);
+  }
+  return cols;
+}
+
+function dateToColumnFraction(date: Date, colStart: Date, colEnd: Date): number {
+  const total = colEnd.getTime() - colStart.getTime();
+  if (total <= 0) return 0;
+  const offset = date.getTime() - colStart.getTime();
+  return Math.max(0, Math.min(1, offset / total));
+}
+
+// ─── Loading skeleton ──────────────────────────────────────────────
 
 function LoadingSkeleton() {
   return (
@@ -19,18 +59,18 @@ function LoadingSkeleton() {
   );
 }
 
-function dateToMonthIndex(dateStr: string | null): number | null {
-  if (!dateStr) return null;
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return null;
-  return d.getMonth();
+// ─── Histogram row type ────────────────────────────────────────────
+
+interface HistogramRow {
+  slot: DashboardRoleSlot;
+  assignedWorker: DashboardWorker | null;
+  assignment: DashboardAssignment | null;
+  filled: boolean;
 }
 
-function dateToDayFraction(dateStr: string): number {
-  const d = new Date(dateStr);
-  const daysInMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-  return (d.getDate() - 1) / daysInMonth;
-}
+// ═══════════════════════════════════════════════════════════════════
+// MAIN COMPONENT
+// ═══════════════════════════════════════════════════════════════════
 
 export default function CustomerPortal({ params }: { params: { projectCode: string } }) {
   const { data, isLoading } = useDashboardData();
@@ -52,35 +92,57 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
     const teamMembers: { worker: DashboardWorker; assignment: DashboardAssignment }[] = [];
     for (const w of workers) {
       for (const a of w.assignments) {
-        if (a.projectId === project.id && a.status === "active") {
+        if (a.projectId === project.id && (a.status === "active" || a.status === "flagged")) {
           teamMembers.push({ worker: w, assignment: a });
         }
       }
     }
 
-    // Build histogram rows: one per role slot, matched with assigned worker
-    const histogramRows = projectRoleSlots.map((slot) => {
-      // Find the assigned worker for this slot, matching by role and shift
-      const match = teamMembers.find((m) => {
-        const assignmentRole = m.assignment.task || m.worker.role;
-        return (
-          assignmentRole.toLowerCase().includes(slot.role.toLowerCase()) &&
-          (!m.assignment.shift || m.assignment.shift === slot.shift)
-        );
-      });
-      return { slot, assignedWorker: match?.worker || null, assignment: match?.assignment || null };
+    // Deduplicate team members (same workerId + startDate + endDate)
+    const seen = new Set<string>();
+    const uniqueTeamMembers = teamMembers.filter((m) => {
+      const key = `${m.worker.id}-${m.assignment.startDate}-${m.assignment.endDate}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
 
-    // If there are no role slots, fall back to showing assignments directly
-    const fallbackRows = teamMembers.map((m) => ({
-      slot: null as DashboardRoleSlot | null,
-      assignedWorker: m.worker,
-      assignment: m.assignment,
-    }));
+    // Build histogram rows: for each role slot (quantity N), create N rows
+    // Match by assignment.roleSlotId === slot.id
+    const histogramRows: HistogramRow[] = projectRoleSlots.flatMap((slot) => {
+      const slotAssignments = uniqueTeamMembers.filter((m) => m.assignment.roleSlotId === slot.id);
 
-    const rows = histogramRows.length > 0 ? histogramRows : fallbackRows;
+      const rows: HistogramRow[] = [];
+      // Filled rows
+      for (const m of slotAssignments) {
+        rows.push({ slot, assignedWorker: m.worker, assignment: m.assignment, filled: true });
+      }
+      // Unfilled rows (up to slot.quantity)
+      const unfilled = Math.max(0, slot.quantity - slotAssignments.length);
+      for (let i = 0; i < unfilled; i++) {
+        rows.push({ slot, assignedWorker: null, assignment: null, filled: false });
+      }
+      return rows;
+    });
 
-    return { project, customer, color, teamMembers, rows, projectRoleSlots };
+    // Fallback for assignments that don't have a matching role slot
+    if (histogramRows.length === 0 && uniqueTeamMembers.length > 0) {
+      for (const m of uniqueTeamMembers) {
+        histogramRows.push({
+          slot: { id: 0, projectId: project.id, role: m.assignment.task || m.worker.role, startDate: m.assignment.startDate || "", endDate: m.assignment.endDate || "", quantity: 1, shift: m.assignment.shift || "Day", projectCode: project.code, projectName: project.name },
+          assignedWorker: m.worker,
+          assignment: m.assignment,
+          filled: true,
+        });
+      }
+    }
+
+    // Build weekly columns
+    const weekColumns = (project.startDate && project.endDate)
+      ? buildWeekColumns(project.startDate, project.endDate)
+      : [];
+
+    return { project, customer, color, teamMembers: uniqueTeamMembers, histogramRows, weekColumns, projectRoleSlots };
   }, [data, params.projectCode]);
 
   if (isLoading || !data) return <LoadingSkeleton />;
@@ -104,10 +166,8 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
     );
   }
 
-  const { project, customer, color, teamMembers, rows } = portalData;
+  const { project, customer, color, teamMembers, histogramRows, weekColumns, projectRoleSlots } = portalData;
   const today = new Date();
-  const todayMonth = today.getMonth();
-  const todayDayFrac = today.getDate() / new Date(today.getFullYear(), today.getMonth() + 1, 0).getDate();
 
   return (
     <div className="min-h-screen" style={{ background: "hsl(var(--background))" }}>
@@ -169,7 +229,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
           </div>
         </div>
 
-        {/* Project Histogram — Role Slot Gantt */}
+        {/* Project Histogram — Weekly Gantt */}
         <div
           className="rounded-xl border overflow-hidden mb-6"
           style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--card-border))", boxShadow: "var(--shadow-sm)" }}
@@ -194,56 +254,55 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
           </div>
 
           <div className="overflow-x-auto">
-            <table className="w-full" style={{ borderCollapse: "collapse", minWidth: 1100 }}>
+            <table className="w-full" style={{ borderCollapse: "collapse", minWidth: Math.max(800, 280 + 60 + weekColumns.length * 48) }}>
               <thead>
                 <tr>
                   <th
                     className="text-left text-[10px] font-semibold uppercase tracking-wide px-4 py-1.5 sticky left-0 z-[3]"
-                    style={{ background: "hsl(var(--muted))", color: "hsl(var(--muted-foreground))", minWidth: 280, borderBottom: "1px solid hsl(var(--border))" }}
+                    style={{ background: "hsl(var(--muted))", color: "hsl(var(--muted-foreground))", minWidth: 260, borderBottom: "1px solid hsl(var(--border))" }}
                   >
                     Role / Person
                   </th>
                   <th
                     className="text-center text-[10px] font-semibold uppercase tracking-wide px-2 py-1.5"
-                    style={{ background: "hsl(var(--muted))", color: "hsl(var(--muted-foreground))", minWidth: 60, borderBottom: "1px solid hsl(var(--border))" }}
+                    style={{ background: "hsl(var(--muted))", color: "hsl(var(--muted-foreground))", minWidth: 52, borderBottom: "1px solid hsl(var(--border))" }}
                   >
                     Shift
                   </th>
-                  {MONTHS.map((m) => (
+                  {weekColumns.map((col, i) => (
                     <th
-                      key={m}
-                      className="text-center text-[10px] font-semibold uppercase tracking-wide px-1 py-1.5"
+                      key={i}
+                      className="text-center text-[9px] font-semibold uppercase tracking-wide px-0 py-1.5"
                       style={{
                         background: "hsl(var(--muted))",
                         color: "hsl(var(--muted-foreground))",
                         borderBottom: "1px solid hsl(var(--border))",
                         borderLeft: "1px solid hsl(var(--border))",
+                        minWidth: 48,
                       }}
                     >
-                      {m}
+                      {col.label}
                     </th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {rows.length === 0 ? (
+                {histogramRows.length === 0 ? (
                   <tr>
-                    <td colSpan={14} className="text-center py-12 text-sm" style={{ color: "hsl(var(--muted-foreground))" }}>
+                    <td colSpan={2 + weekColumns.length} className="text-center py-12 text-sm" style={{ color: "hsl(var(--muted-foreground))" }}>
                       No role slots or assignments defined
                     </td>
                   </tr>
                 ) : (
-                  rows.map((row, idx) => {
-                    const startDate = row.slot?.startDate || row.assignment?.startDate;
-                    const endDate = row.slot?.endDate || row.assignment?.endDate;
-                    const startMonth = dateToMonthIndex(startDate || null);
-                    const endMonth = dateToMonthIndex(endDate || null);
-                    const shift = row.slot?.shift || row.assignment?.shift || "—";
-                    const roleName = row.slot?.role || row.assignment?.task || row.assignedWorker?.role || "—";
+                  histogramRows.map((row, idx) => {
+                    const barStart = row.filled && row.assignment?.startDate ? row.assignment.startDate : row.slot.startDate;
+                    const barEnd = row.filled && row.assignment?.endDate ? row.assignment.endDate : row.slot.endDate;
+                    const barStartDate = new Date(barStart);
+                    const barEndDate = new Date(barEnd);
+                    const shift = row.slot.shift || "—";
+                    const roleName = row.slot.role;
                     const personName = row.assignedWorker?.name || null;
-                    const isFilled = !!row.assignedWorker;
-                    const startFrac = startDate ? dateToDayFraction(startDate) : 0;
-                    const endFrac = endDate ? dateToDayFraction(endDate) : 1;
+                    const isFilled = row.filled;
 
                     return (
                       <tr key={idx} data-testid={`histogram-row-${idx}`}>
@@ -279,17 +338,37 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                             {shift}
                           </span>
                         </td>
-                        {MONTHS.map((_, monthIdx) => {
-                          const isInRange =
-                            startMonth !== null && endMonth !== null &&
-                            monthIdx >= startMonth && monthIdx <= endMonth;
-                          const isStart = monthIdx === startMonth;
-                          const isEnd = monthIdx === endMonth;
-                          const isToday = monthIdx === todayMonth;
+                        {weekColumns.map((col, colIdx) => {
+                          // Does the bar overlap this week column?
+                          const colStartMs = col.startDay.getTime();
+                          const colEndMs = col.endDay.getTime();
+                          const barStartMs = barStartDate.getTime();
+                          const barEndMs = barEndDate.getTime();
+                          const overlaps = barStartMs <= colEndMs && barEndMs >= colStartMs;
+
+                          // Today marker
+                          const todayMs = today.getTime();
+                          const isToday = todayMs >= colStartMs && todayMs <= colEndMs;
+                          const todayFrac = isToday ? dateToColumnFraction(today, col.startDay, col.endDay) : 0;
+
+                          // Bar position within this column
+                          let left = 0;
+                          let right = 0;
+                          if (overlaps) {
+                            if (barStartMs > colStartMs) {
+                              left = dateToColumnFraction(barStartDate, col.startDay, col.endDay);
+                            }
+                            if (barEndMs < colEndMs) {
+                              right = 1 - dateToColumnFraction(barEndDate, col.startDay, col.endDay);
+                            }
+                          }
+
+                          const isBarStart = overlaps && barStartMs >= colStartMs && barStartMs <= colEndMs;
+                          const isBarEnd = overlaps && barEndMs >= colStartMs && barEndMs <= colEndMs;
 
                           return (
                             <td
-                              key={monthIdx}
+                              key={colIdx}
                               className="relative"
                               style={{
                                 borderBottom: "1px solid hsl(var(--border))",
@@ -298,25 +377,27 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                                 padding: "4px 0",
                               }}
                             >
-                              {isInRange && (
+                              {overlaps && (
                                 <div
                                   className="absolute top-1 bottom-1"
                                   style={{
                                     background: isFilled ? color : "transparent",
                                     border: isFilled ? "none" : `2px dashed ${color}`,
                                     opacity: isFilled ? 0.85 : 0.5,
-                                    left: isStart ? `${startFrac * 100}%` : 0,
-                                    right: isEnd ? `${(1 - endFrac) * 100}%` : 0,
+                                    left: `${left * 100}%`,
+                                    right: `${right * 100}%`,
                                     borderRadius:
-                                      isStart && isEnd ? 3 : isStart ? "3px 0 0 3px" : isEnd ? "0 3px 3px 0" : 0,
+                                      isBarStart && isBarEnd ? 3 :
+                                      isBarStart ? "3px 0 0 3px" :
+                                      isBarEnd ? "0 3px 3px 0" : 0,
                                   }}
-                                  title={`${roleName} — ${personName || "Unfilled"} (${startDate} → ${endDate})`}
+                                  title={`${roleName} — ${personName || "Unfilled"} (${barStart} → ${barEnd})`}
                                 />
                               )}
                               {isToday && (
                                 <div
                                   className="absolute top-0 bottom-0 w-0.5 z-[5]"
-                                  style={{ background: "var(--red)", left: `${todayDayFrac * 100}%` }}
+                                  style={{ background: "var(--red)", left: `${todayFrac * 100}%` }}
                                 />
                               )}
                             </td>
@@ -350,7 +431,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
             <table className="w-full text-[13px]" style={{ borderCollapse: "collapse" }}>
               <thead>
                 <tr>
-                  {["Name", "Role", "OEM Experience", "Shift", "Start Date", "End Date", "Status", ""].map((h) => (
+                  {["Name", "Role", "Slot", "OEM Experience", "Shift", "Start Date", "End Date", "Status", ""].map((h) => (
                     <th
                       key={h}
                       className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide"
@@ -364,70 +445,82 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
               <tbody>
                 {teamMembers.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="text-center py-12" style={{ color: "hsl(var(--muted-foreground))" }}>
+                    <td colSpan={9} className="text-center py-12" style={{ color: "hsl(var(--muted-foreground))" }}>
                       No team members assigned
                     </td>
                   </tr>
                 ) : (
-                  teamMembers.map((m) => (
-                    <tr
-                      key={m.assignment.id}
-                      className="border-t"
-                      style={{ borderColor: "hsl(var(--border))" }}
-                      data-testid={`team-row-${m.worker.id}`}
-                    >
-                      <td className="px-4 py-2.5 font-semibold text-pfg-navy">{m.worker.name}</td>
-                      <td className="px-4 py-2.5">{m.assignment.task || m.worker.role}</td>
-                      <td className="px-4 py-2.5">
-                        <div className="flex flex-wrap gap-1">
-                          {m.worker.oemExperience.length > 0 ? (
-                            m.worker.oemExperience.map((oem) => {
-                              const name = oem.split(" - ")[0];
-                              const bg = OEM_BRAND_COLORS[name] || "#64748B";
-                              return (
-                                <span
-                                  key={oem}
-                                  className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
-                                  style={{ background: bg + "18", color: bg, border: `1px solid ${bg}30` }}
-                                >
-                                  {name}
-                                </span>
-                              );
-                            })
+                  teamMembers.map((m) => {
+                    // Find which role slot this assignment belongs to
+                    const matchedSlot = projectRoleSlots.find((s) => s.id === m.assignment.roleSlotId);
+
+                    return (
+                      <tr
+                        key={m.assignment.id}
+                        className="border-t"
+                        style={{ borderColor: "hsl(var(--border))" }}
+                        data-testid={`team-row-${m.assignment.id}`}
+                      >
+                        <td className="px-4 py-2.5 font-semibold text-pfg-navy">{m.worker.name}</td>
+                        <td className="px-4 py-2.5">{m.assignment.task || m.worker.role}</td>
+                        <td className="px-4 py-2.5 text-[11px]" style={{ color: "var(--pfg-steel)" }}>
+                          {matchedSlot ? (
+                            <span>{matchedSlot.role} ({matchedSlot.startDate} → {matchedSlot.endDate})</span>
                           ) : (
-                            <span className="text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>—</span>
+                            <span style={{ color: "hsl(var(--muted-foreground))" }}>—</span>
                           )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-2.5">
-                        {m.assignment.shift ? (
-                          <span className={`badge ${m.assignment.shift === "Night" ? "badge-navy" : "badge-accent"}`}>
-                            {m.assignment.shift}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex flex-wrap gap-1">
+                            {m.worker.oemExperience.length > 0 ? (
+                              m.worker.oemExperience.map((oem) => {
+                                const name = oem.split(" - ")[0];
+                                const bg = OEM_BRAND_COLORS[name] || "#64748B";
+                                return (
+                                  <span
+                                    key={oem}
+                                    className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                                    style={{ background: bg + "18", color: bg, border: `1px solid ${bg}30` }}
+                                  >
+                                    {name}
+                                  </span>
+                                );
+                              })
+                            ) : (
+                              <span className="text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>—</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-2.5">
+                          {m.assignment.shift ? (
+                            <span className={`badge ${m.assignment.shift === "Night" ? "badge-navy" : "badge-accent"}`}>
+                              {m.assignment.shift}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 tabular-nums">{m.assignment.startDate || "—"}</td>
+                        <td className="px-4 py-2.5 tabular-nums">{m.assignment.endDate || "—"}</td>
+                        <td className="px-4 py-2.5">
+                          <span className={`badge ${m.worker.status === "FTE" ? "badge-navy" : "badge-grey"}`}>
+                            {m.worker.status}
                           </span>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td className="px-4 py-2.5 tabular-nums">{m.assignment.startDate || "—"}</td>
-                      <td className="px-4 py-2.5 tabular-nums">{m.assignment.endDate || "—"}</td>
-                      <td className="px-4 py-2.5">
-                        <span className={`badge ${m.worker.status === "FTE" ? "badge-navy" : "badge-grey"}`}>
-                          {m.worker.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <button
-                          onClick={() => downloadSqepPdf(m.worker)}
-                          className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg border transition-colors hover:bg-[hsl(var(--accent))]"
-                          style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-navy)" }}
-                          data-testid={`sqep-download-${m.worker.id}`}
-                        >
-                          <FileDown className="w-3.5 h-3.5" />
-                          SQEP Pack
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <button
+                            onClick={() => downloadSqepPdf(m.worker)}
+                            className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg border transition-colors hover:bg-[hsl(var(--accent))]"
+                            style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-navy)" }}
+                            data-testid={`sqep-download-${m.worker.id}`}
+                          >
+                            <FileDown className="w-3.5 h-3.5" />
+                            SQEP Pack
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
