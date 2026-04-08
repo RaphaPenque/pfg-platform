@@ -92,6 +92,7 @@ export interface DashboardData {
   assignments: any[];
   roleSlots: DashboardRoleSlot[];
   oemTypes: any[];
+  projectLeads?: Record<number, number>;
 }
 
 export function useDashboardData() {

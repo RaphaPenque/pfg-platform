@@ -1,45 +1,42 @@
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { pgTable, serial, text, integer, real, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
 // ===== WORKERS =====
-export const workers = sqliteTable("workers", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const workers = pgTable("workers", {
+  id: serial("id").primaryKey(),
   name: text("name").notNull(),
-  role: text("role").notNull(), // Supervisor, Mechanical Technician, General Operative, etc.
-  status: text("status").notNull(), // FTE or Temp
+  role: text("role").notNull(),
+  status: text("status").notNull(),
   nationality: text("nationality"),
   age: text("age"),
-  joined: text("joined"), // ISO date
-  ctc: text("ctc"), // Yes/No
-  englishLevel: text("english_level"), // A1-C2 or TBC
-  techLevel: text("tech_level"), // Tech 1, Tech 2, Tech 3
-  measuringSkills: text("measuring_skills"), // Yes/No/TBC
-  countryCode: text("country_code"), // e.g. PFG PO CTC, PFG SP, CO, etc.
+  joined: text("joined"),
+  ctc: text("ctc"),
+  englishLevel: text("english_level"),
+  techLevel: text("tech_level"),
+  measuringSkills: text("measuring_skills"),
+  countryCode: text("country_code"),
   comments: text("comments"),
   experienceScore: real("experience_score"),
   technicalScore: real("technical_score"),
   attitudeScore: real("attitude_score"),
   oemFocus: text("oem_focus"),
-  // OEM experience stored as JSON array: ["GE Vernova - ST", "Arabelle Solutions - STV"]
-  oemExperience: text("oem_experience"), // JSON string array
-  dateOfBirth: text("date_of_birth"), // ISO date
-  costCentre: text("cost_centre"), // only for FTE workers
-  roles: text("roles"), // JSON array of role strings
-  profilePhotoPath: text("profile_photo_path"), // file path for uploaded photo
-  passportPath: text("passport_path"), // file path for passport scan
-  driversLicense: text("drivers_license"), // expiry date ISO string or null
-  driversLicenseUploaded: integer("drivers_license_uploaded"), // 0 or 1
-  // Contact information
+  oemExperience: text("oem_experience"),
+  dateOfBirth: text("date_of_birth"),
+  costCentre: text("cost_centre"),
+  roles: text("roles"),
+  profilePhotoPath: text("profile_photo_path"),
+  passportPath: text("passport_path"),
+  driversLicense: text("drivers_license"),
+  driversLicenseUploaded: integer("drivers_license_uploaded"),
   personalEmail: text("personal_email"),
   workEmail: text("work_email"),
-  phone: text("phone"), // primary phone number
-  phoneSecondary: text("phone_secondary"), // secondary/emergency number
-  address: text("address"), // home address
-  // Field kit / logistics
-  coverallSize: text("coverall_size"), // e.g. S, M, L, XL, XXL
-  bootSize: text("boot_size"), // European shoe size e.g. 42, 43
-  localAirport: text("local_airport"), // e.g. LHR, MAD, LIS
+  phone: text("phone"),
+  phoneSecondary: text("phone_secondary"),
+  address: text("address"),
+  coverallSize: text("coverall_size"),
+  bootSize: text("boot_size"),
+  localAirport: text("local_airport"),
 });
 
 export const insertWorkerSchema = createInsertSchema(workers).omit({ id: true });
@@ -47,19 +44,19 @@ export type InsertWorker = z.infer<typeof insertWorkerSchema>;
 export type Worker = typeof workers.$inferSelect;
 
 // ===== PROJECTS =====
-export const projects = sqliteTable("projects", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const projects = pgTable("projects", {
+  id: serial("id").primaryKey(),
   code: text("code").notNull().unique(),
   name: text("name").notNull(),
-  customer: text("customer"), // Arabelle Solutions, GE Vernova, Mitsubishi Power, etc.
+  customer: text("customer"),
   location: text("location"),
-  equipmentType: text("equipment_type"), // GT, ST, STV, GEN, COMP
-  startDate: text("start_date"), // ISO date
-  endDate: text("end_date"), // ISO date
-  shift: text("shift"), // Day, Night, Day + Night
+  equipmentType: text("equipment_type"),
+  startDate: text("start_date"),
+  endDate: text("end_date"),
+  shift: text("shift"),
   headcount: integer("headcount"),
   notes: text("notes"),
-  status: text("status").default("active"), // active, completed, cancelled
+  status: text("status").default("active"),
 });
 
 export const insertProjectSchema = createInsertSchema(projects).omit({ id: true });
@@ -67,15 +64,14 @@ export type InsertProject = z.infer<typeof insertProjectSchema>;
 export type Project = typeof projects.$inferSelect;
 
 // ===== ROLE SLOTS =====
-// Defines the roles needed on a project with specific dates and quantities
-export const roleSlots = sqliteTable("role_slots", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const roleSlots = pgTable("role_slots", {
+  id: serial("id").primaryKey(),
   projectId: integer("project_id").notNull().references(() => projects.id),
-  role: text("role").notNull(), // Superintendent, Foreman, Lead Technician, etc.
-  startDate: text("start_date").notNull(), // ISO date
-  endDate: text("end_date").notNull(), // ISO date
+  role: text("role").notNull(),
+  startDate: text("start_date").notNull(),
+  endDate: text("end_date").notNull(),
   quantity: integer("quantity").notNull().default(1),
-  shift: text("shift").default("Day"), // Day, Night
+  shift: text("shift").default("Day"),
 });
 
 export const insertRoleSlotSchema = createInsertSchema(roleSlots).omit({ id: true });
@@ -83,19 +79,18 @@ export type InsertRoleSlot = z.infer<typeof insertRoleSlotSchema>;
 export type RoleSlot = typeof roleSlots.$inferSelect;
 
 // ===== ASSIGNMENTS =====
-// Links workers to specific role slots (not directly to projects)
-export const assignments = sqliteTable("assignments", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const assignments = pgTable("assignments", {
+  id: serial("id").primaryKey(),
   workerId: integer("worker_id").notNull().references(() => workers.id),
   projectId: integer("project_id").notNull().references(() => projects.id),
-  roleSlotId: integer("role_slot_id").references(() => roleSlots.id), // null for legacy data
+  roleSlotId: integer("role_slot_id").references(() => roleSlots.id),
   task: text("task"),
-  role: text("role"), // the role they're filling
-  shift: text("shift"), // Day, Night, TBC
-  startDate: text("start_date"), // ISO date — from the role slot, not the project
-  endDate: text("end_date"), // ISO date — from the role slot, not the project
-  duration: integer("duration"), // calendar days
-  status: text("status").default("active"), // active, completed, removed
+  role: text("role"),
+  shift: text("shift"),
+  startDate: text("start_date"),
+  endDate: text("end_date"),
+  duration: integer("duration"),
+  status: text("status").default("active"),
 });
 
 export const insertAssignmentSchema = createInsertSchema(assignments).omit({ id: true });
@@ -103,20 +98,19 @@ export type InsertAssignment = z.infer<typeof insertAssignmentSchema>;
 export type Assignment = typeof assignments.$inferSelect;
 
 // ===== DOCUMENTS =====
-// Files attached to workers: passports, certs, diplomas, timesheets, etc.
-export const documents = sqliteTable("documents", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
+export const documents = pgTable("documents", {
+  id: serial("id").primaryKey(),
   workerId: integer("worker_id").notNull().references(() => workers.id),
-  type: text("type").notNull(), // passport, visa, safety_cert, diploma, timesheet, other
-  name: text("name").notNull(), // Display name
-  fileName: text("file_name"), // Original file name
-  filePath: text("file_path"), // Storage path (R2/local)
-  fileSize: integer("file_size"), // bytes
+  type: text("type").notNull(),
+  name: text("name").notNull(),
+  fileName: text("file_name"),
+  filePath: text("file_path"),
+  fileSize: integer("file_size"),
   mimeType: text("mime_type"),
-  expiryDate: text("expiry_date"), // ISO date (for certs)
-  issuedDate: text("issued_date"), // ISO date
-  status: text("status").default("valid"), // valid, expiring, expired
-  uploadedAt: text("uploaded_at"), // ISO datetime
+  expiryDate: text("expiry_date"),
+  issuedDate: text("issued_date"),
+  status: text("status").default("valid"),
+  uploadedAt: text("uploaded_at"),
   notes: text("notes"),
 });
 
@@ -125,14 +119,78 @@ export type InsertDocument = z.infer<typeof insertDocumentSchema>;
 export type Document = typeof documents.$inferSelect;
 
 // ===== OEM TAXONOMY =====
-// Reference table for the standardised OEM + Equipment Type combinations
-export const oemTypes = sqliteTable("oem_types", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  oem: text("oem").notNull(), // GE Vernova, Mitsubishi Power, etc.
-  equipmentType: text("equipment_type").notNull(), // GT, ST, STV, GEN, COMP
-  brandColor: text("brand_color"), // hex colour for UI
+export const oemTypes = pgTable("oem_types", {
+  id: serial("id").primaryKey(),
+  oem: text("oem").notNull(),
+  equipmentType: text("equipment_type").notNull(),
+  brandColor: text("brand_color"),
 });
 
 export const insertOemTypeSchema = createInsertSchema(oemTypes).omit({ id: true });
 export type InsertOemType = z.infer<typeof insertOemTypeSchema>;
 export type OemType = typeof oemTypes.$inferSelect;
+
+// ===== USERS (Auth) =====
+export const users = pgTable("users", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull().unique(),
+  name: text("name").notNull(),
+  role: text("role").notNull(), // admin | resource_manager | project_manager | finance | observer
+  createdAt: timestamp("created_at").defaultNow(),
+  lastLoginAt: timestamp("last_login_at"),
+  isActive: boolean("is_active").default(true),
+});
+
+export const insertUserSchema = createInsertSchema(users).omit({ id: true });
+export type InsertUser = z.infer<typeof insertUserSchema>;
+export type User = typeof users.$inferSelect;
+
+// ===== MAGIC LINKS =====
+export const magicLinks = pgTable("magic_links", {
+  id: serial("id").primaryKey(),
+  email: text("email").notNull(),
+  token: text("token").notNull().unique(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type MagicLink = typeof magicLinks.$inferSelect;
+
+// ===== SESSIONS =====
+export const sessions = pgTable("sessions", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id),
+  token: text("token").notNull().unique(),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+  userAgent: text("user_agent"),
+  ipAddress: text("ip_address"),
+});
+
+export type Session = typeof sessions.$inferSelect;
+
+// ===== AUDIT LOGS =====
+export const auditLogs = pgTable("audit_logs", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").references(() => users.id),
+  action: text("action").notNull(),
+  entityType: text("entity_type").notNull(),
+  entityId: integer("entity_id").notNull(),
+  entityName: text("entity_name"),
+  changes: jsonb("changes"),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export type AuditLog = typeof auditLogs.$inferSelect;
+
+// ===== PROJECT LEADS =====
+export const projectLeads = pgTable("project_leads", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id),
+  userId: integer("user_id").notNull().references(() => users.id),
+  assignedAt: timestamp("assigned_at").defaultNow(),
+});
+
+export type ProjectLead = typeof projectLeads.$inferSelect;

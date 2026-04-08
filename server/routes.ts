@@ -1,10 +1,21 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
 import { insertWorkerSchema, insertProjectSchema, insertAssignmentSchema, insertDocumentSchema, insertOemTypeSchema, insertRoleSlotSchema } from "@shared/schema";
+import type { User } from "@shared/schema";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
+
+// Extend Express Request with user
+declare global {
+  namespace Express {
+    interface Request {
+      user?: User;
+    }
+  }
+}
 
 // Upload directory
 const UPLOAD_BASE = fs.existsSync("/data") ? "/data/uploads" : "./uploads";
@@ -24,71 +35,244 @@ const upload = multer({
       cb(null, `${type}${ext}`);
     },
   }),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+  limits: { fileSize: 10 * 1024 * 1024 },
 });
 
+// ─── Auth Middleware ──────────────────────────────────────────
+
+async function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const sessionToken = (req as any).cookies?.pfg_session;
+  if (!sessionToken) return res.status(401).json({ error: "Not authenticated" });
+
+  const session = await storage.getSessionByToken(sessionToken);
+  if (!session) return res.status(401).json({ error: "Session expired" });
+
+  const user = await storage.getUserById(session.userId);
+  if (!user || !user.isActive) return res.status(401).json({ error: "User not found or inactive" });
+
+  req.user = user;
+  next();
+}
+
+function requireRole(...roles: string[]) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user || !roles.includes(req.user.role)) {
+      return res.status(403).json({ error: "Insufficient permissions" });
+    }
+    next();
+  };
+}
+
+// ─── Audit Helper ────────────────────────────────────────────
+
+async function logAudit(
+  userId: number | null,
+  action: string,
+  entityType: string,
+  entityId: number,
+  entityName?: string,
+  changes?: object,
+) {
+  try {
+    await storage.createAuditLog({ userId, action, entityType, entityId, entityName, changes });
+  } catch (e) {
+    console.error("Audit log failed:", e);
+  }
+}
+
+// ─── Routes ──────────────────────────────────────────────────
+
 export function registerRoutes(server: Server, app: Express) {
-  // ===== WORKERS =====
-  app.get("/api/workers", (_req, res) => {
-    const workers = storage.getWorkers();
-    res.json(workers);
+
+  // ===== AUTH ROUTES (no auth required) =====
+
+  app.post("/api/auth/request-link", async (req: Request, res: Response) => {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: "Email required" });
+
+    const user = await storage.getUserByEmail(email);
+    if (!user) return res.status(404).json({ error: "No account found for this email" });
+    if (!user.isActive) return res.status(403).json({ error: "Account is disabled" });
+
+    const token = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+    await storage.createMagicLink({ email: email.toLowerCase(), token, expiresAt });
+
+    // Log the magic link (Outlook integration wired separately)
+    const devLink = `${req.protocol}://${req.get("host")}/#/auth/verify?token=${token}`;
+    console.log(`[MAGIC-LINK] Login link for ${email}: ${devLink}`);
+
+    res.json({ message: "Magic link sent", devLink: process.env.NODE_ENV !== "production" ? token : undefined });
   });
 
-  app.get("/api/workers/:id", (req, res) => {
-    const worker = storage.getWorker(parseInt(req.params.id));
+  app.get("/api/auth/verify", async (req: Request, res: Response) => {
+    const token = req.query.token as string;
+    if (!token) return res.status(400).json({ error: "Token required" });
+
+    const link = await storage.getMagicLinkByToken(token);
+    if (!link) return res.status(404).json({ error: "Invalid link" });
+    if (link.usedAt) return res.status(400).json({ error: "Link already used" });
+    if (new Date() > link.expiresAt) return res.status(400).json({ error: "Link expired" });
+
+    // Mark link as used
+    await storage.markMagicLinkUsed(token);
+
+    // Find or confirm user
+    const user = await storage.getUserByEmail(link.email);
+    if (!user) return res.status(404).json({ error: "User not found" });
+
+    // Update last login
+    await storage.updateUser(user.id, { lastLoginAt: new Date() } as any);
+
+    // Create session (30 days)
+    const sessionToken = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    await storage.createSession({
+      userId: user.id,
+      token: sessionToken,
+      expiresAt,
+      userAgent: req.get("user-agent") || null,
+      ipAddress: req.ip || null,
+    } as any);
+
+    // Set httpOnly cookie
+    res.cookie("pfg_session", sessionToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+      path: "/",
+    });
+
+    // Redirect to app
+    res.redirect("/#/");
+  });
+
+  app.post("/api/auth/logout", async (req: Request, res: Response) => {
+    const sessionToken = (req as any).cookies?.pfg_session;
+    if (sessionToken) {
+      await storage.deleteSession(sessionToken);
+    }
+    res.clearCookie("pfg_session", { path: "/" });
+    res.json({ message: "Logged out" });
+  });
+
+  app.get("/api/auth/me", requireAuth, (req: Request, res: Response) => {
+    const u = req.user!;
+    res.json({ id: u.id, email: u.email, name: u.name, role: u.role });
+  });
+
+  // ===== PORTAL (no auth required) =====
+  app.get("/api/portal/:code", async (req: Request, res: Response) => {
+    const project = await storage.getProjectByCode(req.params.code.toUpperCase());
+    if (!project) return res.status(404).json({ error: "Project not found" });
+    const projectAssignments = await storage.getAssignmentsByProject(project.id);
+    const allWorkers = await storage.getWorkers();
+    const workerMap = Object.fromEntries(allWorkers.map(w => [w.id, w]));
+    const team = projectAssignments
+      .filter(a => a.status === "active")
+      .map(a => ({
+        role: a.role,
+        shift: a.shift,
+        startDate: a.startDate,
+        endDate: a.endDate,
+        workerName: workerMap[a.workerId]?.name || "TBC",
+      }));
+    res.json({ project, team });
+  });
+
+  // ===== ALL ROUTES BELOW REQUIRE AUTH =====
+  app.use("/api", (req: Request, res: Response, next: NextFunction) => {
+    // Skip auth for auth routes and portal
+    if (req.path.startsWith("/auth/") || req.path.startsWith("/portal/")) return next();
+    // Skip auth for uploads serving (static files)
+    if (req.path.startsWith("/uploads/")) return next();
+    requireAuth(req, res, next);
+  });
+
+  // ===== USERS (admin only) =====
+  app.get("/api/users", requireRole("admin"), async (_req: Request, res: Response) => {
+    const allUsers = await storage.getUsers();
+    res.json(allUsers.map(u => ({ id: u.id, email: u.email, name: u.name, role: u.role, isActive: u.isActive, lastLoginAt: u.lastLoginAt })));
+  });
+
+  app.get("/api/users/resource-managers", async (_req: Request, res: Response) => {
+    const allUsers = await storage.getUsers();
+    res.json(allUsers.filter(u => u.role === "resource_manager" && u.isActive).map(u => ({ id: u.id, name: u.name, email: u.email })));
+  });
+
+  // ===== WORKERS =====
+  app.get("/api/workers", async (_req: Request, res: Response) => {
+    const allWorkers = await storage.getWorkers();
+    res.json(allWorkers);
+  });
+
+  app.get("/api/workers/:id", async (req: Request, res: Response) => {
+    const worker = await storage.getWorker(parseInt(req.params.id));
     if (!worker) return res.status(404).json({ error: "Worker not found" });
     res.json(worker);
   });
 
-  app.post("/api/workers", (req, res) => {
+  app.post("/api/workers", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
     const parsed = insertWorkerSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error });
-    const worker = storage.createWorker(parsed.data);
+    const worker = await storage.createWorker(parsed.data);
+    await logAudit(req.user!.id, "worker.create", "worker", worker.id, worker.name);
     res.status(201).json(worker);
   });
 
-  app.patch("/api/workers/:id", (req, res) => {
-    const worker = storage.updateWorker(parseInt(req.params.id), req.body);
+  app.patch("/api/workers/:id", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const before = await storage.getWorker(id);
+    const worker = await storage.updateWorker(id, req.body);
     if (!worker) return res.status(404).json({ error: "Worker not found" });
+    // Build changes diff
+    const changes: Record<string, { from: any; to: any }> = {};
+    if (before) {
+      for (const key of Object.keys(req.body)) {
+        const k = key as keyof typeof before;
+        if (before[k] !== req.body[key]) {
+          changes[key] = { from: before[k], to: req.body[key] };
+        }
+      }
+    }
+    await logAudit(req.user!.id, "worker.update", "worker", worker.id, worker.name, changes);
     res.json(worker);
   });
 
-  app.delete("/api/workers/:id", (req, res) => {
+  app.delete("/api/workers/:id", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
-    const worker = storage.getWorker(id);
+    const worker = await storage.getWorker(id);
     if (!worker) return res.status(404).json({ error: "Worker not found" });
 
-    // Check for active assignments (end_date >= today)
     const today = new Date().toISOString().split("T")[0];
-    const workerAssignments = storage.getAssignmentsByWorker(id);
+    const workerAssignments = await storage.getAssignmentsByWorker(id);
     const activeAssignments = workerAssignments.filter(a => a.endDate && a.endDate >= today && a.status === "active");
     if (activeAssignments.length > 0) {
-      const allProjects = storage.getProjects();
+      const allProjects = await storage.getProjects();
       const projectMap = Object.fromEntries(allProjects.map(p => [p.id, p]));
       const projectNames = Array.from(new Set(activeAssignments.map(a => projectMap[a.projectId]?.name || "Unknown")));
       return res.status(409).json({ message: "Worker has active assignments", projects: projectNames });
     }
 
-    // Cascade: delete assignments and documents first, then worker
     for (const a of workerAssignments) {
-      storage.deleteAssignment(a.id);
+      await storage.deleteAssignment(a.id);
     }
-    const docs = storage.getDocumentsByWorker(id);
+    const docs = await storage.getDocumentsByWorker(id);
     for (const d of docs) {
-      storage.deleteDocument(d.id);
+      await storage.deleteDocument(d.id);
     }
-    storage.deleteWorker(id);
+    await storage.deleteWorker(id);
+    await logAudit(req.user!.id, "worker.delete", "worker", id, worker.name);
     res.status(204).send();
   });
 
-  // Worker with assignments (enriched view)
-  app.get("/api/workers/:id/full", (req, res) => {
-    const worker = storage.getWorker(parseInt(req.params.id));
+  app.get("/api/workers/:id/full", async (req: Request, res: Response) => {
+    const worker = await storage.getWorker(parseInt(req.params.id));
     if (!worker) return res.status(404).json({ error: "Worker not found" });
-    const workerAssignments = storage.getAssignmentsByWorker(worker.id);
-    const workerDocs = storage.getDocumentsByWorker(worker.id);
-    // Enrich assignments with project info
-    const allProjects = storage.getProjects();
+    const workerAssignments = await storage.getAssignmentsByWorker(worker.id);
+    const workerDocs = await storage.getDocumentsByWorker(worker.id);
+    const allProjects = await storage.getProjects();
     const projectMap = Object.fromEntries(allProjects.map(p => [p.id, p]));
     const enrichedAssignments = workerAssignments.map(a => ({
       ...a,
@@ -98,70 +282,89 @@ export function registerRoutes(server: Server, app: Express) {
   });
 
   // ===== PROJECTS =====
-  app.get("/api/projects", (_req, res) => {
-    const allProjects = storage.getProjects();
+  app.get("/api/projects", async (_req: Request, res: Response) => {
+    const allProjects = await storage.getProjects();
     res.json(allProjects);
   });
 
-  app.get("/api/projects/:id", (req, res) => {
-    const project = storage.getProject(parseInt(req.params.id));
+  app.get("/api/projects/:id", async (req: Request, res: Response) => {
+    const project = await storage.getProject(parseInt(req.params.id));
     if (!project) return res.status(404).json({ error: "Project not found" });
     res.json(project);
   });
 
-  app.post("/api/projects", (req, res) => {
+  app.post("/api/projects", async (req: Request, res: Response) => {
     const parsed = insertProjectSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error });
-    const project = storage.createProject(parsed.data);
+    const project = await storage.createProject(parsed.data);
+    await logAudit(req.user!.id, "project.create", "project", project.id, project.name);
     res.status(201).json(project);
   });
 
-  app.patch("/api/projects/:id", (req, res) => {
-    const project = storage.updateProject(parseInt(req.params.id), req.body);
+  app.patch("/api/projects/:id", async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const before = await storage.getProject(id);
+    const project = await storage.updateProject(id, req.body);
     if (!project) return res.status(404).json({ error: "Project not found" });
+    const changes: Record<string, { from: any; to: any }> = {};
+    if (before) {
+      for (const key of Object.keys(req.body)) {
+        const k = key as keyof typeof before;
+        if (before[k] !== req.body[key]) {
+          changes[key] = { from: before[k], to: req.body[key] };
+        }
+      }
+    }
+    await logAudit(req.user!.id, "project.update", "project", project.id, project.name, changes);
     res.json(project);
   });
 
-  // Change project status
-  app.post("/api/projects/:id/status", (req, res) => {
+  app.post("/api/projects/:id/status", async (req: Request, res: Response) => {
     const { status } = req.body;
     if (!status || !["active", "completed", "cancelled", "potential"].includes(status)) {
-      return res.status(400).json({ error: "Invalid status. Must be: active, completed, cancelled, or potential" });
+      return res.status(400).json({ error: "Invalid status" });
     }
-    const project = storage.getProject(parseInt(req.params.id));
+    // Cancel requires role check
+    if (status === "cancelled") {
+      const allowed = ["admin", "resource_manager", "project_manager"];
+      if (!req.user || !allowed.includes(req.user.role)) {
+        return res.status(403).json({ error: "Insufficient permissions" });
+      }
+    }
+
+    const project = await storage.getProject(parseInt(req.params.id));
     if (!project) return res.status(404).json({ error: "Project not found" });
 
-    // When cancelling an active project, mark all assignments as removed
     if (status === "cancelled" && project.status === "active") {
-      const projectAssignments = storage.getAssignmentsByProject(project.id);
+      const projectAssignments = await storage.getAssignmentsByProject(project.id);
       for (const a of projectAssignments) {
         if (a.status === "active") {
-          storage.updateAssignment(a.id, { status: "removed" });
+          await storage.updateAssignment(a.id, { status: "removed" });
         }
       }
     }
 
-    const updated = storage.updateProjectStatus(project.id, status);
+    const updated = await storage.updateProjectStatus(project.id, status);
+    await logAudit(req.user!.id, "project.status", "project", project.id, project.name, { status: { from: project.status, to: status } });
     res.json(updated);
   });
 
-  // Delete project (cascade-deletes role_slots and assignments) — only for potential projects
-  app.delete("/api/projects/:id", (req, res) => {
-    const project = storage.getProject(parseInt(req.params.id));
+  app.delete("/api/projects/:id", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
+    const project = await storage.getProject(parseInt(req.params.id));
     if (!project) return res.status(404).json({ error: "Project not found" });
     if (project.status !== "potential") {
       return res.status(400).json({ error: "Only potential projects can be deleted" });
     }
-    storage.deleteProject(project.id);
+    await storage.deleteProject(project.id);
+    await logAudit(req.user!.id, "project.delete", "project", project.id, project.name);
     res.status(204).send();
   });
 
-  // Project with team members
-  app.get("/api/projects/:id/team", (req, res) => {
-    const project = storage.getProject(parseInt(req.params.id));
+  app.get("/api/projects/:id/team", async (req: Request, res: Response) => {
+    const project = await storage.getProject(parseInt(req.params.id));
     if (!project) return res.status(404).json({ error: "Project not found" });
-    const projectAssignments = storage.getAssignmentsByProject(project.id);
-    const allWorkers = storage.getWorkers();
+    const projectAssignments = await storage.getAssignmentsByProject(project.id);
+    const allWorkers = await storage.getWorkers();
     const workerMap = Object.fromEntries(allWorkers.map(w => [w.id, w]));
     const team = projectAssignments.map(a => ({
       ...a,
@@ -170,170 +373,200 @@ export function registerRoutes(server: Server, app: Express) {
     res.json({ ...project, team });
   });
 
+  // ===== PROJECT LEADS =====
+  app.get("/api/projects/:id/lead", async (req: Request, res: Response) => {
+    const lead = await storage.getProjectLead(parseInt(req.params.id));
+    if (!lead) return res.json(null);
+    const user = await storage.getUserById(lead.userId);
+    res.json(user ? { id: user.id, name: user.name, email: user.email } : null);
+  });
+
+  app.put("/api/projects/:id/lead", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
+    const { userId } = req.body;
+    if (!userId) {
+      await storage.removeProjectLead(parseInt(req.params.id));
+      return res.json(null);
+    }
+    const lead = await storage.setProjectLead(parseInt(req.params.id), userId);
+    res.json(lead);
+  });
+
   // ===== NOTIFY TEMPS =====
-  app.post("/api/projects/notify-temps", (req, res) => {
+  app.post("/api/projects/notify-temps", async (req: Request, res: Response) => {
     const { projectId, assignmentIds } = req.body;
     if (!projectId || !Array.isArray(assignmentIds)) {
       return res.status(400).json({ error: "projectId and assignmentIds[] required" });
     }
-    const project = storage.getProject(projectId);
+    const project = await storage.getProject(projectId);
     if (!project) return res.status(404).json({ error: "Project not found" });
 
     let sent = 0;
     let skipped = 0;
     const noEmail: string[] = [];
 
+    const allAssignments = await storage.getAssignments();
     for (const aId of assignmentIds) {
-      const allAssignments = storage.getAssignments();
       const assignment = allAssignments.find(a => a.id === aId);
       if (!assignment) { skipped++; continue; }
-
-      const worker = storage.getWorker(assignment.workerId);
+      const worker = await storage.getWorker(assignment.workerId);
       if (!worker) { skipped++; continue; }
       if (worker.status !== "Temp") { skipped++; continue; }
+      if (!worker.personalEmail) { noEmail.push(worker.name); skipped++; continue; }
 
-      if (!worker.personalEmail) {
-        noEmail.push(worker.name);
-        skipped++;
-        continue;
-      }
-
-      // Log the email that would be sent (Outlook integration wired separately)
       const firstName = worker.name.split(" ")[0];
-      console.log(`[NOTIFY-TEMP] Would send email to ${worker.personalEmail}:
-Subject: Project Assignment — ${project.name}
-
-Dear ${firstName},
-
-We would like to allocate you to the following project with Powerforce Global.
-
-Project: ${project.name}
-Location: ${project.location || "TBC"}
-Role: ${assignment.role || "TBC"}
-Start Date: ${assignment.startDate || "TBC"}
-End Date: ${assignment.endDate || "TBC"}
-
-If you are available and would be interested in joining us on this project, please reply as soon as possible.
-
-Kind regards,
-Powerforce Global`);
+      console.log(`[NOTIFY-TEMP] Would send email to ${worker.personalEmail}: Project Assignment — ${project.name} for ${firstName}`);
       sent++;
     }
 
     res.json({ sent, skipped, noEmail });
   });
 
-  // ===== ASSIGNMENTS =====
-  app.get("/api/assignments", (_req, res) => {
-    res.json(storage.getAssignments());
+  // ===== NOTIFICATIONS (extension) =====
+  app.post("/api/notifications/extension", async (req: Request, res: Response) => {
+    const { projectId, changeDescription, changedBy } = req.body;
+    if (!projectId || !changeDescription) {
+      return res.status(400).json({ error: "projectId and changeDescription required" });
+    }
+    const project = await storage.getProject(projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    // Get all resource managers
+    const allUsers = await storage.getUsers();
+    const rms = allUsers.filter(u => u.role === "resource_manager" && u.isActive);
+
+    for (const rm of rms) {
+      console.log(`[EXTENSION-NOTIFY] Would send to ${rm.email}: Schedule change on ${project.name} — ${changedBy || "A user"} has made the following change: ${changeDescription}`);
+    }
+
+    res.json({ notified: rms.length });
   });
 
-  app.post("/api/assignments", (req, res) => {
+  // ===== ASSIGNMENTS =====
+  app.get("/api/assignments", async (_req: Request, res: Response) => {
+    res.json(await storage.getAssignments());
+  });
+
+  app.post("/api/assignments", requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
     const parsed = insertAssignmentSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error });
-    const assignment = storage.createAssignment(parsed.data);
+    const assignment = await storage.createAssignment(parsed.data);
+    await logAudit(req.user!.id, "assignment.create", "assignment", assignment.id);
     res.status(201).json(assignment);
   });
 
-  app.patch("/api/assignments/:id", (req, res) => {
-    const assignment = storage.updateAssignment(parseInt(req.params.id), req.body);
+  app.patch("/api/assignments/:id", requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const assignment = await storage.updateAssignment(id, req.body);
     if (!assignment) return res.status(404).json({ error: "Assignment not found" });
+    await logAudit(req.user!.id, "assignment.update", "assignment", id);
     res.json(assignment);
   });
 
-  app.delete("/api/assignments/:id", (req, res) => {
-    storage.deleteAssignment(parseInt(req.params.id));
+  app.delete("/api/assignments/:id", async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    await storage.deleteAssignment(id);
+    await logAudit(req.user!.id, "assignment.delete", "assignment", id);
     res.status(204).send();
   });
 
   // ===== DOCUMENTS =====
-  app.get("/api/workers/:workerId/documents", (req, res) => {
-    const docs = storage.getDocumentsByWorker(parseInt(req.params.workerId));
+  app.get("/api/workers/:workerId/documents", async (req: Request, res: Response) => {
+    const docs = await storage.getDocumentsByWorker(parseInt(req.params.workerId));
     res.json(docs);
   });
 
-  app.post("/api/documents", (req, res) => {
+  app.post("/api/documents", async (req: Request, res: Response) => {
     const parsed = insertDocumentSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error });
-    const doc = storage.createDocument(parsed.data);
+    const doc = await storage.createDocument(parsed.data);
     res.status(201).json(doc);
   });
 
-  app.delete("/api/documents/:id", (req, res) => {
-    storage.deleteDocument(parseInt(req.params.id));
+  app.delete("/api/documents/:id", async (req: Request, res: Response) => {
+    await storage.deleteDocument(parseInt(req.params.id));
     res.status(204).send();
   });
 
   // ===== ROLE SLOTS =====
-  app.get("/api/projects/:projectId/role-slots", (req, res) => {
-    const slots = storage.getRoleSlotsByProject(parseInt(req.params.projectId));
+  app.get("/api/projects/:projectId/role-slots", async (req: Request, res: Response) => {
+    const slots = await storage.getRoleSlotsByProject(parseInt(req.params.projectId));
     res.json(slots);
   });
 
-  app.post("/api/role-slots", (req, res) => {
+  app.post("/api/role-slots", async (req: Request, res: Response) => {
     const parsed = insertRoleSlotSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error });
-    const slot = storage.createRoleSlot(parsed.data);
+    const slot = await storage.createRoleSlot(parsed.data);
+    await logAudit(req.user!.id, "role_slot.create", "role_slot", slot.id);
     res.status(201).json(slot);
   });
 
-  app.patch("/api/role-slots/:id", (req, res) => {
-    const slot = storage.updateRoleSlot(parseInt(req.params.id), req.body);
+  app.patch("/api/role-slots/:id", async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const slot = await storage.updateRoleSlot(id, req.body);
     if (!slot) return res.status(404).json({ error: "Role slot not found" });
+    await logAudit(req.user!.id, "role_slot.update", "role_slot", id);
     res.json(slot);
   });
 
-  app.delete("/api/role-slots/:id", (req, res) => {
-    storage.deleteRoleSlot(parseInt(req.params.id));
+  app.delete("/api/role-slots/:id", async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    await storage.deleteRoleSlot(id);
+    await logAudit(req.user!.id, "role_slot.delete", "role_slot", id);
     res.status(204).send();
   });
 
   // ===== OEM TYPES =====
-  app.get("/api/oem-types", (_req, res) => {
-    res.json(storage.getOemTypes());
+  app.get("/api/oem-types", async (_req: Request, res: Response) => {
+    res.json(await storage.getOemTypes());
   });
 
-  app.post("/api/oem-types", (req, res) => {
+  app.post("/api/oem-types", async (req: Request, res: Response) => {
     const parsed = insertOemTypeSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error });
-    const oemType = storage.createOemType(parsed.data);
+    const oemType = await storage.createOemType(parsed.data);
     res.status(201).json(oemType);
   });
 
   // ===== FILE UPLOADS =====
-  app.post("/api/workers/:id/upload", upload.single("file"), (req: any, res) => {
+  app.post("/api/workers/:id/upload", upload.single("file"), async (req: any, res: Response) => {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
     const workerId = req.params.id;
     const fileType = req.body?.type || "file";
     const filePath = `/api/uploads/${workerId}/${req.file.filename}`;
 
-    // Update worker record with file path
     if (fileType === "photo") {
-      storage.updateWorker(parseInt(workerId), { profilePhotoPath: filePath });
+      await storage.updateWorker(parseInt(workerId), { profilePhotoPath: filePath });
     } else if (fileType === "passport") {
-      storage.updateWorker(parseInt(workerId), { passportPath: filePath });
+      await storage.updateWorker(parseInt(workerId), { passportPath: filePath });
     }
 
     res.json({ path: filePath, filename: req.file.filename, type: fileType });
   });
 
-  // Serve uploaded files
-  app.get("/api/uploads/:workerId/:filename", (req, res) => {
+  app.get("/api/uploads/:workerId/:filename", (req: Request, res: Response) => {
     const { workerId, filename } = req.params;
     const filePath = path.join(UPLOAD_BASE, workerId, filename);
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: "File not found" });
     res.sendFile(path.resolve(filePath));
   });
 
-  // ===== DASHBOARD SUMMARY =====
-  // Single endpoint that returns everything the dashboard needs
-  app.get("/api/dashboard", (_req, res) => {
-    const allWorkers = storage.getWorkers();
-    const allProjects = storage.getProjects();
-    const allAssignments = storage.getAssignments();
-    const allOemTypes = storage.getOemTypes();
+  // ===== AUDIT LOGS =====
+  app.get("/api/audit-logs", requireRole("admin", "resource_manager", "observer"), async (req: Request, res: Response) => {
+    const limit = parseInt(req.query.limit as string) || 50;
+    const entityType = req.query.entityType as string;
+    const entityId = req.query.entityId ? parseInt(req.query.entityId as string) : undefined;
+    const logs = await storage.getAuditLogs({ entityType, entityId, limit });
+    res.json(logs);
+  });
 
-    // Build enriched workers with their assignments
+  // ===== DASHBOARD SUMMARY =====
+  app.get("/api/dashboard", async (req: Request, res: Response) => {
+    const allWorkers = await storage.getWorkers();
+    const allProjects = await storage.getProjects();
+    const allAssignments = await storage.getAssignments();
+    const allOemTypes = await storage.getOemTypes();
+
     const projectMap = Object.fromEntries(allProjects.map(p => [p.id, p]));
     const assignmentsByWorker: Record<number, any[]> = {};
     allAssignments.forEach(a => {
@@ -341,11 +574,11 @@ Powerforce Global`);
       const proj = projectMap[a.projectId];
       assignmentsByWorker[a.workerId].push({
         ...a,
-        projectCode: proj?.code || '',
-        projectName: proj?.name || '',
-        customer: proj?.customer || '',
-        location: proj?.location || '',
-        equipmentType: proj?.equipmentType || '',
+        projectCode: proj?.code || "",
+        projectName: proj?.name || "",
+        customer: proj?.customer || "",
+        location: proj?.location || "",
+        equipmentType: proj?.equipmentType || "",
       });
     });
 
@@ -355,12 +588,21 @@ Powerforce Global`);
       assignments: assignmentsByWorker[w.id] || [],
     }));
 
-    // Build role slots by project
     const allRoleSlots: any[] = [];
-    allProjects.forEach(p => {
-      const slots = storage.getRoleSlotsByProject(p.id);
+    for (const p of allProjects) {
+      const slots = await storage.getRoleSlotsByProject(p.id);
       slots.forEach(s => allRoleSlots.push({ ...s, projectCode: p.code, projectName: p.name }));
-    });
+    }
+
+    // Load project leads
+    const projectLeadMap: Record<number, { id: number; name: string }> = {};
+    for (const p of allProjects) {
+      const lead = await storage.getProjectLead(p.id);
+      if (lead) {
+        const user = await storage.getUserById(lead.userId);
+        if (user) projectLeadMap[p.id] = { id: user.id, name: user.name };
+      }
+    }
 
     res.json({
       workers: enrichedWorkers,
@@ -368,6 +610,7 @@ Powerforce Global`);
       assignments: allAssignments,
       roleSlots: allRoleSlots,
       oemTypes: allOemTypes,
+      projectLeads: projectLeadMap,
     });
   });
 }

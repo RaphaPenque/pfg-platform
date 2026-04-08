@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect, Fragment } from "react";
+import { useAuth } from "@/context/AuthContext";
 import { useDashboardData, type DashboardWorker, type DashboardAssignment } from "@/hooks/use-dashboard-data";
 import { OEM_BRAND_COLORS, CERT_DEFS, calcUtilisation, PROJECT_ROLES, COST_CENTRES, ENGLISH_LEVELS, ROLE_HIERARCHY, getHighestRole, EQUIPMENT_TYPES, OEM_OPTIONS } from "@/lib/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -889,6 +890,8 @@ function CertificatesTab({ worker }: { worker: DashboardWorker }) {
 // WORKER DETAIL (expanded card with Summary + tabs)
 // ───────────────────────────────────────────────────────────────
 function WorkerDetail({ worker }: { worker: DashboardWorker }) {
+  const { user: authUser } = useAuth();
+  const canDelete = authUser?.role === "admin" || authUser?.role === "resource_manager";
   const [tab, setTab] = useState<"summary" | "certs" | "experience">("summary");
   const [showEditWizard, setShowEditWizard] = useState(false);
   const [deleteState, setDeleteState] = useState<"idle" | "confirming" | "deleting" | "error">("idle");
@@ -937,7 +940,7 @@ function WorkerDetail({ worker }: { worker: DashboardWorker }) {
             data-testid={`edit-worker-${worker.id}`}>
             <Pencil className="w-3.5 h-3.5" /> Edit Profile
           </button>
-          {deleteState === "idle" && (
+          {canDelete && deleteState === "idle" && (
             <button onClick={() => setDeleteState("confirming")}
               className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors hover:bg-red-50"
               style={{ background: "hsl(var(--card))", color: "var(--red)", border: "1px solid var(--red)" }}
@@ -945,14 +948,14 @@ function WorkerDetail({ worker }: { worker: DashboardWorker }) {
               <Trash2 className="w-3.5 h-3.5" /> Delete Profile
             </button>
           )}
-          {deleteState === "confirming" && (
+          {canDelete && deleteState === "confirming" && (
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs" style={{ borderColor: "var(--red)", background: "var(--red-bg)" }}>
               <span style={{ color: "var(--red)" }}>Delete {worker.name}? This cannot be undone.</span>
               <button onClick={handleDelete} className="font-bold px-2 py-0.5 rounded text-white" style={{ background: "var(--red)" }} data-testid={`confirm-delete-${worker.id}`}>Delete</button>
               <button onClick={() => setDeleteState("idle")} className="font-medium px-2 py-0.5 rounded" style={{ color: "var(--pfg-steel)" }} data-testid={`cancel-delete-${worker.id}`}>Cancel</button>
             </div>
           )}
-          {deleteState === "deleting" && (
+          {canDelete && deleteState === "deleting" && (
             <span className="flex items-center gap-1.5 text-xs" style={{ color: "var(--pfg-steel)" }}>
               <Loader2 className="w-3.5 h-3.5 animate-spin" /> Deleting...
             </span>
@@ -1165,6 +1168,8 @@ type SortKey = "name" | "role" | "status" | "englishLevel" | "costCentre" | "mea
 type SortDir = "asc" | "desc";
 
 export default function WorkforceTable() {
+  const { user: authUser } = useAuth();
+  const canAddWorker = authUser?.role === "admin" || authUser?.role === "resource_manager";
   const { data, isLoading } = useDashboardData();
   const [search, setSearch] = useState("");
   const [filterRole, setFilterRole] = useState<string[]>([]);
@@ -1367,13 +1372,15 @@ export default function WorkforceTable() {
             <Download className="w-3.5 h-3.5" /> Export CSV
           </button>
 
-          {/* Add Worker button */}
-          <button onClick={() => setShowAddWorker(true)}
-            className="flex items-center gap-1.5 text-xs font-bold px-4 py-2 rounded-lg ml-2"
-            style={{ background: "var(--pfg-yellow)", color: "var(--pfg-navy)" }}
-            data-testid="add-worker-button">
-            <Plus className="w-3.5 h-3.5" /> Add Worker
-          </button>
+          {/* Add Worker button — admin and resource_manager only */}
+          {canAddWorker && (
+            <button onClick={() => setShowAddWorker(true)}
+              className="flex items-center gap-1.5 text-xs font-bold px-4 py-2 rounded-lg ml-2"
+              style={{ background: "var(--pfg-yellow)", color: "var(--pfg-navy)" }}
+              data-testid="add-worker-button">
+              <Plus className="w-3.5 h-3.5" /> Add Worker
+            </button>
+          )}
 
           <div className="ml-auto text-[13px]" style={{ color: "var(--pfg-steel)" }}>
             <strong className="text-pfg-navy">{sorted.length}</strong> of {workers.length}

@@ -1,4 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@/context/AuthContext";
 import { useDashboardData, type DashboardWorker, type DashboardProject, type DashboardAssignment, type DashboardRoleSlot } from "@/hooks/use-dashboard-data";
 import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, OEM_OPTIONS, EQUIPMENT_TYPES, PROJECT_ROLES, calcUtilisation } from "@/lib/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -234,6 +236,16 @@ function ProjectCard({ card, onClick, effectiveStatus }: { card: ProjectCardData
               CANCELLED
             </span>
           )}
+          {card.members.length > 0 && (() => {
+            const fteCount = card.members.filter(m => m.worker.status === "FTE").length;
+            const ftePct = Math.round((fteCount / card.members.length) * 100);
+            const fteBg = ftePct >= 60 ? "var(--green, #16a34a)" : ftePct >= 50 ? "var(--amber, #D97706)" : "var(--red, #dc2626)";
+            return (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: fteBg, color: "#fff" }} data-testid={`fte-pct-${card.project.code}`}>
+                {ftePct}% FTE
+              </span>
+            );
+          })()}
           <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full" style={{ background: "rgba(255,255,255,0.2)" }}>
             {card.members.length}
           </span>
@@ -1200,6 +1212,8 @@ function EditProjectModal({
   allRoleSlots: DashboardRoleSlot[];
   onClose: () => void;
 }) {
+  const { user: authUser } = useAuth();
+  const canDiscard = authUser?.role === "admin" || authUser?.role === "resource_manager";
   const customer = card.project.customer || PROJECT_CUSTOMER[card.project.code] || "";
   const color = customer ? (OEM_BRAND_COLORS[customer] || "#64748B") : "#64748B";
   const today = new Date().toISOString().split("T")[0];
@@ -1222,6 +1236,15 @@ function EditProjectModal({
   const [editShift, setEditShift] = useState(card.project.shift || "Day");
   const [editHeadcount, setEditHeadcount] = useState(card.project.headcount || 6);
   const [editNotes, setEditNotes] = useState(card.project.notes || "");
+
+  // ── Lead Resource Manager ──
+  const { data: resourceManagers } = useQuery<{ id: number; name: string; email: string }[]>({
+    queryKey: ["/api/users/resource-managers"],
+  });
+  const { data: dashData } = useDashboardData();
+  const initialLeadId = dashData?.projectLeads?.[card.project.id] ?? null;
+  const [editLeadUserId, setEditLeadUserId] = useState<number | null>(initialLeadId);
+  useEffect(() => { setEditLeadUserId(initialLeadId); }, [initialLeadId]);
 
   // Detect OEM from customer
   const editOem = OEM_OPTIONS.find((o) => editCustomer.includes(o)) || "";
@@ -1437,10 +1460,11 @@ function EditProjectModal({
     editShift !== (card.project.shift || "Day") ||
     editHeadcount !== (card.project.headcount || 6) ||
     editNotes !== (card.project.notes || "");
+  const leadChanged = editLeadUserId !== initialLeadId;
 
   const rolesChanged = deletedSlotIds.length > 0 || roleSlotEdits.some((s) => s.key > 0);
   const teamChanged = removedIds.size > 0 || Object.values(slotAdditions).some(ids => ids.length > 0);
-  const hasChanges = detailsChanged || rolesChanged || teamChanged;
+  const hasChanges = detailsChanged || leadChanged || rolesChanged || teamChanged;
 
   // ── Save handler ──
   const handleSave = async () => {
@@ -1461,6 +1485,11 @@ function EditProjectModal({
           headcount: editHeadcount || null,
           notes: editNotes.trim() || null,
         });
+      }
+
+      // Save lead resource manager
+      if (leadChanged) {
+        await apiRequest("PUT", `/api/projects/${card.project.id}/lead`, { userId: editLeadUserId });
       }
 
       // Delete removed role slots
@@ -1669,6 +1698,20 @@ function EditProjectModal({
             </FormGroup>
             <FormGroup label="Notes" full>
               <textarea className={`${inputCls} resize-y min-h-[60px]`} style={inputStyle} value={editNotes} onChange={(e) => setEditNotes(e.target.value)} data-testid="edit-notes" />
+            </FormGroup>
+            <FormGroup label="Lead Resource Manager" full>
+              <select
+                className={inputCls}
+                style={inputStyle}
+                value={editLeadUserId ?? ""}
+                onChange={(e) => setEditLeadUserId(e.target.value ? Number(e.target.value) : null)}
+                data-testid="edit-lead-rm"
+              >
+                <option value="">None</option>
+                {(resourceManagers || []).map((rm) => (
+                  <option key={rm.id} value={rm.id}>{rm.name}</option>
+                ))}
+              </select>
             </FormGroup>
           </div>
         )}
@@ -2115,22 +2158,24 @@ function EditProjectModal({
                 <Sparkles className="w-3.5 h-3.5" />
                 Materialise
               </button>
-              <button
-                onClick={() => setConfirmAction({
-                  title: "Discard Project",
-                  message: `Permanently delete "${card.project.code}"? This potential project and all its role slots and assignments will be removed. This cannot be undone.`,
-                  label: "Discard",
-                  color: "var(--red, #dc2626)",
-                  action: () => handleStatusAction("discard"),
-                })}
-                disabled={saving}
-                className="flex items-center gap-1.5 px-3 py-2 text-[12px] font-semibold rounded-lg"
-                style={{ background: "var(--red-bg)", color: "var(--red)" }}
-                data-testid="action-discard"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                Discard
-              </button>
+              {canDiscard && (
+                <button
+                  onClick={() => setConfirmAction({
+                    title: "Discard Project",
+                    message: `Permanently delete "${card.project.code}"? This potential project and all its role slots and assignments will be removed. This cannot be undone.`,
+                    label: "Discard",
+                    color: "var(--red, #dc2626)",
+                    action: () => handleStatusAction("discard"),
+                  })}
+                  disabled={saving}
+                  className="flex items-center gap-1.5 px-3 py-2 text-[12px] font-semibold rounded-lg"
+                  style={{ background: "var(--red-bg)", color: "var(--red)" }}
+                  data-testid="action-discard"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Discard
+                </button>
+              )}
             </>
           )}
           {isActive && (

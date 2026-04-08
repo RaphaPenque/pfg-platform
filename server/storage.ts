@@ -1,206 +1,331 @@
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
-import { eq, like, and, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
+import { Pool } from "pg";
+import { eq, and, gt, desc, sql } from "drizzle-orm";
 import {
   workers, projects, assignments, documents, oemTypes, roleSlots,
+  users, sessions, magicLinks, auditLogs, projectLeads,
   type Worker, type InsertWorker,
   type Project, type InsertProject,
   type Assignment, type InsertAssignment,
   type Document, type InsertDocument,
   type OemType, type InsertOemType,
   type RoleSlot, type InsertRoleSlot,
+  type User, type InsertUser,
+  type Session, type MagicLink, type AuditLog, type ProjectLead,
 } from "@shared/schema";
 
-import fs from "fs";
-import path from "path";
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.NODE_ENV === "production" ? { rejectUnauthorized: false } : false,
+});
 
-// Use persistent disk on Render (/data/pfg.db), fall back to local
-const RENDER_DB = "/data/pfg.db";
-const LOCAL_DB = "pfg.db";
-const SEED_DB = "pfg-seed.db";
-
-function getDbPath(): string {
-  // If /data exists (Render disk), use it
-  if (fs.existsSync("/data")) {
-    if (!fs.existsSync(RENDER_DB) && fs.existsSync(SEED_DB)) {
-      console.log("Seeding database to persistent disk...");
-      fs.copyFileSync(SEED_DB, RENDER_DB);
-    }
-    if (fs.existsSync(RENDER_DB)) return RENDER_DB;
-  }
-  // Fall back to local (dev mode)
-  return LOCAL_DB;
-}
-
-const dbPath = getDbPath();
-console.log(`Using database: ${dbPath}`);
-const sqlite = new Database(dbPath);
-sqlite.pragma("journal_mode = WAL");
-export const db = drizzle(sqlite);
+export const db = drizzle(pool);
 
 export interface IStorage {
   // Workers
-  getWorkers(): Worker[];
-  getWorker(id: number): Worker | undefined;
-  createWorker(data: InsertWorker): Worker;
-  updateWorker(id: number, data: Partial<InsertWorker>): Worker | undefined;
-  deleteWorker(id: number): void;
+  getWorkers(): Promise<Worker[]>;
+  getWorker(id: number): Promise<Worker | undefined>;
+  createWorker(data: InsertWorker): Promise<Worker>;
+  updateWorker(id: number, data: Partial<InsertWorker>): Promise<Worker | undefined>;
+  deleteWorker(id: number): Promise<void>;
 
   // Projects
-  getProjects(): Project[];
-  getProject(id: number): Project | undefined;
-  getProjectByCode(code: string): Project | undefined;
-  createProject(data: InsertProject): Project;
-  updateProject(id: number, data: Partial<InsertProject>): Project | undefined;
-  updateProjectStatus(id: number, status: string): Project | undefined;
-  deleteProject(id: number): void;
+  getProjects(): Promise<Project[]>;
+  getProject(id: number): Promise<Project | undefined>;
+  getProjectByCode(code: string): Promise<Project | undefined>;
+  createProject(data: InsertProject): Promise<Project>;
+  updateProject(id: number, data: Partial<InsertProject>): Promise<Project | undefined>;
+  updateProjectStatus(id: number, status: string): Promise<Project | undefined>;
+  deleteProject(id: number): Promise<void>;
 
   // Assignments
-  getAssignments(): Assignment[];
-  getAssignmentsByWorker(workerId: number): Assignment[];
-  getAssignmentsByProject(projectId: number): Assignment[];
-  createAssignment(data: InsertAssignment): Assignment;
-  updateAssignment(id: number, data: Partial<InsertAssignment>): Assignment | undefined;
-  deleteAssignment(id: number): void;
+  getAssignments(): Promise<Assignment[]>;
+  getAssignmentsByWorker(workerId: number): Promise<Assignment[]>;
+  getAssignmentsByProject(projectId: number): Promise<Assignment[]>;
+  createAssignment(data: InsertAssignment): Promise<Assignment>;
+  updateAssignment(id: number, data: Partial<InsertAssignment>): Promise<Assignment | undefined>;
+  deleteAssignment(id: number): Promise<void>;
 
   // Documents
-  getDocumentsByWorker(workerId: number): Document[];
-  createDocument(data: InsertDocument): Document;
-  deleteDocument(id: number): void;
+  getDocumentsByWorker(workerId: number): Promise<Document[]>;
+  createDocument(data: InsertDocument): Promise<Document>;
+  deleteDocument(id: number): Promise<void>;
 
   // Role Slots
-  getRoleSlotsByProject(projectId: number): RoleSlot[];
-  getRoleSlot(id: number): RoleSlot | undefined;
-  createRoleSlot(data: InsertRoleSlot): RoleSlot;
-  updateRoleSlot(id: number, data: Partial<InsertRoleSlot>): RoleSlot | undefined;
-  deleteRoleSlot(id: number): void;
+  getRoleSlotsByProject(projectId: number): Promise<RoleSlot[]>;
+  getRoleSlot(id: number): Promise<RoleSlot | undefined>;
+  createRoleSlot(data: InsertRoleSlot): Promise<RoleSlot>;
+  updateRoleSlot(id: number, data: Partial<InsertRoleSlot>): Promise<RoleSlot | undefined>;
+  deleteRoleSlot(id: number): Promise<void>;
 
   // OEM Types
-  getOemTypes(): OemType[];
-  createOemType(data: InsertOemType): OemType;
+  getOemTypes(): Promise<OemType[]>;
+  createOemType(data: InsertOemType): Promise<OemType>;
+
+  // Users
+  getUsers(): Promise<User[]>;
+  getUserById(id: number): Promise<User | undefined>;
+  getUserByEmail(email: string): Promise<User | undefined>;
+  createUser(data: InsertUser): Promise<User>;
+  updateUser(id: number, data: Partial<InsertUser>): Promise<User | undefined>;
+
+  // Sessions
+  createSession(data: { userId: number; token: string; expiresAt: Date; userAgent?: string; ipAddress?: string }): Promise<Session>;
+  getSessionByToken(token: string): Promise<Session | undefined>;
+  deleteSession(token: string): Promise<void>;
+
+  // Magic Links
+  createMagicLink(data: { email: string; token: string; expiresAt: Date }): Promise<MagicLink>;
+  getMagicLinkByToken(token: string): Promise<MagicLink | undefined>;
+  markMagicLinkUsed(token: string): Promise<void>;
+
+  // Audit Logs
+  createAuditLog(data: { userId: number | null; action: string; entityType: string; entityId: number; entityName?: string; changes?: object; metadata?: object }): Promise<void>;
+  getAuditLogs(filters?: { entityType?: string; entityId?: number; limit?: number }): Promise<AuditLog[]>;
+
+  // Project Leads
+  getProjectLead(projectId: number): Promise<ProjectLead | undefined>;
+  setProjectLead(projectId: number, userId: number): Promise<ProjectLead>;
+  removeProjectLead(projectId: number): Promise<void>;
 }
 
-export class SqliteStorage implements IStorage {
+export class PostgresStorage implements IStorage {
   // Workers
-  getWorkers(): Worker[] {
-    return db.select().from(workers).all();
+  async getWorkers(): Promise<Worker[]> {
+    return db.select().from(workers);
   }
 
-  getWorker(id: number): Worker | undefined {
-    return db.select().from(workers).where(eq(workers.id, id)).get();
+  async getWorker(id: number): Promise<Worker | undefined> {
+    const [row] = await db.select().from(workers).where(eq(workers.id, id));
+    return row;
   }
 
-  createWorker(data: InsertWorker): Worker {
-    return db.insert(workers).values(data).returning().get();
+  async createWorker(data: InsertWorker): Promise<Worker> {
+    const [row] = await db.insert(workers).values(data).returning();
+    return row;
   }
 
-  updateWorker(id: number, data: Partial<InsertWorker>): Worker | undefined {
-    return db.update(workers).set(data).where(eq(workers.id, id)).returning().get();
+  async updateWorker(id: number, data: Partial<InsertWorker>): Promise<Worker | undefined> {
+    const [row] = await db.update(workers).set(data).where(eq(workers.id, id)).returning();
+    return row;
   }
 
-  deleteWorker(id: number): void {
-    db.delete(workers).where(eq(workers.id, id)).run();
+  async deleteWorker(id: number): Promise<void> {
+    await db.delete(workers).where(eq(workers.id, id));
   }
 
   // Projects
-  getProjects(): Project[] {
-    return db.select().from(projects).all();
+  async getProjects(): Promise<Project[]> {
+    return db.select().from(projects);
   }
 
-  getProject(id: number): Project | undefined {
-    return db.select().from(projects).where(eq(projects.id, id)).get();
+  async getProject(id: number): Promise<Project | undefined> {
+    const [row] = await db.select().from(projects).where(eq(projects.id, id));
+    return row;
   }
 
-  getProjectByCode(code: string): Project | undefined {
-    return db.select().from(projects).where(eq(projects.code, code)).get();
+  async getProjectByCode(code: string): Promise<Project | undefined> {
+    const [row] = await db.select().from(projects).where(eq(projects.code, code));
+    return row;
   }
 
-  createProject(data: InsertProject): Project {
-    return db.insert(projects).values(data).returning().get();
+  async createProject(data: InsertProject): Promise<Project> {
+    const [row] = await db.insert(projects).values(data).returning();
+    return row;
   }
 
-  updateProject(id: number, data: Partial<InsertProject>): Project | undefined {
-    return db.update(projects).set(data).where(eq(projects.id, id)).returning().get();
+  async updateProject(id: number, data: Partial<InsertProject>): Promise<Project | undefined> {
+    const [row] = await db.update(projects).set(data).where(eq(projects.id, id)).returning();
+    return row;
   }
 
-  updateProjectStatus(id: number, status: string): Project | undefined {
-    return db.update(projects).set({ status }).where(eq(projects.id, id)).returning().get();
+  async updateProjectStatus(id: number, status: string): Promise<Project | undefined> {
+    const [row] = await db.update(projects).set({ status }).where(eq(projects.id, id)).returning();
+    return row;
   }
 
-  deleteProject(id: number): void {
-    // Cascade delete: assignments first, then role slots, then project
-    db.delete(assignments).where(eq(assignments.projectId, id)).run();
-    db.delete(roleSlots).where(eq(roleSlots.projectId, id)).run();
-    db.delete(projects).where(eq(projects.id, id)).run();
+  async deleteProject(id: number): Promise<void> {
+    await db.delete(assignments).where(eq(assignments.projectId, id));
+    await db.delete(roleSlots).where(eq(roleSlots.projectId, id));
+    await db.delete(projectLeads).where(eq(projectLeads.projectId, id));
+    await db.delete(projects).where(eq(projects.id, id));
   }
 
   // Assignments
-  getAssignments(): Assignment[] {
-    return db.select().from(assignments).all();
+  async getAssignments(): Promise<Assignment[]> {
+    return db.select().from(assignments);
   }
 
-  getAssignmentsByWorker(workerId: number): Assignment[] {
-    return db.select().from(assignments).where(eq(assignments.workerId, workerId)).all();
+  async getAssignmentsByWorker(workerId: number): Promise<Assignment[]> {
+    return db.select().from(assignments).where(eq(assignments.workerId, workerId));
   }
 
-  getAssignmentsByProject(projectId: number): Assignment[] {
-    return db.select().from(assignments).where(eq(assignments.projectId, projectId)).all();
+  async getAssignmentsByProject(projectId: number): Promise<Assignment[]> {
+    return db.select().from(assignments).where(eq(assignments.projectId, projectId));
   }
 
-  createAssignment(data: InsertAssignment): Assignment {
-    return db.insert(assignments).values(data).returning().get();
+  async createAssignment(data: InsertAssignment): Promise<Assignment> {
+    const [row] = await db.insert(assignments).values(data).returning();
+    return row;
   }
 
-  updateAssignment(id: number, data: Partial<InsertAssignment>): Assignment | undefined {
-    return db.update(assignments).set(data).where(eq(assignments.id, id)).returning().get();
+  async updateAssignment(id: number, data: Partial<InsertAssignment>): Promise<Assignment | undefined> {
+    const [row] = await db.update(assignments).set(data).where(eq(assignments.id, id)).returning();
+    return row;
   }
 
-  deleteAssignment(id: number): void {
-    db.delete(assignments).where(eq(assignments.id, id)).run();
+  async deleteAssignment(id: number): Promise<void> {
+    await db.delete(assignments).where(eq(assignments.id, id));
   }
 
   // Documents
-  getDocumentsByWorker(workerId: number): Document[] {
-    return db.select().from(documents).where(eq(documents.workerId, workerId)).all();
+  async getDocumentsByWorker(workerId: number): Promise<Document[]> {
+    return db.select().from(documents).where(eq(documents.workerId, workerId));
   }
 
-  createDocument(data: InsertDocument): Document {
-    return db.insert(documents).values(data).returning().get();
+  async createDocument(data: InsertDocument): Promise<Document> {
+    const [row] = await db.insert(documents).values(data).returning();
+    return row;
   }
 
-  deleteDocument(id: number): void {
-    db.delete(documents).where(eq(documents.id, id)).run();
+  async deleteDocument(id: number): Promise<void> {
+    await db.delete(documents).where(eq(documents.id, id));
   }
 
   // Role Slots
-  getRoleSlotsByProject(projectId: number): RoleSlot[] {
-    return db.select().from(roleSlots).where(eq(roleSlots.projectId, projectId)).all();
+  async getRoleSlotsByProject(projectId: number): Promise<RoleSlot[]> {
+    return db.select().from(roleSlots).where(eq(roleSlots.projectId, projectId));
   }
 
-  getRoleSlot(id: number): RoleSlot | undefined {
-    return db.select().from(roleSlots).where(eq(roleSlots.id, id)).get();
+  async getRoleSlot(id: number): Promise<RoleSlot | undefined> {
+    const [row] = await db.select().from(roleSlots).where(eq(roleSlots.id, id));
+    return row;
   }
 
-  createRoleSlot(data: InsertRoleSlot): RoleSlot {
-    return db.insert(roleSlots).values(data).returning().get();
+  async createRoleSlot(data: InsertRoleSlot): Promise<RoleSlot> {
+    const [row] = await db.insert(roleSlots).values(data).returning();
+    return row;
   }
 
-  updateRoleSlot(id: number, data: Partial<InsertRoleSlot>): RoleSlot | undefined {
-    return db.update(roleSlots).set(data).where(eq(roleSlots.id, id)).returning().get();
+  async updateRoleSlot(id: number, data: Partial<InsertRoleSlot>): Promise<RoleSlot | undefined> {
+    const [row] = await db.update(roleSlots).set(data).where(eq(roleSlots.id, id)).returning();
+    return row;
   }
 
-  deleteRoleSlot(id: number): void {
-    db.delete(roleSlots).where(eq(roleSlots.id, id)).run();
+  async deleteRoleSlot(id: number): Promise<void> {
+    await db.delete(roleSlots).where(eq(roleSlots.id, id));
   }
 
   // OEM Types
-  getOemTypes(): OemType[] {
-    return db.select().from(oemTypes).all();
+  async getOemTypes(): Promise<OemType[]> {
+    return db.select().from(oemTypes);
   }
 
-  createOemType(data: InsertOemType): OemType {
-    return db.insert(oemTypes).values(data).returning().get();
+  async createOemType(data: InsertOemType): Promise<OemType> {
+    const [row] = await db.insert(oemTypes).values(data).returning();
+    return row;
+  }
+
+  // Users
+  async getUsers(): Promise<User[]> {
+    return db.select().from(users);
+  }
+
+  async getUserById(id: number): Promise<User | undefined> {
+    const [row] = await db.select().from(users).where(eq(users.id, id));
+    return row;
+  }
+
+  async getUserByEmail(email: string): Promise<User | undefined> {
+    const [row] = await db.select().from(users).where(eq(users.email, email.toLowerCase()));
+    return row;
+  }
+
+  async createUser(data: InsertUser): Promise<User> {
+    const [row] = await db.insert(users).values({ ...data, email: data.email.toLowerCase() }).returning();
+    return row;
+  }
+
+  async updateUser(id: number, data: Partial<InsertUser>): Promise<User | undefined> {
+    const [row] = await db.update(users).set(data).where(eq(users.id, id)).returning();
+    return row;
+  }
+
+  // Sessions
+  async createSession(data: { userId: number; token: string; expiresAt: Date; userAgent?: string; ipAddress?: string }): Promise<Session> {
+    const [row] = await db.insert(sessions).values(data).returning();
+    return row;
+  }
+
+  async getSessionByToken(token: string): Promise<Session | undefined> {
+    const [row] = await db.select().from(sessions)
+      .where(and(eq(sessions.token, token), gt(sessions.expiresAt, new Date())));
+    return row;
+  }
+
+  async deleteSession(token: string): Promise<void> {
+    await db.delete(sessions).where(eq(sessions.token, token));
+  }
+
+  // Magic Links
+  async createMagicLink(data: { email: string; token: string; expiresAt: Date }): Promise<MagicLink> {
+    const [row] = await db.insert(magicLinks).values(data).returning();
+    return row;
+  }
+
+  async getMagicLinkByToken(token: string): Promise<MagicLink | undefined> {
+    const [row] = await db.select().from(magicLinks).where(eq(magicLinks.token, token));
+    return row;
+  }
+
+  async markMagicLinkUsed(token: string): Promise<void> {
+    await db.update(magicLinks).set({ usedAt: new Date() }).where(eq(magicLinks.token, token));
+  }
+
+  // Audit Logs
+  async createAuditLog(data: { userId: number | null; action: string; entityType: string; entityId: number; entityName?: string; changes?: object; metadata?: object }): Promise<void> {
+    await db.insert(auditLogs).values({
+      userId: data.userId,
+      action: data.action,
+      entityType: data.entityType,
+      entityId: data.entityId,
+      entityName: data.entityName || null,
+      changes: data.changes || null,
+      metadata: data.metadata || null,
+    });
+  }
+
+  async getAuditLogs(filters?: { entityType?: string; entityId?: number; limit?: number }): Promise<AuditLog[]> {
+    let query = db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt));
+    if (filters?.limit) {
+      query = query.limit(filters.limit) as typeof query;
+    }
+    const rows = await query;
+    if (filters?.entityType) {
+      return rows.filter(r => r.entityType === filters.entityType);
+    }
+    if (filters?.entityId) {
+      return rows.filter(r => r.entityId === filters.entityId);
+    }
+    return rows;
+  }
+
+  // Project Leads
+  async getProjectLead(projectId: number): Promise<ProjectLead | undefined> {
+    const [row] = await db.select().from(projectLeads).where(eq(projectLeads.projectId, projectId));
+    return row;
+  }
+
+  async setProjectLead(projectId: number, userId: number): Promise<ProjectLead> {
+    // Remove existing lead first
+    await db.delete(projectLeads).where(eq(projectLeads.projectId, projectId));
+    const [row] = await db.insert(projectLeads).values({ projectId, userId }).returning();
+    return row;
+  }
+
+  async removeProjectLead(projectId: number): Promise<void> {
+    await db.delete(projectLeads).where(eq(projectLeads.projectId, projectId));
   }
 }
 
-export const storage = new SqliteStorage();
+export const storage: IStorage = new PostgresStorage();
