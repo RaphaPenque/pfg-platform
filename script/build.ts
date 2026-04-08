@@ -46,6 +46,18 @@ async function buildAll() {
   ];
   const externals = allDeps.filter((dep) => !allowlist.includes(dep));
 
+  // Always external: dev-only and problematic packages that should never be bundled
+  const alwaysExternal = [
+    "vite",
+    "@vitejs/plugin-react",
+    "@babel/core",
+    "@babel/preset-typescript",
+    "@babel/preset-env",
+    "@babel/preset-react",
+    "@babel/plugin-transform-react-jsx",
+    "@babel/helper-module-imports",
+  ];
+
   await esbuild({
     entryPoints: ["server/index.ts"],
     platform: "node",
@@ -56,7 +68,7 @@ async function buildAll() {
       "process.env.NODE_ENV": '"production"',
     },
     minify: true,
-    external: externals,
+    external: [...new Set([...externals, ...alwaysExternal])],
     logLevel: "info",
   });
 }
