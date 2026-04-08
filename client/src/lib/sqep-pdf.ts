@@ -227,8 +227,8 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
   drawSqepHeader(doc, logoUrl, `Work Experience — ${name}`);
 
   const pastAssignments = worker.assignments
-    .filter(a => a.startDate && a.startDate <= today)
-    .sort((a, b) => (b.startDate || "").localeCompare(a.startDate || "")); // most recent first
+    .filter(a => a.status === "active" || a.status === "flagged" || (a.status === "completed") || (a.startDate && a.startDate <= today))
+    .sort((a, b) => (b.startDate || "").localeCompare(a.startDate || "")); // most recent first (descending start date)
 
   y = SQEP_HEADER_H + 12;
 
