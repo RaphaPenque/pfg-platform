@@ -342,8 +342,22 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
   // Step 2: Certs
   const [certData, setCertData] = useState<Record<string, { completionDate: string; validityDate: string; file: File | null; uploaded: boolean }>>(() => {
     const init: Record<string, { completionDate: string; validityDate: string; file: File | null; uploaded: boolean }> = {};
+    // Pre-populate from worker's existing documents
+    const existingDocs: Record<string, any> = {};
+    if ((worker as any).documents) {
+      for (const doc of (worker as any).documents) {
+        existingDocs[doc.type] = doc;
+      }
+    }
     CERT_DEFS.forEach(cert => {
-      init[cert.name] = { completionDate: "", validityDate: "", file: null, uploaded: false };
+      const certType = "cert_" + cert.name.toLowerCase().replace(/[^a-z0-9]/g, "_");
+      const existing = existingDocs[certType];
+      init[cert.name] = {
+        completionDate: existing?.issuedDate || "",
+        validityDate: existing?.expiryDate || "",
+        file: null,
+        uploaded: !!existing?.filePath,
+      };
     });
     return init;
   });
@@ -411,12 +425,20 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
       if (passportFile) await uploadFile(passportFile, "passport");
       if (dlFile) await uploadFile(dlFile, "drivers_license");
 
-      // Upload cert files
+      // Upload cert files and save cert dates
       for (const certName of Object.keys(certData)) {
         const cd = certData[certName];
-        if (cd.file) {
-          const type = "cert_" + certName.toLowerCase().replace(/[^a-z0-9]/g, "_");
-          await uploadFile(cd.file, type);
+        const certType = "cert_" + certName.toLowerCase().replace(/[^a-z0-9]/g, "_");
+        // Only save if there's a file, or dates were entered
+        if (cd.file || cd.completionDate || cd.validityDate || cd.uploaded) {
+          if (cd.file) await uploadFile(cd.file, certType);
+          // Save/update the document record with dates
+          await apiRequest("PUT", `/api/workers/${worker.id}/documents`, {
+            type: certType,
+            name: certName,
+            issuedDate: cd.completionDate || null,
+            expiryDate: cd.validityDate || null,
+          });
         }
       }
 

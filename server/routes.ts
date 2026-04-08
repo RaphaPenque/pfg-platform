@@ -519,6 +519,23 @@ export function registerRoutes(server: Server, app: Express) {
     res.status(204).send();
   });
 
+  // Upsert a certificate/document for a worker (insert or update by workerId + type)
+  app.put("/api/workers/:workerId/documents", async (req: Request, res: Response) => {
+    const workerId = parseInt(req.params.workerId);
+    const { type, name, issuedDate, expiryDate, filePath, fileName, mimeType, fileSize } = req.body;
+    if (!type || !name) return res.status(400).json({ error: "type and name required" });
+    const doc = await storage.upsertDocument(workerId, type, name, {
+      issuedDate: issuedDate || null,
+      expiryDate: expiryDate || null,
+      filePath: filePath || null,
+      fileName: fileName || null,
+      mimeType: mimeType || null,
+      fileSize: fileSize || null,
+      status: "valid",
+    });
+    res.json(doc);
+  });
+
   // ===== ROLE SLOTS =====
   app.get("/api/projects/:projectId/role-slots", async (req: Request, res: Response) => {
     const slots = await storage.getRoleSlotsByProject(parseInt(req.params.projectId));
@@ -614,10 +631,16 @@ export function registerRoutes(server: Server, app: Express) {
       });
     });
 
+    // Load documents for all workers
+    const allDocuments = await Promise.all(allWorkers.map(w => storage.getDocumentsByWorker(w.id)));
+    const documentsByWorker: Record<number, any[]> = {};
+    allWorkers.forEach((w, i) => { documentsByWorker[w.id] = allDocuments[i]; });
+
     const enrichedWorkers = allWorkers.map(w => ({
       ...w,
       oemExperience: w.oemExperience ? JSON.parse(w.oemExperience) : [],
       assignments: assignmentsByWorker[w.id] || [],
+      documents: documentsByWorker[w.id] || [],
     }));
 
     const allRoleSlots: any[] = [];

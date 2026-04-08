@@ -58,6 +58,7 @@ export interface IStorage {
   getDocumentsByWorker(workerId: number): Promise<Document[]>;
   createDocument(data: InsertDocument): Promise<Document>;
   deleteDocument(id: number): Promise<void>;
+  upsertDocument(workerId: number, type: string, name: string, data: Partial<InsertDocument>): Promise<Document>;
 
   // Role Slots
   getRoleSlotsByProject(projectId: number): Promise<RoleSlot[]>;
@@ -198,6 +199,23 @@ export class PostgresStorage implements IStorage {
 
   async deleteDocument(id: number): Promise<void> {
     await db.delete(documents).where(eq(documents.id, id));
+  }
+
+  async upsertDocument(workerId: number, type: string, name: string, data: Partial<InsertDocument>): Promise<Document> {
+    // Check if document of this type already exists for the worker
+    const [existing] = await db.select().from(documents)
+      .where(and(eq(documents.workerId, workerId), eq(documents.type, type)));
+    if (existing) {
+      const [updated] = await db.update(documents)
+        .set({ ...data, name, uploadedAt: new Date().toISOString() })
+        .where(eq(documents.id, existing.id))
+        .returning();
+      return updated;
+    }
+    const [created] = await db.insert(documents)
+      .values({ workerId, type, name, ...data, uploadedAt: new Date().toISOString() } as InsertDocument)
+      .returning();
+    return created;
   }
 
   // Role Slots
