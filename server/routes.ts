@@ -166,19 +166,50 @@ export function registerRoutes(server: Server, app: Express) {
   app.get("/api/portal/:code", async (req: Request, res: Response) => {
     const project = await storage.getProjectByCode(req.params.code.toUpperCase());
     if (!project) return res.status(404).json({ error: "Project not found" });
-    const projectAssignments = await storage.getAssignmentsByProject(project.id);
-    const allWorkers = await storage.getWorkers();
+
+    const [projectAssignments, allWorkers, roleSlots] = await Promise.all([
+      storage.getAssignmentsByProject(project.id),
+      storage.getWorkers(),
+      storage.getRoleSlotsByProject(project.id),
+    ]);
+
     const workerMap = Object.fromEntries(allWorkers.map(w => [w.id, w]));
-    const team = projectAssignments
-      .filter(a => a.status === "active")
+
+    // Build enriched worker objects for assigned workers (with OEM experience parsed)
+    const assignedWorkerIds = new Set(
+      projectAssignments.filter(a => a.status === "active" || a.status === "flagged").map(a => a.workerId)
+    );
+    const workers: Record<number, any> = {};
+    for (const wid of assignedWorkerIds) {
+      const w = workerMap[wid];
+      if (!w) continue;
+      const docs = await storage.getDocumentsByWorker(wid);
+      workers[wid] = {
+        id: w.id,
+        name: w.name,
+        role: w.role,
+        status: w.status,
+        oemExperience: w.oemExperience ? JSON.parse(w.oemExperience) : [],
+        documents: docs,
+      };
+    }
+
+    const assignments = projectAssignments
+      .filter(a => a.status === "active" || a.status === "flagged")
       .map(a => ({
-        role: a.role,
+        id: a.id,
+        workerId: a.workerId,
+        projectId: a.projectId,
+        roleSlotId: a.roleSlotId,
+        task: a.role,
         shift: a.shift,
         startDate: a.startDate,
         endDate: a.endDate,
-        workerName: workerMap[a.workerId]?.name || "TBC",
+        status: a.status,
+        duration: a.duration,
       }));
-    res.json({ project, team });
+
+    res.json({ project, roleSlots, assignments, workers });
   });
 
   // ===== ALL ROUTES BELOW REQUIRE AUTH =====

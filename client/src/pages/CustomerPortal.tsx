@@ -1,5 +1,7 @@
 import { useMemo } from "react";
-import { useDashboardData, type DashboardWorker, type DashboardProject, type DashboardRoleSlot, type DashboardAssignment } from "@/hooks/use-dashboard-data";
+import { useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import type { DashboardWorker, DashboardRoleSlot, DashboardAssignment } from "@/hooks/use-dashboard-data";
 import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, sortSlots } from "@/lib/constants";
 import { downloadSqepPdf, downloadCustomerPack } from "@/lib/sqep-pdf";
 import { Download, FileDown, Info } from "lucide-react";
@@ -73,28 +75,34 @@ interface HistogramRow {
 // ═══════════════════════════════════════════════════════════════════
 
 export default function CustomerPortal({ params }: { params: { projectCode: string } }) {
-  const { data, isLoading } = useDashboardData();
+  // Public endpoint — no auth required
+  const { data, isLoading } = useQuery({
+    queryKey: ["/api/portal", params.projectCode],
+    queryFn: () => apiRequest("GET", `/api/portal/${params.projectCode}`),
+    retry: false,
+  });
 
   const portalData = useMemo(() => {
     if (!data) return null;
-    const { workers, projects, roleSlots } = data;
-
-    const project = projects.find((p) => p.code === params.projectCode);
+    // data = { project, roleSlots, assignments, workers: Record<id, worker> }
+    const { project, roleSlots, assignments, workers: workersMap } = data as any;
     if (!project) return null;
 
     const customer = project.customer || PROJECT_CUSTOMER[project.code] || "";
     const color = customer ? (OEM_BRAND_COLORS[customer] || "#64748B") : "#64748B";
 
-    // Get role slots for this project
-    const projectRoleSlots = roleSlots.filter((s) => s.projectId === project.id);
+    const projectRoleSlots: DashboardRoleSlot[] = (roleSlots || []).map((s: any) => ({
+      ...s,
+      projectCode: project.code,
+      projectName: project.name,
+    }));
 
-    // Get team members (workers assigned to this project)
+    // Build team members from assignments + workers map
     const teamMembers: { worker: DashboardWorker; assignment: DashboardAssignment }[] = [];
-    for (const w of workers) {
-      for (const a of w.assignments) {
-        if (a.projectId === project.id && (a.status === "active" || a.status === "flagged")) {
-          teamMembers.push({ worker: w, assignment: a });
-        }
+    for (const a of (assignments || [])) {
+      const w = workersMap[a.workerId];
+      if (w) {
+        teamMembers.push({ worker: w as DashboardWorker, assignment: a as DashboardAssignment });
       }
     }
 
