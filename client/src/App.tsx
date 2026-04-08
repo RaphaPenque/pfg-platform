@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Switch, Route, Router, useLocation, Link } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -127,12 +128,26 @@ function MainLayout() {
 }
 
 function AuthVerifyRedirect() {
-  // Handle magic link verification — the server redirects here after verify
-  // The cookie is already set; just need to reload auth context
+  // Handle magic link verification
+  // If we have a token in the URL, call the API to verify it and set the cookie
   const { refetch } = useAuth();
-  refetch().then(() => {
-    window.location.hash = "#/";
-  });
+  
+  useEffect(() => {
+    const hashParams = window.location.hash.split('?')[1];
+    const params = new URLSearchParams(hashParams || '');
+    const token = params.get('token');
+    
+    if (token) {
+      // Call the API verify endpoint which sets the session cookie
+      fetch(`/api/auth/verify?token=${token}`, { credentials: 'include', redirect: 'manual' })
+        .then(() => refetch())
+        .then(() => { window.location.hash = '/'; })
+        .catch(() => { window.location.hash = '/login'; });
+    } else {
+      // No token — just reload auth (cookie already set by server redirect)
+      refetch().then(() => { window.location.hash = '/'; });
+    }
+  }, []);
   return (
     <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--pfg-navy, #1A1D23)" }}>
       <div className="text-center">
