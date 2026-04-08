@@ -573,7 +573,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                         </td>
                         <td className="px-4 py-2.5">
                           <button
-                            onClick={() => downloadSqepPdf(m.worker)}
+                            onClick={() => downloadSqepPdf(m.worker as any)}
                             className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded-lg border transition-colors hover:bg-[hsl(var(--accent))]"
                             style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-navy)" }}
                             data-testid={`sqep-download-${m.worker.id}`}

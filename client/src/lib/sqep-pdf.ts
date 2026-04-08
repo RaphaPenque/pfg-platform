@@ -3,21 +3,29 @@ import JSZip from "jszip";
 import type { DashboardWorker, DashboardAssignment } from "@/hooks/use-dashboard-data";
 import { CERT_DEFS } from "@/lib/constants";
 
-// ─── Logo loader (cached promise) ─────────────────────────────────────────────
-let _logoDataUrl: string | null = null;
-async function getLogoDataUrl(): Promise<string | null> {
-  if (_logoDataUrl) return _logoDataUrl;
+// ─── Logo loader (cached — loads logo-gold-mark.png, gold on transparent) ────
+const _logoCache: Record<string, string | null> = {};
+async function loadDataUrl(path: string): Promise<string | null> {
+  if (path in _logoCache) return _logoCache[path];
   try {
-    const res = await fetch("/logo-gold.png");
+    const res = await fetch(path);
     const blob = await res.blob();
     return new Promise((resolve) => {
       const reader = new FileReader();
-      reader.onload = () => { _logoDataUrl = reader.result as string; resolve(_logoDataUrl); };
-      reader.onerror = () => resolve(null);
+      reader.onload = () => { _logoCache[path] = reader.result as string; resolve(_logoCache[path]); };
+      reader.onerror = () => { _logoCache[path] = null; resolve(null); };
       reader.readAsDataURL(blob);
     });
-  } catch { return null; }
+  } catch { _logoCache[path] = null; return null; }
 }
+
+// ─── Clean worker name (strip suffixes like "(PFG SP)", "(PFG CO CTC)" etc) ──
+function cleanName(name: string): string {
+  return name.replace(/\s*\([^)]*\)\s*$/g, "").trim();
+}
+
+// ─── Legacy alias kept for Customer Pack logo loader ─────────────────────────
+const getLogoDataUrl = () => loadDataUrl("/logo-gold-mark.png");
 
 // PFG brand colors
 const NAVY = "#1A1D23";
@@ -26,38 +34,43 @@ const STEEL = "#63758C";
 const WHITE = "#FFFFFF";
 const LIGHT_BG = "#F4F5F7";
 
-function drawHeader(doc: jsPDF, title: string) {
+const SQEP_HEADER_H = 32;
+
+function drawSqepHeader(doc: jsPDF, logoUrl: string | null, subtitle: string) {
   const pageW = doc.internal.pageSize.getWidth();
-  // Navy header band
-  doc.setFillColor(26, 29, 35); // NAVY
-  doc.rect(0, 0, pageW, 28, "F");
-  // Yellow accent line
-  doc.setFillColor(245, 189, 0); // YELLOW
-  doc.rect(0, 28, pageW, 2, "F");
-  // Title text
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(14);
-  doc.setTextColor(255, 255, 255);
-  doc.text("POWERFORCE GLOBAL", 15, 12);
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor(200, 200, 200);
-  doc.text(title, 15, 20);
-  // Date
-  doc.setFontSize(8);
-  doc.text(new Date().toLocaleDateString("en-GB"), pageW - 15, 20, { align: "right" });
+  doc.setFillColor(26, 29, 35);
+  doc.rect(0, 0, pageW, SQEP_HEADER_H, "F");
+  doc.setFillColor(245, 189, 0);
+  doc.rect(0, SQEP_HEADER_H, pageW, 2, "F");
+  if (logoUrl) {
+    // Logo is 662x208 px — scale to fit header height (~22mm tall)
+    doc.addImage(logoUrl, "PNG", 10, 5, 55, 55 * (208 / 662));
+  } else {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(13);
+    doc.setTextColor(245, 189, 0);
+    doc.text("Powerforce Global", 14, 15);
+  }
+  doc.setFont("helvetica", "normal"); doc.setFontSize(8);
+  doc.setTextColor(180, 180, 180);
+  doc.text(subtitle, logoUrl ? 70 : 14, 22);
+  doc.setFontSize(7);
+  doc.text(new Date().toLocaleDateString("en-GB"), pageW - 14, 22, { align: "right" });
 }
 
-function drawFooter(doc: jsPDF, pageNum: number) {
+function drawSqepFooter(doc: jsPDF, label: string) {
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
   doc.setFillColor(26, 29, 35);
-  doc.rect(0, pageH - 12, pageW, 12, "F");
-  doc.setFontSize(7);
+  doc.rect(0, pageH - 10, pageW, 10, "F");
+  doc.setFontSize(7); doc.setFont("helvetica", "normal");
   doc.setTextColor(150, 150, 150);
-  doc.text("Confidential — PowerForce Global SQEP Pack", 15, pageH - 4);
-  doc.text(`Page ${pageNum}`, pageW - 15, pageH - 4, { align: "right" });
+  doc.text("Confidential — PowerForce Global SQEP Pack", 14, pageH - 3.5);
+  doc.text(label, pageW - 14, pageH - 3.5, { align: "right" });
 }
+
+// Keep legacy aliases so Customer Pack header still works
+const drawHeader = (doc: jsPDF, title: string) => drawSqepHeader(doc, null, title);
+const drawFooter = (doc: jsPDF, n: number) => drawSqepFooter(doc, `Page ${n}`);
 
 function calcAge(dob: string | null): string {
   if (!dob) return "—";
@@ -69,267 +82,329 @@ function calcAge(dob: string | null): string {
   return String(age);
 }
 
-export function generateSqepPdf(worker: DashboardWorker): jsPDF {
+export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
   const today = new Date().toISOString().split("T")[0];
+  const logoUrl = await loadDataUrl("/logo-gold-mark.png");
+  const name = cleanName(worker.name);
+  const totalPages = 3; // updated below if overflow
 
-  // ═══════════════════════════════════════════════════════
-  // PAGE 1: Cover Profile
-  // ═══════════════════════════════════════════════════════
-  drawHeader(doc, "SQEP Personnel Pack");
+  // ─── Shared section title helper ───────────────────────────────────────────
+  function sectionTitle(label: string, atY: number) {
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9);
+    doc.setTextColor(26, 29, 35);
+    doc.text(label.toUpperCase(), 14, atY);
+    doc.setDrawColor(245, 189, 0); doc.setLineWidth(0.5);
+    doc.line(14, atY + 1.5, pageW - 14, atY + 1.5);
+  }
 
-  let y = 42;
+  function tableHeader(cols: {label:string;x:number}[], atY: number) {
+    doc.setFillColor(26, 29, 35);
+    doc.rect(14, atY - 4, pageW - 28, 8, "F");
+    doc.setFont("helvetica", "bold"); doc.setFontSize(7);
+    doc.setTextColor(255, 255, 255);
+    cols.forEach(c => doc.text(c.label.toUpperCase(), c.x, atY));
+  }
 
-  // Profile circle with initials
-  const initials = worker.name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
+  // ═══ PAGE 1: Profile Summary ═══════════════════════════════════════════════════
+  drawSqepHeader(doc, logoUrl, "SQEP Personnel Pack");
+
+  let y = SQEP_HEADER_H + 12;
+
+  // Initials circle
+  const initials = name.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2);
   doc.setFillColor(26, 29, 35);
-  doc.circle(pageW / 2, y + 18, 18, "F");
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(18);
+  doc.circle(pageW / 2, y + 14, 14, "F");
+  doc.setFont("helvetica", "bold"); doc.setFontSize(14);
   doc.setTextColor(245, 189, 0);
-  doc.text(initials, pageW / 2, y + 24, { align: "center" });
+  doc.text(initials, pageW / 2, y + 19, { align: "center" });
+  y += 34;
 
-  y += 44;
-
-  // Name
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(20);
+  // Name + role
+  doc.setFont("helvetica", "bold"); doc.setFontSize(18);
   doc.setTextColor(26, 29, 35);
-  doc.text(worker.name, pageW / 2, y, { align: "center" });
-  y += 8;
-
-  // Role
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(12);
+  doc.text(name, pageW / 2, y, { align: "center" });
+  y += 7;
+  doc.setFont("helvetica", "normal"); doc.setFontSize(11);
   doc.setTextColor(99, 117, 140);
   doc.text(worker.role, pageW / 2, y, { align: "center" });
-  y += 14;
+  y += 5;
+  doc.setDrawColor(245, 189, 0); doc.setLineWidth(0.7);
+  doc.line(pageW / 2 - 25, y, pageW / 2 + 25, y);
+  y += 10;
 
-  // Divider
-  doc.setDrawColor(245, 189, 0);
-  doc.setLineWidth(0.8);
-  doc.line(pageW / 2 - 30, y, pageW / 2 + 30, y);
-  y += 12;
-
-  // Info grid
+  // Info grid (2 cols x 3 rows)
   const age = worker.dateOfBirth ? calcAge(worker.dateOfBirth) : worker.age || "—";
   const fields = [
-    ["Age", age],
-    ["Status", worker.status || "—"],
-    ["Date Joined", worker.joined || "—"],
-    ["English Proficiency", worker.englishLevel || "—"],
-    ["Nationality", worker.nationality || "—"],
-    ["Technical Level", worker.techLevel || "—"],
+    ["Nationality",          worker.nationality || "—"],
+    ["Status",               worker.status || "—"],
+    ["Date Joined",          worker.joined || "—"],
+    ["English Proficiency",  worker.englishLevel || "—"],
+    ["Technical Level",      worker.techLevel || "—"],
+    ["Cost Centre",          worker.costCentre || "—"],
   ];
+  const gPad = 6;
+  const gW = (pageW - 28 - gPad) / 2;
+  const gX = [14, 14 + gW + gPad];
 
-  const colWidth = 80;
-  const startX = (pageW - colWidth * 2) / 2;
+  // Grid background
+  doc.setFillColor(244, 245, 247);
+  doc.roundedRect(14, y - 4, pageW - 28, Math.ceil(fields.length / 2) * 16 + 4, 2, 2, "F");
 
   for (let i = 0; i < fields.length; i++) {
     const col = i % 2;
     const row = Math.floor(i / 2);
-    const x = startX + col * colWidth;
-    const fy = y + row * 18;
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
+    const fx = gX[col] + 4;
+    const fy = y + row * 16;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(7);
     doc.setTextColor(99, 117, 140);
-    doc.text(fields[i][0].toUpperCase(), x, fy);
-
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(11);
+    doc.text(fields[i][0].toUpperCase(), fx, fy);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10);
     doc.setTextColor(26, 29, 35);
-    doc.text(fields[i][1], x, fy + 6);
+    doc.text(fields[i][1], fx, fy + 6);
   }
+  y += Math.ceil(fields.length / 2) * 16 + 8;
 
-  y += Math.ceil(fields.length / 2) * 18 + 10;
-
-  // OEM Experience section
+  // OEM Experience
   if (worker.oemExperience.length > 0) {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(8);
-    doc.setTextColor(99, 117, 140);
-    doc.text("OEM EXPERIENCE", startX, y);
-    y += 7;
-
-    let oemX = startX;
+    sectionTitle("OEM Experience", y);
+    y += 8;
+    let oemX = 14;
     for (const oem of worker.oemExperience) {
-      const name = oem.split(" - ")[0];
-      const textWidth = doc.getTextWidth(name) + 8;
-
-      if (oemX + textWidth > pageW - 15) {
-        oemX = startX;
-        y += 9;
-      }
-
-      // Badge background
+      const label = oem.split(" - ")[0];
+      const tw = doc.getTextWidth(label) + 8;
+      if (oemX + tw > pageW - 14) { oemX = 14; y += 9; }
       doc.setFillColor(244, 245, 247);
-      doc.roundedRect(oemX, y - 4, textWidth, 7, 1.5, 1.5, "F");
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(8);
+      doc.roundedRect(oemX, y - 4, tw, 7, 1.5, 1.5, "F");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(8);
       doc.setTextColor(26, 29, 35);
-      doc.text(name, oemX + 4, y + 1);
-      oemX += textWidth + 3;
+      doc.text(label, oemX + 4, y + 1);
+      oemX += tw + 3;
     }
+    y += 12;
   }
 
-  drawFooter(doc, 1);
-
-  // ═══════════════════════════════════════════════════════
-  // PAGE 2: Work Experience
-  // ═══════════════════════════════════════════════════════
-  doc.addPage();
-  drawHeader(doc, "Work Experience — " + worker.name);
-
-  const historicalAssignments = worker.assignments.filter(
-    (a) => a.startDate && a.startDate <= today
+  // Current / active assignments
+  const activeAssignments = worker.assignments.filter(a =>
+    a.status === "active" || a.status === "flagged"
   );
-
-  y = 40;
-
-  if (historicalAssignments.length === 0) {
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(11);
-    doc.setTextColor(99, 117, 140);
-    doc.text("No work experience recorded.", 15, y);
-  } else {
-    // Table header
-    const cols = [
-      { label: "Site / Project", x: 15, w: 45 },
-      { label: "Start", x: 60, w: 22 },
-      { label: "End", x: 82, w: 22 },
-      { label: "Role", x: 104, w: 30 },
-      { label: "OEM", x: 134, w: 28 },
-      { label: "Equipment", x: 162, w: 22 },
+  if (activeAssignments.length > 0) {
+    sectionTitle("Current Assignment" + (activeAssignments.length > 1 ? "s" : ""), y);
+    y += 8;
+    const aCols = [
+      { label: "Project",  x: 14 },
+      { label: "Role",     x: 90 },
+      { label: "Shift",    x: 130 },
+      { label: "Dates",    x: 152 },
+      { label: "Location", x: 185 },
     ];
-
-    doc.setFillColor(244, 245, 247);
-    doc.rect(15, y - 4, pageW - 30, 8, "F");
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(7);
-    doc.setTextColor(99, 117, 140);
-    cols.forEach((col) => {
-      doc.text(col.label.toUpperCase(), col.x, y);
-    });
-
+    tableHeader(aCols, y);
     y += 6;
-
-    // Table rows
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
-
-    for (const a of historicalAssignments) {
-      if (y > 270) {
-        drawFooter(doc, doc.getNumberOfPages());
-        doc.addPage();
-        drawHeader(doc, "Work Experience — " + worker.name + " (cont.)");
-        y = 40;
-      }
-
-      // Zebra striping
-      const rowIdx = historicalAssignments.indexOf(a);
-      if (rowIdx % 2 === 1) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8);
+    for (let i = 0; i < activeAssignments.length; i++) {
+      const a = activeAssignments[i];
+      if (i % 2 === 1) {
         doc.setFillColor(250, 250, 252);
-        doc.rect(15, y - 3.5, pageW - 30, 7, "F");
+        doc.rect(14, y - 3.5, pageW - 28, 7, "F");
       }
-
       doc.setTextColor(26, 29, 35);
-      doc.text(truncate(`${a.projectName} (${a.projectCode})`, 32), cols[0].x, y);
-      doc.text(a.startDate || "—", cols[1].x, y);
-      doc.text(a.endDate || "—", cols[2].x, y);
-      doc.text(truncate(a.role || a.task || worker.role, 20), cols[3].x, y);
-      doc.text(truncate(a.customer || "—", 18), cols[4].x, y);
-      doc.text(a.equipmentType || "—", cols[5].x, y);
-
+      doc.text(truncate(`${a.projectCode} — ${a.projectName}`, 36), aCols[0].x, y);
+      doc.text(truncate(a.role || a.task || worker.role, 18), aCols[1].x, y);
+      doc.text(a.shift || "—", aCols[2].x, y);
+      doc.text(`${a.startDate || "—"} → ${a.endDate || "—"}`, aCols[3].x, y);
+      doc.setTextColor(99, 117, 140);
+      doc.text(truncate((a as any).location || "—", 18), aCols[4].x, y);
       y += 7;
     }
   }
 
-  drawFooter(doc, 2);
+  drawSqepFooter(doc, `Page 1 of ${doc.getNumberOfPages() + 2}`);
 
-  // ═══════════════════════════════════════════════════════
-  // PAGE 3: Qualifications & Certificates
-  // ═══════════════════════════════════════════════════════
+  // ═══ PAGE 2: Work Experience ═══════════════════════════════════════════════════
   doc.addPage();
-  drawHeader(doc, "Qualifications & Certificates — " + worker.name);
+  drawSqepHeader(doc, logoUrl, `Work Experience — ${name}`);
 
-  y = 40;
+  const pastAssignments = worker.assignments
+    .filter(a => a.startDate && a.startDate <= today)
+    .sort((a, b) => (b.startDate || "").localeCompare(a.startDate || "")); // most recent first
 
-  const certCols = [
-    { label: "Certificate", x: 15, w: 80 },
-    { label: "Status", x: 110, w: 30 },
-    { label: "Notes", x: 145, w: 40 },
+  y = SQEP_HEADER_H + 12;
+
+  const wCols = [
+    { label: "Site / Project",  x: 14,  w: 42 },
+    { label: "Start",           x: 56,  w: 20 },
+    { label: "End",             x: 76,  w: 20 },
+    { label: "Role",            x: 96,  w: 24 },
+    { label: "OEM",             x: 120, w: 24 },
+    { label: "Equip.",          x: 144, w: 16 },
+    { label: "Scope of Work",   x: 160, w: 36 },
   ];
 
-  doc.setFillColor(244, 245, 247);
-  doc.rect(15, y - 4, pageW - 30, 8, "F");
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(7);
-  doc.setTextColor(99, 117, 140);
-  certCols.forEach((col) => {
-    doc.text(col.label.toUpperCase(), col.x, y);
-  });
+  if (pastAssignments.length === 0) {
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10);
+    doc.setTextColor(99, 117, 140);
+    doc.text("No work experience recorded.", 14, y);
+  } else {
+    tableHeader(wCols, y);
+    y += 6;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(7.5);
+    for (let i = 0; i < pastAssignments.length; i++) {
+      const a = pastAssignments[i];
+      if (y > pageH - 18) {
+        drawSqepFooter(doc, `Page ${doc.getNumberOfPages()}`);
+        doc.addPage();
+        drawSqepHeader(doc, logoUrl, `Work Experience — ${name} (cont.)`);
+        y = SQEP_HEADER_H + 12;
+        tableHeader(wCols, y); y += 6;
+        doc.setFont("helvetica", "normal"); doc.setFontSize(7.5);
+      }
+      if (i % 2 === 1) {
+        doc.setFillColor(250, 250, 252);
+        doc.rect(14, y - 3, pageW - 28, 6.5, "F");
+      }
+      doc.setTextColor(26, 29, 35);
+      doc.text(truncate(`${a.projectName} (${a.projectCode})`, 30), wCols[0].x, y);
+      doc.text(a.startDate || "—", wCols[1].x, y);
+      doc.text(a.endDate || "—", wCols[2].x, y);
+      doc.text(truncate(a.role || a.task || worker.role, 16), wCols[3].x, y);
+      doc.setTextColor(99, 117, 140);
+      doc.text(truncate(a.customer || "—", 16), wCols[4].x, y);
+      doc.text(a.equipmentType || "—", wCols[5].x, y);
+      doc.setTextColor(26, 29, 35);
+      doc.text(truncate(a.task || a.role || "—", 28), wCols[6].x, y);
+      y += 6.5;
+    }
+  }
+  drawSqepFooter(doc, `Page ${doc.getNumberOfPages()}`);
 
-  y += 6;
+  // ═══ PAGE 3: Qualifications & Certificates ════════════════════════════════════
+  doc.addPage();
+  drawSqepHeader(doc, logoUrl, `Qualifications & Certificates — ${name}`);
+  y = SQEP_HEADER_H + 12;
+
+  // Section A: Certificate checklist
+  sectionTitle("Certificate Checklist", y);
+  y += 8;
+
+  const cCols = [
+    { label: "Certificate",  x: 14 },
+    { label: "Status",       x: 115 },
+    { label: "Expiry",       x: 148 },
+    { label: "Notes",        x: 174 },
+  ];
+  tableHeader(cCols, y); y += 6;
+
+  // Get worker's actual documents for cross-referencing
+  const workerDocs = (worker as any).documents as Array<{
+    type: string; name: string; fileName: string | null;
+    filePath: string | null; expiryDate: string | null;
+    issuedDate: string | null; status: string | null;
+  }> | undefined || [];
 
   doc.setFontSize(8);
-
   for (let i = 0; i < CERT_DEFS.length; i++) {
     const cert = CERT_DEFS[i];
-
-    if (y > 270) {
-      drawFooter(doc, doc.getNumberOfPages());
+    if (y > pageH - 18) {
+      drawSqepFooter(doc, `Page ${doc.getNumberOfPages()}`);
       doc.addPage();
-      drawHeader(doc, "Qualifications & Certificates — " + worker.name + " (cont.)");
-      y = 40;
+      drawSqepHeader(doc, logoUrl, `Certificates — ${name} (cont.)`);
+      y = SQEP_HEADER_H + 12;
+      tableHeader(cCols, y); y += 6;
+      doc.setFontSize(8);
     }
-
-    // Zebra
     if (i % 2 === 1) {
       doc.setFillColor(250, 250, 252);
-      doc.rect(15, y - 3.5, pageW - 30, 7, "F");
+      doc.rect(14, y - 3, pageW - 28, 6.5, "F");
     }
+    // Match against uploaded docs
+    const matchedDoc = workerDocs.find(d =>
+      d.name.toLowerCase().includes(cert.name.toLowerCase().substring(0, 12)) ||
+      cert.name.toLowerCase().includes(d.name.toLowerCase().substring(0, 12))
+    );
+    const hasDoc = !!matchedDoc;
+    const isExpired = matchedDoc?.expiryDate ? matchedDoc.expiryDate < today : false;
+    const isExpiring = matchedDoc?.expiryDate
+      ? matchedDoc.expiryDate >= today && matchedDoc.expiryDate <= new Date(Date.now() + 90*24*60*60*1000).toISOString().split("T")[0]
+      : false;
 
-    // Status indicator dot
-    const isTrade = cert.name === "Trade Diploma";
-    if (isTrade) {
-      doc.setFillColor(34, 197, 94); // green
-    } else {
-      doc.setFillColor(200, 200, 200); // grey
-    }
-    doc.circle(certCols[0].x + 2, y - 1, 1.5, "F");
+    // Status dot
+    if (hasDoc && !isExpired)   doc.setFillColor(34, 197, 94);   // green
+    else if (isExpiring)        doc.setFillColor(245, 158, 11);  // amber
+    else if (isExpired)         doc.setFillColor(239, 68, 68);   // red
+    else                        doc.setFillColor(200, 200, 200); // grey
+    doc.circle(cCols[0].x + 2, y - 1, 1.5, "F");
 
-    doc.setTextColor(26, 29, 35);
-    doc.setFont("helvetica", "normal");
     let certName = cert.name;
-    if ((cert as any).noTradeAlt) {
-      certName += ` / ${(cert as any).noTradeAlt}`;
-    }
-    doc.text(truncate(certName, 52), certCols[0].x + 7, y);
+    if ((cert as any).noTradeAlt) certName += ` / ${(cert as any).noTradeAlt}`;
+
+    doc.setFont("helvetica", "normal"); doc.setTextColor(26, 29, 35);
+    doc.text(truncate(certName, 50), cCols[0].x + 7, y);
 
     doc.setFont("helvetica", "bold");
-    doc.setTextColor(isTrade ? 34 : 150, isTrade ? 197 : 150, isTrade ? 94 : 150);
-    doc.text(isTrade ? "Valid" : "—", certCols[1].x, y);
+    if (hasDoc && !isExpired)   doc.setTextColor(34, 197, 94);
+    else if (isExpiring)        doc.setTextColor(245, 158, 11);
+    else if (isExpired)         doc.setTextColor(239, 68, 68);
+    else                        doc.setTextColor(180, 180, 180);
+    doc.text(hasDoc ? (isExpired ? "Expired" : isExpiring ? "Expiring" : "Valid") : "—", cCols[1].x, y);
 
-    doc.setTextColor(150, 150, 150);
-    doc.setFont("helvetica", "normal");
-    doc.text(
-      isTrade ? (cert.completionOnly ? "Completion only" : "") : "",
-      certCols[2].x,
-      y
-    );
+    doc.setFont("helvetica", "normal"); doc.setTextColor(99, 117, 140);
+    doc.text(matchedDoc?.expiryDate || "—", cCols[2].x, y);
+    doc.text(truncate(matchedDoc?.status || "", 16), cCols[3].x, y);
 
-    y += 7;
+    y += 6.5;
   }
 
-  drawFooter(doc, 3);
+  // Section B: Uploaded documents
+  if (workerDocs.length > 0) {
+    y += 6;
+    if (y > pageH - 40) {
+      drawSqepFooter(doc, `Page ${doc.getNumberOfPages()}`);
+      doc.addPage();
+      drawSqepHeader(doc, logoUrl, `Uploaded Documents — ${name}`);
+      y = SQEP_HEADER_H + 12;
+    }
+    sectionTitle("Uploaded Documents", y);
+    y += 8;
+    const dCols = [
+      { label: "Type / Name",  x: 14 },
+      { label: "File",         x: 90 },
+      { label: "Issued",       x: 140 },
+      { label: "Expiry",       x: 163 },
+      { label: "Status",       x: 186 },
+    ];
+    tableHeader(dCols, y); y += 6;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(7.5);
+    for (let i = 0; i < workerDocs.length; i++) {
+      const d = workerDocs[i];
+      if (i % 2 === 1) {
+        doc.setFillColor(250, 250, 252);
+        doc.rect(14, y - 3, pageW - 28, 6.5, "F");
+      }
+      const isExp = d.expiryDate ? d.expiryDate < today : false;
+      const isExpiring2 = d.expiryDate ? d.expiryDate >= today && d.expiryDate <= new Date(Date.now()+90*24*60*60*1000).toISOString().split("T")[0] : false;
+      doc.setTextColor(26, 29, 35);
+      doc.text(truncate(d.name, 36), dCols[0].x, y);
+      doc.setTextColor(99, 117, 140);
+      doc.text(truncate(d.fileName || "—", 28), dCols[1].x, y);
+      doc.setTextColor(26, 29, 35);
+      doc.text(d.issuedDate || "—", dCols[2].x, y);
+      doc.text(d.expiryDate || "—", dCols[3].x, y);
+      if (isExp)       doc.setTextColor(239, 68, 68);
+      else if (isExpiring2) doc.setTextColor(245, 158, 11);
+      else             doc.setTextColor(34, 197, 94);
+      doc.setFont("helvetica", "bold");
+      doc.text(isExp ? "Expired" : isExpiring2 ? "Expiring" : "Valid", dCols[4].x, y);
+      doc.setFont("helvetica", "normal");
+      y += 6.5;
+    }
+    y += 4;
+    doc.setFontSize(7); doc.setTextColor(150,150,150);
+    doc.text("Certificate originals are included in the attached ZIP file.", 14, y);
+  }
 
+  drawSqepFooter(doc, `Page ${doc.getNumberOfPages()}`);
   return doc;
 }
 
@@ -337,9 +412,9 @@ function truncate(text: string, maxLen: number): string {
   return text.length > maxLen ? text.slice(0, maxLen - 1) + "…" : text;
 }
 
-export function downloadSqepPdf(worker: DashboardWorker) {
-  const doc = generateSqepPdf(worker);
-  const safeName = worker.name.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "");
+export async function downloadSqepPdf(worker: DashboardWorker) {
+  const doc = await generateSqepPdf(worker);
+  const safeName = cleanName(worker.name).replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "");
   doc.save(`SQEP_${safeName}_${new Date().toISOString().split("T")[0]}.pdf`);
 }
 
@@ -577,7 +652,7 @@ export async function downloadCustomerPack(
     const workerFolder = projectFolder.folder(safeName)!;
 
     // SQEP PDF
-    const sqepDoc = generateSqepPdf(worker);
+    const sqepDoc = await generateSqepPdf(worker);
     workerFolder.file(`SQEP_${safeName}.pdf`, sqepDoc.output("blob"));
 
     // Certificate files (from their documents)
