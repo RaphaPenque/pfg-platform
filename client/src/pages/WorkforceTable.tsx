@@ -527,9 +527,31 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
             <FormGroup label="Full Name *">
               <input className={inputCls} style={inputStyle} value={name} onChange={(e) => setName(e.target.value)} data-testid="edit-name" />
             </FormGroup>
-            <FormGroup label="Nationality">
-              <input className={inputCls} style={inputStyle} value={nationality} onChange={(e) => setNationality(e.target.value)} data-testid="edit-nationality" />
+            <FormGroup label="Status">
+              <select className={inputCls} style={inputStyle} value={status} onChange={(e) => setStatus(e.target.value)} data-testid="edit-status">
+                <option value="FTE">FTE</option>
+                <option value="Temp">Temp</option>
+              </select>
             </FormGroup>
+
+            {status === "FTE" ? (
+              <FormGroup label="Cost Centre">
+                <select className={inputCls} style={inputStyle} value={costCentre} onChange={(e) => setCostCentre(e.target.value)} data-testid="edit-cost-centre">
+                  <option value="">Select...</option>
+                  {COST_CENTRES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </FormGroup>
+            ) : (
+              <FormGroup label="Nationality">
+                <input className={inputCls} style={inputStyle} value={nationality} onChange={(e) => setNationality(e.target.value)} data-testid="edit-nationality" />
+              </FormGroup>
+            )}
+
+            {status === "FTE" && (
+              <FormGroup label="Nationality">
+                <input className={inputCls} style={inputStyle} value={nationality} onChange={(e) => setNationality(e.target.value)} data-testid="edit-nationality" />
+              </FormGroup>
+            )}
 
             <FormGroup label="Job Title (Multi-select)" full>
               <div className="flex flex-wrap gap-1.5 p-2 rounded-lg border min-h-[40px]" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--background))" }}>
@@ -550,21 +572,6 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
             <FormGroup label="Date of Birth">
               <input type="date" className={inputCls} style={inputStyle} value={dob} onChange={(e) => setDob(e.target.value)} data-testid="edit-dob" />
             </FormGroup>
-            <FormGroup label="Status">
-              <select className={inputCls} style={inputStyle} value={status} onChange={(e) => setStatus(e.target.value)} data-testid="edit-status">
-                <option value="FTE">FTE</option>
-                <option value="Temp">Temp</option>
-              </select>
-            </FormGroup>
-
-            {status === "FTE" && (
-              <FormGroup label="Cost Centre">
-                <select className={inputCls} style={inputStyle} value={costCentre} onChange={(e) => setCostCentre(e.target.value)} data-testid="edit-cost-centre">
-                  <option value="">Select...</option>
-                  {COST_CENTRES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </FormGroup>
-            )}
 
             <FormGroup label="English Proficiency">
               <select className={inputCls} style={inputStyle} value={englishLevel} onChange={(e) => setEnglishLevel(e.target.value)} data-testid="edit-english">
