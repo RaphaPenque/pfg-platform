@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { useDashboardData, type DashboardWorker, type DashboardProject, type DashboardAssignment, type DashboardRoleSlot } from "@/hooks/use-dashboard-data";
-import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, OEM_OPTIONS, EQUIPMENT_TYPES, PROJECT_ROLES, COST_CENTRES, CERT_DEFS, calcUtilisation, sortSlots } from "@/lib/constants";
+import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, OEM_OPTIONS, EQUIPMENT_TYPES, PROJECT_ROLES, COST_CENTRES, CERT_DEFS, calcUtilisation, sortSlots, cleanName } from "@/lib/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Plus, X, ExternalLink, Trash2, Undo2, Search, ChevronDown, ChevronUp, Check, Loader2, CheckCircle2, XCircle, Sparkles, RotateCcw, AlertTriangle, Download, Info, Mail, Save } from "lucide-react";
 import { downloadCSV } from "@/lib/csv-export";
@@ -260,7 +260,7 @@ function ProjectCard({ card, onClick, effectiveStatus }: { card: ProjectCardData
           card.members.map((m) => (
             <div key={m.assignment.id} className="flex items-center justify-between px-5 py-2.5 text-[13px] transition-colors hover:bg-[hsl(var(--muted))]" style={{ borderBottom: "1px solid hsl(var(--border))" }}>
               <div>
-                <div className="font-medium text-pfg-navy">{m.worker.name}{m.worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
+                <div className="font-medium text-pfg-navy">{cleanName(m.worker.name)}{m.worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
                 {m.assignment.task && <div className="text-[11px] mt-0.5 truncate max-w-[260px]" style={{ color: "var(--pfg-steel)" }}>{m.assignment.task}</div>}
               </div>
               <div className="flex items-center gap-1.5">
@@ -300,7 +300,7 @@ function AvailablePoolCard({ workers }: { workers: DashboardWorker[] }) {
           workers.map((w) => (
             <div key={w.id} className="flex items-center justify-between px-5 py-2.5 text-[13px] transition-colors hover:bg-[hsl(var(--muted))]" style={{ borderBottom: "1px solid hsl(var(--border))" }}>
               <div>
-                <div className="font-medium text-pfg-navy">{w.name}</div>
+                <div className="font-medium text-pfg-navy">{cleanName(w.name)}</div>
                 <div className="text-[11px] mt-0.5" style={{ color: "var(--pfg-steel)" }}>{w.role}</div>
               </div>
               <StatusBadge status={w.status} />
@@ -883,7 +883,7 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
                             data-testid={`assigned-${slot.key}-${wid}`}
                           >
                             <div className="flex-1 min-w-0">
-                              <span className="font-semibold text-pfg-navy">{worker.name}{worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</span>
+                              <span className="font-semibold text-pfg-navy">{cleanName(worker.name)}{worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</span>
                               <span className="ml-2 text-[11px]" style={{ color: "var(--pfg-steel)" }}>{worker.role}</span>
                             </div>
                             <div className="flex items-center gap-1.5 shrink-0">
@@ -981,7 +981,7 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
                                   data-testid={`available-${slot.key}-${w.id}`}
                                 >
                                   <div className="flex-1 min-w-0" onClick={() => assignWorkerToSlot(slot.key, w.id)}>
-                                    <div className="text-[13px] font-semibold text-pfg-navy">{w.name}{w.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
+                                    <div className="text-[13px] font-semibold text-pfg-navy">{cleanName(w.name)}{w.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
                                     <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                                       <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>{w.role}</span>
                                       {w.oemExperience.slice(0, 3).map((exp) => (
@@ -1149,7 +1149,7 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
                         <div key={worker.id} className="flex items-center gap-3 px-3 py-2 rounded-lg border text-[12px]" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}>
                           <Mail className="w-3.5 h-3.5 shrink-0" style={{ color: "var(--pfg-steel)" }} />
                           <div className="flex-1 min-w-0">
-                            <span className="font-semibold text-pfg-navy">{worker.name}</span>
+                            <span className="font-semibold text-pfg-navy">{cleanName(worker.name)}</span>
                             <span className="ml-2" style={{ color: "var(--pfg-steel)" }}>{worker.personalEmail}</span>
                           </div>
                           <span className="text-[11px] shrink-0" style={{ color: "var(--pfg-steel)" }}>{slot.role} · {slot.startDate} → {slot.endDate}</span>
@@ -1395,7 +1395,7 @@ function ConflictResolutionModal({
               <div className="px-4 py-3">
                 {/* Worker name + status */}
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="font-semibold text-sm text-pfg-navy">{c.worker.name}</span>
+                  <span className="font-semibold text-sm text-pfg-navy">{cleanName(c.worker.name)}</span>
                   <span className={`badge text-[10px] ${c.worker.status === "FTE" ? "badge-navy" : "badge-grey"}`}>{c.worker.status}</span>
                   {c.resolution && (
                     <span className="ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full text-white" style={{ background: "var(--green, #16a34a)" }} data-testid={`resolution-badge-${c.worker.id}`}>
@@ -2258,7 +2258,7 @@ function EditProjectModal({
                                 data-testid={`member-row-${m.assignment.id}`}
                               >
                                 <div className="flex-1 min-w-0">
-                                  <div className="text-[13px] font-semibold text-pfg-navy">{m.worker.name}{m.worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
+                                  <div className="text-[13px] font-semibold text-pfg-navy">{cleanName(m.worker.name)}{m.worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
                                   <div className="flex items-center gap-2 mt-0.5">
                                     <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>
                                       {m.assignment.role || m.worker.role} · {m.assignment.startDate || "—"} →
@@ -2309,7 +2309,7 @@ function EditProjectModal({
                             return (
                               <div key={`add-${wid}`} className="flex items-center gap-3 px-3 py-2 rounded-lg border" style={{ borderColor: "var(--green)", background: "var(--green-bg)" }} data-testid={`edit-addition-${slot.key}-${wid}`}>
                                 <div className="flex-1 min-w-0">
-                                  <div className="text-[13px] font-semibold text-pfg-navy">{worker.name}{worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
+                                  <div className="text-[13px] font-semibold text-pfg-navy">{cleanName(worker.name)}{worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
                                   <div className="text-[11px] mt-0.5" style={{ color: "var(--pfg-steel)" }}>{worker.role} · New addition</div>
                                 </div>
                                 <div className="flex items-center gap-1.5 shrink-0">
@@ -2383,7 +2383,7 @@ function EditProjectModal({
                                       data-testid={`edit-available-${slot.key}-${w.id}`}
                                     >
                                       <div className="flex-1 min-w-0" onClick={() => assignWorkerToEditSlot(slot.key, w.id)}>
-                                        <div className="text-[13px] font-semibold text-pfg-navy">{w.name}{w.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
+                                        <div className="text-[13px] font-semibold text-pfg-navy">{cleanName(w.name)}{w.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
                                         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
                                           <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>{w.role}</span>
                                           {w.oemExperience.slice(0, 3).map((exp) => (
@@ -2467,7 +2467,7 @@ function EditProjectModal({
                             data-testid={`member-row-${m.assignment.id}`}
                           >
                             <div className="flex-1 min-w-0">
-                              <div className="text-[13px] font-semibold text-pfg-navy">{m.worker.name}{m.worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
+                              <div className="text-[13px] font-semibold text-pfg-navy">{cleanName(m.worker.name)}{m.worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}</div>
                               <div className="flex items-center gap-2 mt-0.5">
                                 <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>{m.assignment.role || m.worker.role} · {m.assignment.startDate || "—"} → {m.assignment.endDate || "—"}</span>
                               </div>

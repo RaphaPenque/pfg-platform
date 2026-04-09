@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useDashboardData } from "@/hooks/use-dashboard-data";
-import { getProjectColor, OEM_BRAND_COLORS, PROJECT_CUSTOMER } from "@/lib/constants";
+import { getProjectColor, OEM_BRAND_COLORS, PROJECT_CUSTOMER, cleanName } from "@/lib/constants";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip } from "recharts";
 import { Check } from "lucide-react";
 

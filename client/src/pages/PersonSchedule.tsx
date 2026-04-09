@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useDashboardData, type DashboardWorker } from "@/hooks/use-dashboard-data";
-import { getProjectColor, calcUtilisation } from "@/lib/constants";
+import { getProjectColor, calcUtilisation, cleanName } from "@/lib/constants";
 import { Search, Check, Download } from "lucide-react";
 import { downloadCSV } from "@/lib/csv-export";
 
@@ -350,7 +350,7 @@ function PersonRow({
           borderRight: "1px solid hsl(var(--border))",
         }}
       >
-        {worker.name}
+        {cleanName(worker.name)}
         {worker.assignments.some(a => a.status === "flagged") && <span className="text-[10px] ml-1" style={{ color: "var(--red, #dc2626)" }} title="Flagged assignment" data-testid={`schedule-flagged-${worker.id}`}>&#9888;&#xFE0F;</span>}
         {worker.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}
       </td>

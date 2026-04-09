@@ -1,10 +1,11 @@
 import { useState, useMemo, useRef, useEffect, Fragment } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { useDashboardData, type DashboardWorker, type DashboardAssignment } from "@/hooks/use-dashboard-data";
-import { OEM_BRAND_COLORS, CERT_DEFS, calcUtilisation, PROJECT_ROLES, COST_CENTRES, ENGLISH_LEVELS, ROLE_HIERARCHY, getHighestRole, EQUIPMENT_TYPES, OEM_OPTIONS } from "@/lib/constants";
+import { OEM_BRAND_COLORS, CERT_DEFS, calcUtilisation, PROJECT_ROLES, COST_CENTRES, ENGLISH_LEVELS, ROLE_HIERARCHY, getHighestRole, EQUIPMENT_TYPES, OEM_OPTIONS, cleanName } from "@/lib/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Search, ChevronDown, ChevronUp, Info, Upload, Download, ArrowUpDown, Pencil, Plus, X, Check, Loader2, User, FileText, Trash2 } from "lucide-react";
 import { downloadCSV } from "@/lib/csv-export";
+import { downloadSqepPdf } from "@/lib/sqep-pdf";
 
 // ─── Helpers ───
 const inputCls = "px-3 py-2 text-[13px] rounded-lg border focus:outline-none focus:border-[var(--pfg-yellow)] focus:shadow-[0_0_0_3px_rgba(245,189,0,0.15)]";
@@ -489,7 +490,7 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
     <ModalOverlay onClose={onClose} testId="edit-wizard-modal" wide>
       {/* Header */}
       <div className="px-6 py-4 flex items-center justify-between border-b" style={{ borderColor: "hsl(var(--border))" }}>
-        <h2 className="font-display text-lg font-bold text-pfg-navy">Edit Worker — {worker.name}</h2>
+        <h2 className="font-display text-lg font-bold text-pfg-navy">Edit Worker — {cleanName(worker.name)}</h2>
         <button onClick={onClose} className="p-1 hover:bg-black/5 rounded" data-testid="edit-wizard-close"><X className="w-5 h-5" style={{ color: "var(--pfg-steel)" }} /></button>
       </div>
 
@@ -925,6 +926,7 @@ function WorkerDetail({ worker }: { worker: DashboardWorker }) {
   const [showEditWizard, setShowEditWizard] = useState(false);
   const [deleteState, setDeleteState] = useState<"idle" | "confirming" | "deleting" | "error">("idle");
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [sqepDownloading, setSqepDownloading] = useState(false);
   const util = calcUtilisation(worker.assignments);
   const workerRoles = parseRoles(worker);
   const age = worker.dateOfBirth ? calcAge(worker.dateOfBirth) : (worker.age || "—");
@@ -941,7 +943,7 @@ function WorkerDetail({ worker }: { worker: DashboardWorker }) {
       try {
         if (msg.includes("409")) {
           const body = JSON.parse(msg.split(": ").slice(1).join(": "));
-          msg = `Cannot delete — ${worker.name} is currently assigned to ${body.projects.join(", ")}. Remove them from all projects first.`;
+          msg = `Cannot delete — ${cleanName(worker.name)} is currently assigned to ${body.projects.join(", ")}. Remove them from all projects first.`;
         }
       } catch { /* use original message */ }
       setDeleteError(msg);
@@ -979,7 +981,7 @@ function WorkerDetail({ worker }: { worker: DashboardWorker }) {
           )}
           {canDelete && deleteState === "confirming" && (
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs" style={{ borderColor: "var(--red)", background: "var(--red-bg)" }}>
-              <span style={{ color: "var(--red)" }}>Delete {worker.name}? This cannot be undone.</span>
+              <span style={{ color: "var(--red)" }}>Delete {cleanName(worker.name)}? This cannot be undone.</span>
               <button onClick={handleDelete} className="font-bold px-2 py-0.5 rounded text-white" style={{ background: "var(--red)" }} data-testid={`confirm-delete-${worker.id}`}>Delete</button>
               <button onClick={() => setDeleteState("idle")} className="font-medium px-2 py-0.5 rounded" style={{ color: "var(--pfg-steel)" }} data-testid={`cancel-delete-${worker.id}`}>Cancel</button>
             </div>
@@ -1011,14 +1013,14 @@ function WorkerDetail({ worker }: { worker: DashboardWorker }) {
               </div>
               <div className="flex items-center gap-3 mb-3">
                 {worker.profilePhotoPath ? (
-                  <img src={worker.profilePhotoPath} alt={worker.name} className="w-14 h-14 rounded-full object-cover border-2" style={{ borderColor: "hsl(var(--border))" }} />
+                  <img src={worker.profilePhotoPath} alt={cleanName(worker.name)} className="w-14 h-14 rounded-full object-cover border-2" style={{ borderColor: "hsl(var(--border))" }} />
                 ) : (
                   <div className="w-14 h-14 rounded-full flex items-center justify-center text-lg font-bold" style={{ background: "hsl(var(--muted))", color: "var(--pfg-steel)" }}>
-                    {worker.name.split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
+                    {cleanName(worker.name).split(" ").map(n => n[0]).join("").slice(0, 2).toUpperCase()}
                   </div>
                 )}
                 <div>
-                  <div className="text-base font-bold text-pfg-navy">{worker.name}</div>
+                  <div className="text-base font-bold text-pfg-navy">{cleanName(worker.name)}</div>
                   <div className="text-xs" style={{ color: "var(--pfg-steel)" }}>{workerRoles.length > 0 ? getHighestRole(workerRoles) : worker.role}</div>
                 </div>
               </div>
@@ -1165,8 +1167,27 @@ function WorkerDetail({ worker }: { worker: DashboardWorker }) {
               </table>
             </div>
             <div className="mt-3 flex justify-end">
-              <button disabled className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border opacity-40 cursor-not-allowed" data-testid="download-sqep">
-                <Download className="w-3.5 h-3.5" /> Download SQEP Pack
+              <button
+                disabled={sqepDownloading}
+                onClick={async () => {
+                  setSqepDownloading(true);
+                  try {
+                    // Fetch documents for this worker so certs page is complete
+                    const docs = await apiRequest("GET", `/api/workers/${worker.id}/documents`)
+                      .then((r: any) => r.json()).catch(() => []);
+                    const enrichedWorker = { ...worker, documents: docs };
+                    await downloadSqepPdf(enrichedWorker as any);
+                  } finally {
+                    setSqepDownloading(false);
+                  }
+                }}
+                className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors hover:bg-[hsl(var(--accent))] disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-navy)" }}
+                data-testid="download-sqep"
+              >
+                {sqepDownloading
+                  ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Preparing PDF…</>
+                  : <><Download className="w-3.5 h-3.5" /> Download SQEP Pack</>}
               </button>
             </div>
           </div>
@@ -1477,7 +1498,7 @@ export default function WorkforceTable() {
                         onMouseEnter={(e) => { if (!isExpanded) (e.currentTarget.style.background = "hsl(var(--accent))"); }}
                         onMouseLeave={(e) => { if (!isExpanded) (e.currentTarget.style.background = ""); }}>
                         <td className="px-2.5 py-2.5 font-semibold whitespace-nowrap text-pfg-navy">
-                          {w.name}
+                          {cleanName(w.name)}
                           {w.driversLicenseUploaded ? <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0" style={{ background: "#1A1D23", color: "#F5BD00" }} title="Has Driver's Licence">D</span> : null}
                         </td>
                         <td className="px-2.5 py-2.5">{w.role}</td>

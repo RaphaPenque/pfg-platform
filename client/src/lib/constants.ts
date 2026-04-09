@@ -133,6 +133,11 @@ export function calcUtilisation(assignments: any[]): { days: number; pct: number
 
 // ─── Slot sort: Day shift before Night shift, then by ROLE_HIERARCHY rank ───
 const SHIFT_ORDER: Record<string, number> = { Day: 0, Night: 1 };
+// ─── Strip internal name suffixes e.g. "(PFG SP)", "(PO)", "(CTC)" for display ───
+export function cleanName(name: string): string {
+  return name.replace(/\s*\([^)]*\)\s*$/g, "").trim();
+}
+
 export function sortSlots<T extends { role: string; shift?: string }>(slots: T[]): T[] {
   return [...slots].sort((a, b) => {
     const shiftA = SHIFT_ORDER[a.shift ?? 'Day'] ?? 0;
