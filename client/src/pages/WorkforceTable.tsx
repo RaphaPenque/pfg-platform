@@ -1181,41 +1181,150 @@ function WorkExperienceTab({ worker }: { worker: DashboardWorker }) {
 }
 
 // ───────────────────────────────────────────────────────────────
-// READ-ONLY CERTIFICATES TAB
+// CERTIFICATES TAB — reads from real uploaded documents
 // ───────────────────────────────────────────────────────────────
 function CertificatesTab({ worker }: { worker: DashboardWorker }) {
-  // Read-only view of certs
+  const docs = worker.documents || [];
+
+  // Build a lookup: certType key → document
+  const docByType: Record<string, typeof docs[0]> = {};
+  for (const d of docs) {
+    if (d.type) docByType[d.type] = d;
+  }
+
+  // Convert cert name to type key (same formula as upload API)
+  const certKey = (name: string) => 'cert_' + name.toLowerCase().replace(/[^a-z0-9]/g, '_');
+
+  // Certs that have been uploaded but don't match any CERT_DEF (extra certs)
+  const knownKeys = new Set(CERT_DEFS.map(c => certKey(c.name)));
+  const extraDocs = docs.filter(d => d.type?.startsWith('cert_') && !knownKeys.has(d.type));
+
+  const uploadedCount = docs.filter(d => d.type?.startsWith('cert_') && d.filePath).length;
+  const validCount = CERT_DEFS.filter(c => {
+    const d = docByType[certKey(c.name)];
+    return d && getCertStatus(c, !!d.filePath, d.expiryDate).color === 'var(--green)';
+  }).length;
+
+  const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
+
   return (
     <div className="rounded-lg border overflow-hidden" style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))" }}>
+      {/* Summary bar */}
+      <div className="px-4 py-2.5 flex items-center gap-4 border-b text-[12px]" style={{ background: "hsl(var(--muted))", borderColor: "hsl(var(--border))" }}>
+        <span className="font-semibold" style={{ color: "var(--pfg-navy)" }}>{uploadedCount} uploaded</span>
+        <span style={{ color: "var(--green)" }}>{validCount} valid</span>
+        {uploadedCount - validCount > 0 && (
+          <span style={{ color: "var(--red)" }}>{uploadedCount - validCount} expired / expiring</span>
+        )}
+      </div>
       <table className="w-full text-[13px]">
         <thead>
           <tr style={{ background: "hsl(var(--muted))" }}>
-            <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide w-8" style={{ color: "hsl(var(--muted-foreground))" }}></th>
-            <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide" style={{ color: "hsl(var(--muted-foreground))" }}>Certificate</th>
-            <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-wide w-[150px]" style={{ color: "hsl(var(--muted-foreground))" }}>Status</th>
+            <th className="text-left px-4 py-2 text-[10px] font-semibold uppercase tracking-wide w-7" style={{ color: "hsl(var(--muted-foreground))" }} />
+            <th className="text-left px-4 py-2 text-[10px] font-semibold uppercase tracking-wide" style={{ color: "hsl(var(--muted-foreground))" }}>Certificate</th>
+            <th className="text-left px-4 py-2 text-[10px] font-semibold uppercase tracking-wide w-32" style={{ color: "hsl(var(--muted-foreground))" }}>Status</th>
+            <th className="text-left px-4 py-2 text-[10px] font-semibold uppercase tracking-wide w-28" style={{ color: "hsl(var(--muted-foreground))" }}>Issued</th>
+            <th className="text-left px-4 py-2 text-[10px] font-semibold uppercase tracking-wide w-28" style={{ color: "hsl(var(--muted-foreground))" }}>Expiry</th>
+            <th className="px-4 py-2 w-10" />
           </tr>
         </thead>
         <tbody>
           {CERT_DEFS.map(cert => {
-            // For now, show basic status. In production, this would read from documents.
-            const isTrade = cert.name === "Trade Diploma";
-            const statusInfo = isTrade
-              ? { color: "var(--green)", label: "Valid" }
-              : { color: "hsl(var(--muted-foreground))", label: "—" };
+            const key = certKey(cert.name);
+            const doc = docByType[key];
+            const uploaded = !!(doc?.filePath);
+            const status = getCertStatus(cert, uploaded, doc?.expiryDate);
+            const isHolder = uploaded || cert.name === 'Trade Diploma';
 
             return (
-              <tr key={cert.name} className="border-t" style={{ borderColor: "hsl(var(--border))" }}>
+              <tr
+                key={cert.name}
+                className="border-t"
+                style={{
+                  borderColor: "hsl(var(--border))",
+                  opacity: isHolder ? 1 : 0.45,
+                }}
+              >
                 <td className="px-4 py-2.5">
-                  <span style={{ color: statusInfo.color, fontSize: 14 }}>{isTrade ? "●" : "○"}</span>
+                  <span style={{ color: status.color, fontSize: 15 }}>{isHolder ? '●' : '○'}</span>
                 </td>
                 <td className="px-4 py-2.5 font-medium">
                   {cert.name}
                   {(cert as any).noTradeAlt && (
-                    <span className="italic text-xs ml-1" style={{ color: "hsl(var(--muted-foreground))" }}>/ {(cert as any).noTradeAlt}</span>
+                    <span className="italic text-[11px] ml-1" style={{ color: "hsl(var(--muted-foreground))" }}>/ {(cert as any).noTradeAlt}</span>
                   )}
                 </td>
                 <td className="px-4 py-2.5">
-                  <span className="text-xs font-semibold" style={{ color: statusInfo.color }}>{statusInfo.label}</span>
+                  <span
+                    className="text-[11px] font-semibold px-2 py-0.5 rounded-full"
+                    style={{
+                      background: status.color + '1a',
+                      color: status.color,
+                    }}
+                  >
+                    {status.label}
+                  </span>
+                </td>
+                <td className="px-4 py-2.5 text-[12px]" style={{ color: "var(--pfg-steel)" }}>
+                  {doc?.issuedDate || '—'}
+                </td>
+                <td className="px-4 py-2.5 text-[12px]" style={{
+                  color: status.color === 'var(--red)' ? 'var(--red)' :
+                         status.color === 'var(--amber)' ? 'var(--amber)' :
+                         'var(--pfg-steel)'
+                }}>
+                  {doc?.expiryDate || (uploaded ? 'No expiry' : '—')}
+                </td>
+                <td className="px-4 py-2.5">
+                  {doc?.filePath && (
+                    <a
+                      href={`${API_BASE}${doc.filePath}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center w-6 h-6 rounded hover:opacity-80 transition"
+                      style={{ background: "hsl(var(--muted))" }}
+                      title="Download certificate"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--pfg-steel)" }}>
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                      </svg>
+                    </a>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+
+          {/* Extra uploaded certs not in CERT_DEFS */}
+          {extraDocs.map(doc => {
+            const label = doc.type!.replace('cert_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            return (
+              <tr key={doc.type} className="border-t" style={{ borderColor: "hsl(var(--border))" }}>
+                <td className="px-4 py-2.5">
+                  <span style={{ color: "var(--green)", fontSize: 15 }}>●</span>
+                </td>
+                <td className="px-4 py-2.5 font-medium">
+                  {label}
+                  <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--muted))", color: "var(--pfg-steel)" }}>Other</span>
+                </td>
+                <td className="px-4 py-2.5">
+                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ background: "var(--green)1a", color: "var(--green)" }}>Uploaded</span>
+                </td>
+                <td className="px-4 py-2.5 text-[12px]" style={{ color: "var(--pfg-steel)" }}>{doc.issuedDate || '—'}</td>
+                <td className="px-4 py-2.5 text-[12px]" style={{ color: "var(--pfg-steel)" }}>{doc.expiryDate || 'No expiry'}</td>
+                <td className="px-4 py-2.5">
+                  {doc.filePath && (
+                    <a href={`${API_BASE}${doc.filePath}`} target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center justify-center w-6 h-6 rounded hover:opacity-80" style={{ background: "hsl(var(--muted))" }}>
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--pfg-steel)" }}>
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                      </svg>
+                    </a>
+                  )}
                 </td>
               </tr>
             );
