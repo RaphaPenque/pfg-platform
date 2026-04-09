@@ -196,11 +196,11 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
     sectionTitle("Current Assignment" + (activeAssignments.length > 1 ? "s" : ""), y);
     y += 8;
     const aCols = [
-      { label: "Project",  x: 14 },
-      { label: "Role",     x: 85 },
-      { label: "Shift",    x: 118 },
-      { label: "Dates",    x: 138 },
-      { label: "Location", x: 178 },
+      { label: "Project",    x: 14  },  // ~60mm wide
+      { label: "Role",       x: 90  },  // ~28mm wide
+      { label: "Shift",      x: 124 },  // ~18mm wide
+      { label: "Start Date", x: 147 },  // ~25mm wide
+      { label: "End Date",   x: 172 },  // ~25mm wide
     ];
     tableHeader(aCols, y);
     y += 6;
@@ -212,12 +212,11 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
         doc.rect(14, y - 3.5, pageW - 28, 7, "F");
       }
       doc.setTextColor(26, 29, 35);
-      doc.text(truncate(`${a.projectCode} — ${a.projectName}`, 32), aCols[0].x, y);
-      doc.text(truncate(a.role || a.task || worker.role, 16), aCols[1].x, y);
-      doc.text(a.shift || "—", aCols[2].x, y);
-      doc.text(truncate(`${a.startDate || "—"} → ${a.endDate || "—"}`, 22), aCols[3].x, y);
-      doc.setTextColor(99, 117, 140);
-      doc.text(truncate((a as any).location || "—", 14), aCols[4].x, y);
+      doc.text(truncate(`${a.projectCode} - ${a.projectName}`, 36), aCols[0].x, y);
+      doc.text(truncate(a.role || a.task || worker.role, 18), aCols[1].x, y);
+      doc.text(a.shift || "-", aCols[2].x, y);
+      doc.text(a.startDate || "-", aCols[3].x, y);
+      doc.text(a.endDate || "-", aCols[4].x, y);
       y += 7;
     }
   } else {
@@ -301,7 +300,7 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
 
   // Section A: Certificate checklist
   sectionTitle("Certificate Checklist", y);
-  y += 8;
+  y += 14;  // more gap — sectionTitle draws an underline at y+1.5, tableHeader needs space above its bg rect
 
   const cCols = [
     { label: "Certificate",  x: 14 },
@@ -379,7 +378,7 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
       y = SQEP_HEADER_H + 12;
     }
     sectionTitle("Uploaded Documents", y);
-    y += 8;
+    y += 14;
     const dCols = [
       { label: "Type / Name",  x: 14 },
       { label: "File",         x: 90 },
