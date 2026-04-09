@@ -48,7 +48,9 @@ function AppHeader() {
     <>
       <header className="bg-pfg-navy text-white px-6 h-16 flex items-center justify-between sticky top-0 z-50" style={{ boxShadow: "0 2px 8px rgba(0,0,0,0.3)" }}>
         <div className="flex items-center gap-4">
-          <img src="./logo-gold.png" alt="Powerforce Global" className="h-8" />
+          <Link href="/">
+            <img src="./logo-gold.png" alt="Powerforce Global" className="h-8 cursor-pointer" />
+          </Link>
           <span className="text-xs font-medium tracking-[0.12em] uppercase text-white/50 ml-1">
             Workforce Intelligence Platform
           </span>
