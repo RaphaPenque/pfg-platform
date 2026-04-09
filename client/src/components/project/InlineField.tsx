@@ -176,7 +176,7 @@ export default function InlineField({
         ) : (
           <input
             ref={inputRef as React.RefObject<HTMLInputElement>}
-            type={type}
+            type={type === "email" ? "text" : type}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onBlur={save}
