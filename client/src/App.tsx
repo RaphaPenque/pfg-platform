@@ -13,6 +13,7 @@ import GanttChart from "./pages/GanttChart";
 import PersonSchedule from "./pages/PersonSchedule";
 import CustomerPortal from "./pages/CustomerPortal";
 import PayrollRules from "./pages/PayrollRules";
+import UserManagement from "./pages/UserManagement";
 import Login from "./pages/Login";
 import ConfirmAssignment from "./pages/ConfirmAssignment";
 import NotFound from "./pages/not-found";
@@ -124,6 +125,18 @@ function AppHeader() {
                 ⚙ Payroll Rules
               </div>
             </Link>
+            <Link href="/admin/users">
+              <div
+                className={`px-5 py-3 text-[13px] font-medium cursor-pointer border-b-2 transition-all ${
+                  location === "/admin/users"
+                    ? "text-pfg-navy border-pfg-yellow"
+                    : "text-pfg-steel border-transparent hover:text-pfg-navy"
+                }`}
+                data-testid="tab-user-management"
+              >
+                👥 Users
+              </div>
+            </Link>
           </>
         )}
       </nav>
@@ -144,6 +157,7 @@ function MainLayout() {
           <Route path="/gantt" component={GanttChart} />
           <Route path="/schedule" component={PersonSchedule} />
           <Route path="/admin/payroll-rules" component={PayrollRules} />
+          <Route path="/admin/users" component={UserManagement} />
           <Route component={NotFound} />
         </Switch>
       </main>
