@@ -360,32 +360,76 @@ export class PostgresStorage implements IStorage {
     await db.delete(projectLeads).where(eq(projectLeads.projectId, projectId));
   }
 
-  // ─── Payroll Rules ──────────────────────────────────────────────────────────────
+  // ─── Payroll Rules (raw SQL to avoid esbuild scope issues with Drizzle table refs) ──
   async getPayrollRules(): Promise<PayrollRule[]> {
-    return await this.db.select().from(payrollRules).orderBy(payrollRules.countryName);
+    const result = await pool.query(`
+      SELECT id, cost_centre as "costCentre", country_code as "countryCode",
+        country_name as "countryName",
+        weekly_ot_threshold_hours as "weeklyOtThresholdHours",
+        annual_ot_threshold_hours as "annualOtThresholdHours",
+        night_shift_start as "nightShiftStart",
+        night_shift_end as "nightShiftEnd",
+        track_sunday_hours as "trackSundayHours",
+        standby_day_hours as "standbyDayHours",
+        notes, updated_at as "updatedAt", updated_by as "updatedBy"
+      FROM payroll_rules ORDER BY country_name
+    `);
+    return result.rows as PayrollRule[];
   }
 
   async getPayrollRulesByCostCentre(costCentre: string): Promise<PayrollRule | undefined> {
-    return await this.db.select().from(payrollRules)
-      .where(eq(payrollRules.costCentre, costCentre)).limit(1)
-      .then(r => r[0]);
+    const result = await pool.query(`
+      SELECT id, cost_centre as "costCentre", country_code as "countryCode",
+        country_name as "countryName",
+        weekly_ot_threshold_hours as "weeklyOtThresholdHours",
+        annual_ot_threshold_hours as "annualOtThresholdHours",
+        night_shift_start as "nightShiftStart",
+        night_shift_end as "nightShiftEnd",
+        track_sunday_hours as "trackSundayHours",
+        standby_day_hours as "standbyDayHours",
+        notes, updated_at as "updatedAt", updated_by as "updatedBy"
+      FROM payroll_rules WHERE cost_centre = $1 LIMIT 1
+    `, [costCentre]);
+    return result.rows[0] as PayrollRule | undefined;
   }
 
   async upsertPayrollRule(rule: InsertPayrollRule): Promise<PayrollRule> {
-    const existing = await this.getPayrollRulesByCostCentre(rule.costCentre);
-    if (existing) {
-      const [updated] = await this.db.update(payrollRules)
-        .set({ ...rule, updatedAt: new Date() })
-        .where(eq(payrollRules.costCentre, rule.costCentre))
-        .returning();
-      return updated;
-    }
-    const [created] = await this.db.insert(payrollRules).values(rule).returning();
-    return created;
+    const result = await pool.query(`
+      INSERT INTO payroll_rules
+        (cost_centre, country_code, country_name, weekly_ot_threshold_hours,
+         annual_ot_threshold_hours, night_shift_start, night_shift_end,
+         track_sunday_hours, standby_day_hours, notes, updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+      ON CONFLICT (cost_centre) DO UPDATE SET
+        country_code = EXCLUDED.country_code,
+        country_name = EXCLUDED.country_name,
+        weekly_ot_threshold_hours = EXCLUDED.weekly_ot_threshold_hours,
+        annual_ot_threshold_hours = EXCLUDED.annual_ot_threshold_hours,
+        night_shift_start = EXCLUDED.night_shift_start,
+        night_shift_end = EXCLUDED.night_shift_end,
+        track_sunday_hours = EXCLUDED.track_sunday_hours,
+        standby_day_hours = EXCLUDED.standby_day_hours,
+        notes = EXCLUDED.notes,
+        updated_at = NOW()
+      RETURNING id, cost_centre as "costCentre", country_code as "countryCode",
+        country_name as "countryName",
+        weekly_ot_threshold_hours as "weeklyOtThresholdHours",
+        annual_ot_threshold_hours as "annualOtThresholdHours",
+        night_shift_start as "nightShiftStart", night_shift_end as "nightShiftEnd",
+        track_sunday_hours as "trackSundayHours", standby_day_hours as "standbyDayHours",
+        notes, updated_at as "updatedAt"
+    `, [
+      rule.costCentre, rule.countryCode, rule.countryName,
+      rule.weeklyOtThresholdHours ?? null, rule.annualOtThresholdHours ?? null,
+      rule.nightShiftStart ?? null, rule.nightShiftEnd ?? null,
+      rule.trackSundayHours ?? false, rule.standbyDayHours ?? 8,
+      rule.notes ?? null
+    ]);
+    return result.rows[0] as PayrollRule;
   }
 
   async deletePayrollRule(id: number): Promise<void> {
-    await this.db.delete(payrollRules).where(eq(payrollRules.id, id));
+    await pool.query(`DELETE FROM payroll_rules WHERE id = $1`, [id]);
   }
 }
 
