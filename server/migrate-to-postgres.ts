@@ -69,6 +69,18 @@ export async function runSchemaUpdates() {
     await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS night_shift_signatory_name TEXT`);
     await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS night_shift_signatory_email TEXT`);
 
+    // Consolidate day/night signatory fields into single timesheet signatory
+    await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS timesheet_signatory_name TEXT`);
+    await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS timesheet_signatory_email TEXT`);
+    // Migrate existing data: prefer day shift signatory, fall back to night shift
+    await db.execute(sql`
+      UPDATE projects 
+      SET timesheet_signatory_name = COALESCE(day_shift_signatory_name, night_shift_signatory_name),
+          timesheet_signatory_email = COALESCE(day_shift_signatory_email, night_shift_signatory_email)
+      WHERE timesheet_signatory_name IS NULL
+        AND (day_shift_signatory_name IS NOT NULL OR night_shift_signatory_name IS NOT NULL)
+    `);
+
     console.log("Schema updates applied.");
   } catch (e: any) {
     console.error("Schema update error:", e.message);

@@ -78,10 +78,8 @@ export interface DashboardProject {
   sourcingContact: string | null;
   customerProjectManager: string | null;
   siteManager: string | null;
-  dayShiftSignatoryName: string | null;
-  dayShiftSignatoryEmail: string | null;
-  nightShiftSignatoryName: string | null;
-  nightShiftSignatoryEmail: string | null;
+  timesheetSignatoryName: string | null;
+  timesheetSignatoryEmail: string | null;
 }
 
 export interface DashboardRoleSlot {

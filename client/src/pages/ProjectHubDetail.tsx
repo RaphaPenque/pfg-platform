@@ -84,7 +84,7 @@ function computeHealth(
 
   let planningStatus: HealthStatus = "green";
   let planningNote = "All items complete";
-  const hasSignatory = project.dayShiftSignatoryName || project.nightShiftSignatoryName;
+  const hasSignatory = project.timesheetSignatoryName;
   if (!hasSignatory) {
     planningStatus = "red";
     planningNote = "No signatory set";
@@ -230,8 +230,7 @@ function OverviewTab({
     { label: "Sourcing Contact", nameField: "sourcingContact" as const, value: project.sourcingContact },
     { label: "Customer Project Manager", nameField: "customerProjectManager" as const, value: project.customerProjectManager },
     { label: "Site Manager", nameField: "siteManager" as const, value: project.siteManager },
-    { label: "Day Shift Signatory", nameField: "dayShiftSignatoryName" as const, value: project.dayShiftSignatoryName, emailField: "dayShiftSignatoryEmail" as const, email: project.dayShiftSignatoryEmail },
-    { label: "Night Shift Signatory", nameField: "nightShiftSignatoryName" as const, value: project.nightShiftSignatoryName, emailField: "nightShiftSignatoryEmail" as const, email: project.nightShiftSignatoryEmail },
+    { label: "Timesheet Signatory", nameField: "timesheetSignatoryName" as const, value: project.timesheetSignatoryName, emailField: "timesheetSignatoryEmail" as const, email: project.timesheetSignatoryEmail },
   ];
 
   return (

@@ -368,10 +368,8 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
   const [sourcingContact, setSourcingContact] = useState("");
   const [customerPM, setCustomerPM] = useState("");
   const [siteManagerName, setSiteManagerName] = useState("");
-  const [daySignatoryName, setDaySignatoryName] = useState("");
-  const [daySignatoryEmail, setDaySignatoryEmail] = useState("");
-  const [nightSignatoryName, setNightSignatoryName] = useState("");
-  const [nightSignatoryEmail, setNightSignatoryEmail] = useState("");
+  const [signatoryName, setSignatoryName] = useState("");
+  const [signatoryEmail, setSignatoryEmail] = useState("");
 
   // Step 2: Role slots
   const [roleSlots, setRoleSlots] = useState<RoleSlotDraft[]>([]);
@@ -553,10 +551,8 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
         sourcingContact: sourcingContact.trim() || null,
         customerProjectManager: customerPM.trim() || null,
         siteManager: siteManagerName.trim() || null,
-        dayShiftSignatoryName: daySignatoryName.trim() || null,
-        dayShiftSignatoryEmail: daySignatoryEmail.trim() || null,
-        nightShiftSignatoryName: nightSignatoryName.trim() || null,
-        nightShiftSignatoryEmail: nightSignatoryEmail.trim() || null,
+        timesheetSignatoryName: signatoryName.trim() || null,
+        timesheetSignatoryEmail: signatoryEmail.trim() || null,
       });
 
       // 2. Create role slots and collect their server IDs
@@ -827,24 +823,13 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
               </FormGroup>
             </div>
             <div className="border-t pt-4 mt-4" style={{ borderColor: "hsl(var(--border))" }}>
-              <div className="text-xs font-bold uppercase tracking-wide mb-3" style={{ color: "var(--pfg-steel)" }}>Day Shift Signatory</div>
+              <div className="text-xs font-bold uppercase tracking-wide mb-3" style={{ color: "var(--pfg-steel)" }}>Timesheet Signatory</div>
               <div className="grid grid-cols-2 gap-4">
                 <FormGroup label="Name">
-                  <input className={inputCls} style={inputStyle} value={daySignatoryName} onChange={(e) => setDaySignatoryName(e.target.value)} placeholder="Signatory name" data-testid="input-day-signatory-name" />
+                  <input className={inputCls} style={inputStyle} value={signatoryName} onChange={(e) => setSignatoryName(e.target.value)} placeholder="Signatory name" data-testid="input-signatory-name" />
                 </FormGroup>
                 <FormGroup label="Email">
-                  <input type="email" className={inputCls} style={inputStyle} value={daySignatoryEmail} onChange={(e) => setDaySignatoryEmail(e.target.value)} placeholder="signatory@customer.com" data-testid="input-day-signatory-email" />
-                </FormGroup>
-              </div>
-            </div>
-            <div className="border-t pt-4 mt-4" style={{ borderColor: "hsl(var(--border))" }}>
-              <div className="text-xs font-bold uppercase tracking-wide mb-3" style={{ color: "var(--pfg-steel)" }}>Night Shift Signatory</div>
-              <div className="grid grid-cols-2 gap-4">
-                <FormGroup label="Name">
-                  <input className={inputCls} style={inputStyle} value={nightSignatoryName} onChange={(e) => setNightSignatoryName(e.target.value)} placeholder="Signatory name" data-testid="input-night-signatory-name" />
-                </FormGroup>
-                <FormGroup label="Email">
-                  <input type="email" className={inputCls} style={inputStyle} value={nightSignatoryEmail} onChange={(e) => setNightSignatoryEmail(e.target.value)} placeholder="signatory@customer.com" data-testid="input-night-signatory-email" />
+                  <input type="email" className={inputCls} style={inputStyle} value={signatoryEmail} onChange={(e) => setSignatoryEmail(e.target.value)} placeholder="signatory@customer.com" data-testid="input-signatory-email" />
                 </FormGroup>
               </div>
             </div>
@@ -1594,10 +1579,8 @@ function EditProjectModal({
   const [editSourcingContact, setEditSourcingContact] = useState(card.project.sourcingContact || "");
   const [editCustomerPM, setEditCustomerPM] = useState(card.project.customerProjectManager || "");
   const [editSiteManager, setEditSiteManager] = useState(card.project.siteManager || "");
-  const [editDaySignatoryName, setEditDaySignatoryName] = useState(card.project.dayShiftSignatoryName || "");
-  const [editDaySignatoryEmail, setEditDaySignatoryEmail] = useState(card.project.dayShiftSignatoryEmail || "");
-  const [editNightSignatoryName, setEditNightSignatoryName] = useState(card.project.nightShiftSignatoryName || "");
-  const [editNightSignatoryEmail, setEditNightSignatoryEmail] = useState(card.project.nightShiftSignatoryEmail || "");
+  const [editSignatoryName, setEditSignatoryName] = useState(card.project.timesheetSignatoryName || "");
+  const [editSignatoryEmail, setEditSignatoryEmail] = useState(card.project.timesheetSignatoryEmail || "");
 
   // ── Lead Resource Manager ──
   const { data: resourceManagers } = useQuery<{ id: number; name: string; email: string }[]>({
@@ -1897,10 +1880,8 @@ function EditProjectModal({
     editSourcingContact !== (card.project.sourcingContact || "") ||
     editCustomerPM !== (card.project.customerProjectManager || "") ||
     editSiteManager !== (card.project.siteManager || "") ||
-    editDaySignatoryName !== (card.project.dayShiftSignatoryName || "") ||
-    editDaySignatoryEmail !== (card.project.dayShiftSignatoryEmail || "") ||
-    editNightSignatoryName !== (card.project.nightShiftSignatoryName || "") ||
-    editNightSignatoryEmail !== (card.project.nightShiftSignatoryEmail || "");
+    editSignatoryName !== (card.project.timesheetSignatoryName || "") ||
+    editSignatoryEmail !== (card.project.timesheetSignatoryEmail || "");
   const leadChanged = editLeadUserId !== initialLeadId;
 
   // rolesChanged: new slots, deleted slots, OR any existing slot that differs from original
@@ -1940,10 +1921,8 @@ function EditProjectModal({
           sourcingContact: editSourcingContact.trim() || null,
           customerProjectManager: editCustomerPM.trim() || null,
           siteManager: editSiteManager.trim() || null,
-          dayShiftSignatoryName: editDaySignatoryName.trim() || null,
-          dayShiftSignatoryEmail: editDaySignatoryEmail.trim() || null,
-          nightShiftSignatoryName: editNightSignatoryName.trim() || null,
-          nightShiftSignatoryEmail: editNightSignatoryEmail.trim() || null,
+          timesheetSignatoryName: editSignatoryName.trim() || null,
+          timesheetSignatoryEmail: editSignatoryEmail.trim() || null,
         });
       }
 
@@ -2215,17 +2194,17 @@ function EditProjectModal({
             <FormGroup label="Site Manager" full>
               <input className={inputCls} style={inputStyle} value={editSiteManager} onChange={(e) => setEditSiteManager(e.target.value)} placeholder="Name" data-testid="edit-site-manager" />
             </FormGroup>
-            <FormGroup label="Day Shift Signatory Name">
-              <input className={inputCls} style={inputStyle} value={editDaySignatoryName} onChange={(e) => setEditDaySignatoryName(e.target.value)} placeholder="Name" data-testid="edit-day-signatory-name" />
+            <FormGroup label="Timesheet Signatory Name">
+              <input className={inputCls} style={inputStyle} value={editSignatoryName} onChange={(e) => setEditDaySignatoryName(e.target.value)} placeholder="Name" data-testid="edit-day-signatory-name" />
             </FormGroup>
-            <FormGroup label="Day Shift Signatory Email">
-              <input type="email" className={inputCls} style={inputStyle} value={editDaySignatoryEmail} onChange={(e) => setEditDaySignatoryEmail(e.target.value)} placeholder="email@customer.com" data-testid="edit-day-signatory-email" />
+            <FormGroup label="Timesheet Signatory Email">
+              <input type="email" className={inputCls} style={inputStyle} value={editSignatoryEmail} onChange={(e) => setEditDaySignatoryEmail(e.target.value)} placeholder="email@customer.com" data-testid="edit-day-signatory-email" />
             </FormGroup>
-            <FormGroup label="Night Shift Signatory Name">
-              <input className={inputCls} style={inputStyle} value={editNightSignatoryName} onChange={(e) => setEditNightSignatoryName(e.target.value)} placeholder="Name" data-testid="edit-night-signatory-name" />
+            <FormGroup label="Timesheet Signatory Name">
+              <input className={inputCls} style={inputStyle} value={editSignatoryName} onChange={(e) => setEditNightSignatoryName(e.target.value)} placeholder="Name" data-testid="edit-night-signatory-name" />
             </FormGroup>
-            <FormGroup label="Night Shift Signatory Email">
-              <input type="email" className={inputCls} style={inputStyle} value={editNightSignatoryEmail} onChange={(e) => setEditNightSignatoryEmail(e.target.value)} placeholder="email@customer.com" data-testid="edit-night-signatory-email" />
+            <FormGroup label="Timesheet Signatory Email">
+              <input type="email" className={inputCls} style={inputStyle} value={editSignatoryEmail} onChange={(e) => setEditNightSignatoryEmail(e.target.value)} placeholder="email@customer.com" data-testid="edit-night-signatory-email" />
             </FormGroup>
           </div>
         )}
