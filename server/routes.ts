@@ -93,8 +93,13 @@ export function registerRoutes(server: Server, app: Express) {
     if (!email) return res.status(400).json({ error: "Email required" });
 
     const user = await storage.getUserByEmail(email);
-    if (!user) return res.status(404).json({ error: "No account found for this email" });
-    if (!user.isActive) return res.status(403).json({ error: "Account is disabled" });
+    // Always return the same response to prevent email enumeration
+    // If user doesn't exist or is inactive, silently succeed — no info leaked
+    if (!user || !user.isActive) {
+      // Delay response slightly to prevent timing attacks
+      await new Promise(resolve => setTimeout(resolve, 400));
+      return res.json({ message: "If that address is registered, a login link is on its way" });
+    }
 
     const token = crypto.randomUUID();
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
@@ -109,7 +114,7 @@ export function registerRoutes(server: Server, app: Express) {
     sendMail({ to: email, subject: tmpl.subject, html: tmpl.html, text: tmpl.text })
       .catch(err => console.error("[email] Magic link send error:", err));
 
-    res.json({ message: "Magic link sent" });
+    res.json({ message: "If that address is registered, a login link is on its way" });
   });
 
   app.get("/api/auth/verify", async (req: Request, res: Response) => {

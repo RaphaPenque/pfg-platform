@@ -63,8 +63,8 @@ export default function Login() {
               <CheckCircle2 className="w-12 h-12 mx-auto mb-3" style={{ color: "var(--green, #16a34a)" }} />
               <h2 className="font-display font-bold text-pfg-navy text-lg mb-2">Check your email</h2>
               <p className="text-sm" style={{ color: "var(--pfg-steel)" }}>
-                We've sent a login link to <strong>{email}</strong>.
-                <br />Click the link to sign in.
+                If <strong>{email}</strong> is registered, a login link is on its way.
+                <br />Check your inbox and click the link to sign in.
               </p>
               {devToken && (
                 <div className="mt-4 p-3 rounded-lg text-[12px]" style={{ background: "hsl(var(--muted))" }}>
