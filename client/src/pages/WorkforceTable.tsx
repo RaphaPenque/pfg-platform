@@ -985,6 +985,138 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
 // ───────────────────────────────────────────────────────────────
 // READ-ONLY WORK EXPERIENCE TAB
 // ───────────────────────────────────────────────────────────────
+// ── Inline-editable work experience row ───────────────────────────────────
+function EditableWeRow({ exp, workerId }: { exp: WorkExperience; workerId: number }) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    siteName: exp.siteName,
+    startDate: exp.startDate || '',
+    endDate: exp.endDate || '',
+    role: exp.role || '',
+    oem: exp.oem || '',
+    equipmentType: exp.equipmentType || '',
+    scopeOfWork: exp.scopeOfWork || '',
+  });
+
+  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+
+  const inputCls = "w-full bg-transparent border-b text-[12px] px-0 py-0.5 outline-none focus:border-pfg-navy";
+
+  async function save() {
+    if (!form.siteName.trim()) return;
+    setSaving(true);
+    try {
+      await apiRequest('PATCH', `/api/work-experience/${exp.id}`, {
+        siteName: form.siteName.trim(),
+        startDate: form.startDate || null,
+        endDate: form.endDate || null,
+        role: form.role || null,
+        oem: form.oem || null,
+        equipmentType: form.equipmentType || null,
+        scopeOfWork: form.scopeOfWork || null,
+      });
+      await qc.invalidateQueries({ queryKey: ['/api/workers', workerId, 'work-experience'] });
+      setEditing(false);
+    } catch {
+      toast({ title: 'Failed to save', variant: 'destructive' });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function deleteEntry() {
+    await apiRequest('DELETE', `/api/work-experience/${exp.id}`);
+    await qc.invalidateQueries({ queryKey: ['/api/workers', workerId, 'work-experience'] });
+  }
+
+  if (editing) {
+    return (
+      <tr className="border-t" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--muted))" }}>
+        <td className="px-2 py-1.5">
+          <input className={inputCls} value={form.siteName} onChange={e => set('siteName', e.target.value)} placeholder="Site name" autoFocus />
+        </td>
+        <td className="px-2 py-1.5">
+          <input className={inputCls} value={form.startDate} onChange={e => set('startDate', e.target.value)} placeholder="2024" style={{ width: 60 }} />
+        </td>
+        <td className="px-2 py-1.5">
+          <input className={inputCls} value={form.endDate} onChange={e => set('endDate', e.target.value)} placeholder="2024" style={{ width: 60 }} />
+        </td>
+        <td className="px-2 py-1.5">
+          <input className={inputCls} value={form.role} onChange={e => set('role', e.target.value)} placeholder="Role" />
+        </td>
+        <td className="px-2 py-1.5">
+          <input className={inputCls} value={form.oem} onChange={e => set('oem', e.target.value)} placeholder="OEM" />
+        </td>
+        <td className="px-2 py-1.5">
+          <input className={inputCls} value={form.equipmentType} onChange={e => set('equipmentType', e.target.value)} placeholder="GT/ST" style={{ width: 50 }} />
+        </td>
+        <td className="px-2 py-1.5">
+          <input className={inputCls} value={form.scopeOfWork} onChange={e => set('scopeOfWork', e.target.value)} placeholder="Scope" />
+        </td>
+        <td className="px-2 py-1.5">
+          <div className="flex items-center gap-1">
+            <button
+              onClick={save}
+              disabled={saving}
+              className="px-2 py-0.5 rounded text-[11px] font-semibold text-white disabled:opacity-50"
+              style={{ background: "var(--pfg-navy)" }}
+            >
+              {saving ? '...' : '✓'}
+            </button>
+            <button
+              onClick={() => { setEditing(false); setForm({ siteName: exp.siteName, startDate: exp.startDate || '', endDate: exp.endDate || '', role: exp.role || '', oem: exp.oem || '', equipmentType: exp.equipmentType || '', scopeOfWork: exp.scopeOfWork || '' }); }}
+              className="px-2 py-0.5 rounded text-[11px] font-semibold hover:bg-gray-200"
+              style={{ color: "var(--pfg-steel)" }}
+            >
+              ×
+            </button>
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
+  return (
+    <tr
+      className="border-t group hover:bg-[hsl(var(--accent))]"
+      style={{ borderColor: "hsl(var(--border))" }}
+    >
+      <td className="px-3 py-2 font-medium">{exp.siteName}</td>
+      <td className="px-3 py-2 tabular-nums">{exp.startDate || '—'}</td>
+      <td className="px-3 py-2 tabular-nums">{exp.endDate || '—'}</td>
+      <td className="px-3 py-2">{exp.role || '—'}</td>
+      <td className="px-3 py-2">{exp.oem || '—'}</td>
+      <td className="px-3 py-2">{exp.equipmentType || '—'}</td>
+      <td className="px-3 py-2">{exp.scopeOfWork || '—'}</td>
+      <td className="px-3 py-2">
+        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button
+            onClick={() => setEditing(true)}
+            className="p-1 rounded hover:bg-gray-100"
+            style={{ color: "var(--pfg-steel)" }}
+            title="Edit"
+            data-testid={`edit-we-${exp.id}`}
+          >
+            <Pencil className="w-3 h-3" />
+          </button>
+          <button
+            onClick={deleteEntry}
+            className="p-1 rounded hover:bg-red-50"
+            style={{ color: "var(--red)" }}
+            title="Delete"
+            data-testid={`delete-we-${exp.id}`}
+          >
+            <Trash2 className="w-3 h-3" />
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 function WorkExperienceTab({ worker }: { worker: DashboardWorker }) {
   const today = new Date().toISOString().split("T")[0];
   const { data: existingWorkExp = [] } = useQuery<WorkExperience[]>({
@@ -992,86 +1124,58 @@ function WorkExperienceTab({ worker }: { worker: DashboardWorker }) {
     queryFn: () => apiRequest('GET', `/api/workers/${worker.id}/work-experience`).then((r: any) => r.json()),
   });
 
-  // Combine work experience entries and historical assignments, sorted most recent first
-  type CombinedEntry = {
-    key: string;
-    siteName: string;
-    startDate: string | null;
-    endDate: string | null;
-    role: string | null;
-    oem: string | null;
-    equipmentType: string | null;
-    scopeOfWork: string | null;
-    source: 'we' | 'assignment';
-    weId?: number;
-  };
+  // Assignment-based past entries (read-only — from live platform projects)
+  const assignmentEntries = worker.assignments
+    .filter(a => a.startDate && a.startDate <= today)
+    .sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
 
-  const combinedEntries: CombinedEntry[] = [
-    ...existingWorkExp.map(exp => ({
-      key: `we-${exp.id}`,
-      siteName: exp.siteName,
-      startDate: exp.startDate || null,
-      endDate: exp.endDate || null,
-      role: exp.role || null,
-      oem: exp.oem || null,
-      equipmentType: exp.equipmentType || null,
-      scopeOfWork: exp.scopeOfWork || null,
-      source: 'we' as const,
-      weId: exp.id,
-    })),
-    ...worker.assignments
-      .filter(a => a.startDate && a.startDate <= today)
-      .map(a => ({
-        key: `a-${a.id}`,
-        siteName: `${a.projectName} (${a.projectCode})`,
-        startDate: a.startDate || null,
-        endDate: a.endDate || null,
-        role: a.role || a.task || null,
-        oem: a.customer || null,
-        equipmentType: a.equipmentType || null,
-        scopeOfWork: a.task || null,
-        source: 'assignment' as const,
-      })),
-  ].sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
+  // Sort work experience entries most recent first
+  const sortedExp = [...existingWorkExp].sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
 
   return (
     <div className="rounded-lg border overflow-hidden" style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))" }}>
       <table className="w-full text-[12px]">
         <thead>
           <tr style={{ background: "hsl(var(--muted))" }}>
-            {["Site / Project", "Start Date", "End Date", "Role", "OEM", "Equipment", "Scope of Work", ""].map(h => (
+            {["Site / Project", "Start", "End", "Role", "OEM", "Equip.", "Scope of Work", ""].map(h => (
               <th key={h} className="text-left px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wide" style={{ color: "hsl(var(--muted-foreground))" }}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
-          {combinedEntries.length === 0 ? (
+          {sortedExp.length === 0 && assignmentEntries.length === 0 ? (
             <tr><td colSpan={8} className="px-4 py-8 text-center" style={{ color: "hsl(var(--muted-foreground))" }}>No work experience recorded</td></tr>
           ) : (
-            combinedEntries.map(entry => (
-              <tr key={entry.key} className="border-t hover:bg-[hsl(var(--accent))]" style={{ borderColor: "hsl(var(--border))" }}>
-                <td className="px-3 py-2 font-medium">{entry.siteName}</td>
-                <td className="px-3 py-2 tabular-nums">{entry.startDate || "—"}</td>
-                <td className="px-3 py-2 tabular-nums">{entry.endDate || "—"}</td>
-                <td className="px-3 py-2">{entry.role || "—"}</td>
-                <td className="px-3 py-2">{entry.oem || "—"}</td>
-                <td className="px-3 py-2">{entry.equipmentType || "—"}</td>
-                <td className="px-3 py-2">{entry.scopeOfWork || "—"}</td>
-                <td className="px-3 py-2">
-                  {entry.source === 'we' && entry.weId && (
-                    <button onClick={async () => {
-                      await apiRequest('DELETE', `/api/work-experience/${entry.weId}`);
-                      await queryClient.invalidateQueries({ queryKey: ['/api/workers', worker.id, 'work-experience'] });
-                    }} className="p-1 text-red-400 hover:text-red-600">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))
+            <>
+              {/* Editable historical EID entries */}
+              {sortedExp.map(exp => (
+                <EditableWeRow key={`we-${exp.id}`} exp={exp} workerId={worker.id} />
+              ))}
+              {/* Read-only platform assignment entries */}
+              {assignmentEntries.map(a => (
+                <tr key={`a-${a.id}`} className="border-t" style={{ borderColor: "hsl(var(--border))", opacity: 0.75 }}>
+                  <td className="px-3 py-2 font-medium">
+                    <span>{a.projectName ?? ''} ({a.projectCode ?? ''})</span>
+                    <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--muted))", color: "var(--pfg-steel)" }}>Platform</span>
+                  </td>
+                  <td className="px-3 py-2 tabular-nums">{a.startDate || '—'}</td>
+                  <td className="px-3 py-2 tabular-nums">{a.endDate || '—'}</td>
+                  <td className="px-3 py-2">{a.role || a.task || '—'}</td>
+                  <td className="px-3 py-2">{(a as any).customer || '—'}</td>
+                  <td className="px-3 py-2">{(a as any).equipmentType || '—'}</td>
+                  <td className="px-3 py-2">{a.task || '—'}</td>
+                  <td className="px-3 py-2" />
+                </tr>
+              ))}
+            </>
           )}
         </tbody>
       </table>
+      {sortedExp.length > 0 && (
+        <div className="px-3 py-1.5 border-t text-[10px]" style={{ borderColor: "hsl(var(--border))", color: "hsl(var(--muted-foreground))" }}>
+          Hover any row to edit · {sortedExp.length} imported {assignmentEntries.length > 0 ? `· ${assignmentEntries.length} from platform` : ''}
+        </div>
+      )}
     </div>
   );
 }

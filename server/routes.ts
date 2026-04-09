@@ -499,6 +499,16 @@ export function registerRoutes(server: Server, app: Express) {
     res.status(201).json(entry);
   });
 
+  app.patch("/api/work-experience/:id", async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const { siteName, startDate, endDate, role, oem, equipmentType, scopeOfWork } = req.body;
+    const updated = await storage.updateWorkExperience(id, {
+      siteName, startDate: startDate || null, endDate: endDate || null,
+      role: role || null, oem: oem || null, equipmentType: equipmentType || null, scopeOfWork: scopeOfWork || null
+    });
+    res.json(updated);
+  });
+
   app.delete("/api/work-experience/:id", async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     await storage.deleteWorkExperience(id);

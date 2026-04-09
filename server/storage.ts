@@ -111,6 +111,7 @@ export interface IStorage {
   getWorkExperience(workerId: number): Promise<WorkExperience[]>;
   createWorkExperience(entry: InsertWorkExperience): Promise<WorkExperience>;
   deleteWorkExperience(id: number): Promise<void>;
+  updateWorkExperience(id: number, data: Partial<InsertWorkExperience>): Promise<WorkExperience>;
   bulkCreateWorkExperience(entries: InsertWorkExperience[]): Promise<void>;
   // OEM Experience
   getOemExperience(workerId: number): Promise<OemExperience[]>;
@@ -460,6 +461,11 @@ export class PostgresStorage implements IStorage {
 
   async deleteWorkExperience(id: number): Promise<void> {
     await db.delete(workExperience).where(eq(workExperience.id, id));
+  }
+
+  async updateWorkExperience(id: number, data: Partial<InsertWorkExperience>): Promise<WorkExperience> {
+    const updated = await db.update(workExperience).set(data).where(eq(workExperience.id, id)).returning();
+    return updated[0];
   }
 
   async bulkCreateWorkExperience(entries: InsertWorkExperience[]): Promise<void> {
