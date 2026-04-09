@@ -241,3 +241,21 @@ export const payrollRules = pgTable("payroll_rules", {
 export const insertPayrollRulesSchema = createInsertSchema(payrollRules).omit({ id: true });
 export type PayrollRule = typeof payrollRules.$inferSelect;
 export type InsertPayrollRule = typeof insertPayrollRulesSchema._type;
+
+// ===== WORK EXPERIENCE =====
+export const workExperience = pgTable("work_experience", {
+  id: serial("id").primaryKey(),
+  workerId: integer("worker_id").notNull().references(() => workers.id, { onDelete: "cascade" }),
+  siteName: text("site_name").notNull(),
+  startDate: text("start_date"),   // "2024" or "2024-06-01" — stored as text
+  endDate: text("end_date"),
+  role: text("role"),
+  oem: text("oem"),
+  equipmentType: text("equipment_type"),
+  scopeOfWork: text("scope_of_work"),
+  source: text("source").default("manual"),  // "manual" | "eid_import"
+});
+
+export const insertWorkExperienceSchema = createInsertSchema(workExperience).omit({ id: true });
+export type InsertWorkExperience = z.infer<typeof insertWorkExperienceSchema>;
+export type WorkExperience = typeof workExperience.$inferSelect;

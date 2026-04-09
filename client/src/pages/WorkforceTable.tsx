@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect, Fragment } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
 import { useDashboardData, type DashboardWorker, type DashboardAssignment } from "@/hooks/use-dashboard-data";
 import { OEM_BRAND_COLORS, CERT_DEFS, calcUtilisation, PROJECT_ROLES, COST_CENTRES, ENGLISH_LEVELS, ROLE_HIERARCHY, getHighestRole, EQUIPMENT_TYPES, OEM_OPTIONS, cleanName } from "@/lib/constants";
@@ -6,6 +7,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Search, ChevronDown, ChevronUp, Info, Upload, Download, ArrowUpDown, Pencil, Plus, X, Check, Loader2, User, FileText, Trash2 } from "lucide-react";
 import { downloadCSV } from "@/lib/csv-export";
 import { downloadSqepPdf } from "@/lib/sqep-pdf";
+import type { WorkExperience } from "@shared/schema";
 
 // ─── Helpers ───
 const inputCls = "px-3 py-2 text-[13px] rounded-lg border focus:outline-none focus:border-[var(--pfg-yellow)] focus:shadow-[0_0_0_3px_rgba(245,189,0,0.15)]";
@@ -388,6 +390,12 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
   const today = new Date().toISOString().split("T")[0];
   const historicalAssignments = worker.assignments.filter(a => a.startDate && a.startDate <= today);
 
+  // Load existing work experience from DB
+  const { data: existingWorkExp = [] } = useQuery<WorkExperience[]>({
+    queryKey: ['/api/workers', worker.id, 'work-experience'],
+    queryFn: () => apiRequest('GET', `/api/workers/${worker.id}/work-experience`).then((r: any) => r.json()),
+  });
+
   const addManualExp = () => {
     setManualExp(prev => [...prev, {
       id: nextExpId, siteName: "", startDate: "", endDate: "", role: "", oem: "", equipment: "", scope: "",
@@ -475,7 +483,24 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
         localAirport: localAirport || null,
       });
 
+      // Save manual work experience entries
+      for (const exp of manualExp) {
+        if (exp.siteName.trim()) {
+          await apiRequest('POST', `/api/workers/${worker.id}/work-experience`, {
+            siteName: exp.siteName,
+            startDate: exp.startDate || null,
+            endDate: exp.endDate || null,
+            role: exp.role || null,
+            oem: exp.oem || null,
+            equipmentType: exp.equipment || null,
+            scopeOfWork: exp.scope || null,
+            source: 'manual',
+          });
+        }
+      }
+
       await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      await queryClient.invalidateQueries({ queryKey: ['/api/workers', worker.id, 'work-experience'] });
       onClose();
     } catch (e: any) {
       setError(e.message || "Failed to save");
@@ -734,16 +759,36 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
               <table className="w-full text-[12px]">
                 <thead>
                   <tr style={{ background: "hsl(var(--muted))" }}>
-                    {["Site / Project", "Start", "End", "Role", "OEM", "Equipment", "Scope"].map(h => (
+                    {["Site / Project", "Start", "End", "Role", "OEM", "Equipment", "Scope", ""].map(h => (
                       <th key={h} className="text-left px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wide" style={{ color: "hsl(var(--muted-foreground))" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {historicalAssignments.length === 0 && manualExp.length === 0 ? (
-                    <tr><td colSpan={7} className="px-4 py-6 text-center text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>No work experience recorded</td></tr>
+                  {historicalAssignments.length === 0 && manualExp.length === 0 && existingWorkExp.length === 0 ? (
+                    <tr><td colSpan={8} className="px-4 py-6 text-center text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>No work experience recorded</td></tr>
                   ) : (
                     <>
+                      {/* Existing DB work experience entries (with delete) */}
+                      {existingWorkExp.map(exp => (
+                        <tr key={`we-${exp.id}`} className="border-t" style={{ borderColor: "hsl(var(--border))", background: "rgba(34,197,94,0.03)" }}>
+                          <td className="px-3 py-2 font-medium">{exp.siteName}</td>
+                          <td className="px-3 py-2 tabular-nums">{exp.startDate || "—"}</td>
+                          <td className="px-3 py-2 tabular-nums">{exp.endDate || "—"}</td>
+                          <td className="px-3 py-2">{exp.role || "—"}</td>
+                          <td className="px-3 py-2">{exp.oem || "—"}</td>
+                          <td className="px-3 py-2">{exp.equipmentType || "—"}</td>
+                          <td className="px-3 py-2">{exp.scopeOfWork || "—"}</td>
+                          <td className="px-3 py-2">
+                            <button onClick={async () => {
+                              await apiRequest('DELETE', `/api/work-experience/${exp.id}`);
+                              await queryClient.invalidateQueries({ queryKey: ['/api/workers', worker.id, 'work-experience'] });
+                            }} className="p-1 text-red-400 hover:text-red-600">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
                       {historicalAssignments.map(a => (
                         <tr key={a.id} className="border-t" style={{ borderColor: "hsl(var(--border))" }}>
                           <td className="px-3 py-2 font-medium">{a.projectName} ({a.projectCode})</td>
@@ -753,6 +798,7 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
                           <td className="px-3 py-2">{a.customer || "—"}</td>
                           <td className="px-3 py-2">{a.equipmentType || "—"}</td>
                           <td className="px-3 py-2">{a.task || "—"}</td>
+                          <td></td>
                         </tr>
                       ))}
                       {manualExp.map(exp => (
@@ -867,6 +913,100 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
         </div>
       </div>
     </ModalOverlay>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────
+// READ-ONLY WORK EXPERIENCE TAB
+// ───────────────────────────────────────────────────────────────
+function WorkExperienceTab({ worker }: { worker: DashboardWorker }) {
+  const today = new Date().toISOString().split("T")[0];
+  const { data: existingWorkExp = [] } = useQuery<WorkExperience[]>({
+    queryKey: ['/api/workers', worker.id, 'work-experience'],
+    queryFn: () => apiRequest('GET', `/api/workers/${worker.id}/work-experience`).then((r: any) => r.json()),
+  });
+
+  // Combine work experience entries and historical assignments, sorted most recent first
+  type CombinedEntry = {
+    key: string;
+    siteName: string;
+    startDate: string | null;
+    endDate: string | null;
+    role: string | null;
+    oem: string | null;
+    equipmentType: string | null;
+    scopeOfWork: string | null;
+    source: 'we' | 'assignment';
+    weId?: number;
+  };
+
+  const combinedEntries: CombinedEntry[] = [
+    ...existingWorkExp.map(exp => ({
+      key: `we-${exp.id}`,
+      siteName: exp.siteName,
+      startDate: exp.startDate || null,
+      endDate: exp.endDate || null,
+      role: exp.role || null,
+      oem: exp.oem || null,
+      equipmentType: exp.equipmentType || null,
+      scopeOfWork: exp.scopeOfWork || null,
+      source: 'we' as const,
+      weId: exp.id,
+    })),
+    ...worker.assignments
+      .filter(a => a.startDate && a.startDate <= today)
+      .map(a => ({
+        key: `a-${a.id}`,
+        siteName: `${a.projectName} (${a.projectCode})`,
+        startDate: a.startDate || null,
+        endDate: a.endDate || null,
+        role: a.role || a.task || null,
+        oem: a.customer || null,
+        equipmentType: a.equipmentType || null,
+        scopeOfWork: a.task || null,
+        source: 'assignment' as const,
+      })),
+  ].sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
+
+  return (
+    <div className="rounded-lg border overflow-hidden" style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))" }}>
+      <table className="w-full text-[12px]">
+        <thead>
+          <tr style={{ background: "hsl(var(--muted))" }}>
+            {["Site / Project", "Start Date", "End Date", "Role", "OEM", "Equipment", "Scope of Work", ""].map(h => (
+              <th key={h} className="text-left px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wide" style={{ color: "hsl(var(--muted-foreground))" }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {combinedEntries.length === 0 ? (
+            <tr><td colSpan={8} className="px-4 py-8 text-center" style={{ color: "hsl(var(--muted-foreground))" }}>No work experience recorded</td></tr>
+          ) : (
+            combinedEntries.map(entry => (
+              <tr key={entry.key} className="border-t hover:bg-[hsl(var(--accent))]" style={{ borderColor: "hsl(var(--border))" }}>
+                <td className="px-3 py-2 font-medium">{entry.siteName}</td>
+                <td className="px-3 py-2 tabular-nums">{entry.startDate || "—"}</td>
+                <td className="px-3 py-2 tabular-nums">{entry.endDate || "—"}</td>
+                <td className="px-3 py-2">{entry.role || "—"}</td>
+                <td className="px-3 py-2">{entry.oem || "—"}</td>
+                <td className="px-3 py-2">{entry.equipmentType || "—"}</td>
+                <td className="px-3 py-2">{entry.scopeOfWork || "—"}</td>
+                <td className="px-3 py-2">
+                  {entry.source === 'we' && entry.weId && (
+                    <button onClick={async () => {
+                      await apiRequest('DELETE', `/api/work-experience/${entry.weId}`);
+                      await queryClient.invalidateQueries({ queryKey: ['/api/workers', worker.id, 'work-experience'] });
+                    }} className="p-1 text-red-400 hover:text-red-600">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -1136,46 +1276,21 @@ function WorkerDetail({ worker }: { worker: DashboardWorker }) {
 
         {tab === "experience" && (
           <div>
-            <div className="rounded-lg border overflow-hidden" style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))" }}>
-              <table className="w-full text-[12px]">
-                <thead>
-                  <tr style={{ background: "hsl(var(--muted))" }}>
-                    {["Site / Project", "Start Date", "End Date", "Role", "OEM", "Equipment", "Scope of Work"].map(h => (
-                      <th key={h} className="text-left px-3 py-2.5 text-[10px] font-semibold uppercase tracking-wide" style={{ color: "hsl(var(--muted-foreground))" }}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {worker.assignments.length === 0 ? (
-                    <tr><td colSpan={7} className="px-4 py-8 text-center" style={{ color: "hsl(var(--muted-foreground))" }}>No work experience recorded</td></tr>
-                  ) : (
-                    worker.assignments
-                      .filter(a => a.startDate && a.startDate <= new Date().toISOString().split("T")[0])
-                      .map(a => (
-                        <tr key={a.id} className="border-t hover:bg-[hsl(var(--accent))]" style={{ borderColor: "hsl(var(--border))" }}>
-                          <td className="px-3 py-2 font-medium">{a.projectName} ({a.projectCode})</td>
-                          <td className="px-3 py-2 tabular-nums">{a.startDate || "—"}</td>
-                          <td className="px-3 py-2 tabular-nums">{a.endDate || "—"}</td>
-                          <td className="px-3 py-2">{a.role || a.task || worker.role}</td>
-                          <td className="px-3 py-2">{a.customer || "—"}</td>
-                          <td className="px-3 py-2">{a.equipmentType || "—"}</td>
-                          <td className="px-3 py-2">{a.task || "—"}</td>
-                        </tr>
-                      ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <WorkExperienceTab worker={worker} />
             <div className="mt-3 flex justify-end">
               <button
                 disabled={sqepDownloading}
                 onClick={async () => {
                   setSqepDownloading(true);
                   try {
-                    // Fetch documents for this worker so certs page is complete
-                    const docs = await apiRequest("GET", `/api/workers/${worker.id}/documents`)
-                      .then((r: any) => r.json()).catch(() => []);
-                    const enrichedWorker = { ...worker, documents: docs };
+                    // Fetch documents and work experience for this worker so SQEP PDF is complete
+                    const [docs, workExp] = await Promise.all([
+                      apiRequest("GET", `/api/workers/${worker.id}/documents`)
+                        .then((r: any) => r.json()).catch(() => []),
+                      apiRequest("GET", `/api/workers/${worker.id}/work-experience`)
+                        .then((r: any) => r.json()).catch(() => []),
+                    ]);
+                    const enrichedWorker = { ...worker, documents: docs, workExperience: workExp };
                     await downloadSqepPdf(enrichedWorker as any);
                   } finally {
                     setSqepDownloading(false);

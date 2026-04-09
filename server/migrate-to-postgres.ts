@@ -89,6 +89,22 @@ export async function runSchemaUpdates() {
     await db.execute(sql`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS confirmed_at TEXT`);
     await db.execute(sql`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS declined_at TEXT`);
 
+    // Work experience table — added for EID import
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS work_experience (
+        id SERIAL PRIMARY KEY,
+        worker_id INTEGER NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
+        site_name TEXT NOT NULL,
+        start_date TEXT,
+        end_date TEXT,
+        role TEXT,
+        oem TEXT,
+        equipment_type TEXT,
+        scope_of_work TEXT,
+        source TEXT DEFAULT 'manual'
+      )
+    `);
+
     console.log("Schema updates applied.");
   } catch (e: any) {
     console.error("Schema update error:", e.message);

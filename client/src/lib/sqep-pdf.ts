@@ -240,9 +240,37 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
   doc.addPage();
   drawSqepHeader(doc, logoUrl, `Work Experience — ${name}`);
 
-  const pastAssignments = worker.assignments
-    .filter(a => a.status === "active" || a.status === "flagged" || (a.status === "completed") || (a.startDate && a.startDate <= today))
-    .sort((a, b) => (b.startDate || "").localeCompare(a.startDate || "")); // most recent first (descending start date)
+  // Combine work experience entries (from DB) with historical assignments
+  type WeRow = { siteName: string; startDate: string | null; endDate: string | null; role: string | null; oem: string | null; equipmentType: string | null; scopeOfWork: string | null };
+  const workExpEntries: WeRow[] = ((worker as any).workExperience || []).map((we: any) => ({
+    siteName: we.siteName,
+    startDate: we.startDate || null,
+    endDate: we.endDate || null,
+    role: we.role || null,
+    oem: we.oem || null,
+    equipmentType: we.equipmentType || null,
+    scopeOfWork: we.scopeOfWork || null,
+  }));
+  const assignmentEntries: WeRow[] = worker.assignments
+    .filter(a => a.status === "active" || a.status === "flagged" || a.status === "completed" || (a.startDate && a.startDate <= today))
+    .map(a => ({
+      siteName: (a as any).siteName || `${a.projectName} (${a.projectCode})`,
+      startDate: a.startDate || null,
+      endDate: a.endDate || null,
+      role: a.role || a.task || worker.role,
+      oem: a.customer || null,
+      equipmentType: a.equipmentType || null,
+      scopeOfWork: (a as any).scopeOfWork || a.task || a.role || null,
+    }));
+  // Deduplicate by siteName+startDate, work experience entries first
+  const seenKeys = new Set<string>();
+  const allWorkRows: WeRow[] = [];
+  for (const row of [...workExpEntries, ...assignmentEntries]) {
+    const key = `${row.siteName}|${row.startDate}`;
+    if (!seenKeys.has(key)) { seenKeys.add(key); allWorkRows.push(row); }
+  }
+  // Sort most recent first
+  allWorkRows.sort((a, b) => (b.startDate || "").localeCompare(a.startDate || ""));
 
   y = SQEP_HEADER_H + 12;
 
@@ -256,7 +284,7 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
     { label: "Scope of Work",   x: 156, w: 40 },
   ];
 
-  if (pastAssignments.length === 0) {
+  if (allWorkRows.length === 0) {
     doc.setFont("helvetica", "normal"); doc.setFontSize(10);
     doc.setTextColor(99, 117, 140);
     doc.text("No work experience recorded.", 14, y);
@@ -264,8 +292,8 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
     tableHeader(wCols, y);
     y += 6;
     doc.setFont("helvetica", "normal"); doc.setFontSize(7.5);
-    for (let i = 0; i < pastAssignments.length; i++) {
-      const a = pastAssignments[i];
+    for (let i = 0; i < allWorkRows.length; i++) {
+      const a = allWorkRows[i];
       if (y > pageH - 18) {
         drawSqepFooter(doc, `Page ${doc.getNumberOfPages()}`);
         doc.addPage();
@@ -279,15 +307,15 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
         doc.rect(14, y - 3, pageW - 28, 6.5, "F");
       }
       doc.setTextColor(26, 29, 35);
-      doc.text(truncate((a as any).siteName || `${a.projectName} (${a.projectCode})`, 26), wCols[0].x, y);
+      doc.text(truncate(a.siteName || "—", 26), wCols[0].x, y);
       doc.text(a.startDate || "—", wCols[1].x, y);
       doc.text(a.endDate || "—", wCols[2].x, y);
-      doc.text(truncate(a.role || a.task || worker.role, 14), wCols[3].x, y);
+      doc.text(truncate(a.role || worker.role, 14), wCols[3].x, y);
       doc.setTextColor(99, 117, 140);
-      doc.text(truncate(a.customer || "—", 16), wCols[4].x, y);
+      doc.text(truncate(a.oem || "—", 16), wCols[4].x, y);
       doc.text(truncate(a.equipmentType || "—", 10), wCols[5].x, y);
       doc.setTextColor(26, 29, 35);
-      doc.text(truncate((a as any).scopeOfWork || a.task || a.role || "—", 26), wCols[6].x, y);
+      doc.text(truncate(a.scopeOfWork || "—", 26), wCols[6].x, y);
       y += 6.5;
     }
   }

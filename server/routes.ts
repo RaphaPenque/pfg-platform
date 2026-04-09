@@ -1,8 +1,8 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
-import { insertWorkerSchema, insertProjectSchema, insertAssignmentSchema, insertDocumentSchema, insertOemTypeSchema, insertRoleSlotSchema } from "@shared/schema";
-import type { User } from "@shared/schema";
+import { insertWorkerSchema, insertProjectSchema, insertAssignmentSchema, insertDocumentSchema, insertOemTypeSchema, insertRoleSlotSchema, insertWorkExperienceSchema } from "@shared/schema";
+import type { User, WorkExperience } from "@shared/schema";
 import { sendMail, magicLinkEmail, welcomeEmail, confirmationEmail, confirmationResultEmail } from "./email";
 import { insertPayrollRulesSchema } from "@shared/schema";
 import multer from "multer";
@@ -196,6 +196,7 @@ export function registerRoutes(server: Server, app: Express) {
       const w = workerMap[wid];
       if (!w) continue;
       const docs = await storage.getDocumentsByWorker(wid);
+      const allWorkExp = await storage.getWorkExperience(wid);
       workers[wid] = {
         id: w.id,
         name: w.name,
@@ -211,6 +212,7 @@ export function registerRoutes(server: Server, app: Express) {
         driversLicenseUploaded: w.driversLicenseUploaded,
         oemExperience: w.oemExperience ? JSON.parse(w.oemExperience) : [],
         documents: docs,
+        workExperience: allWorkExp,
         assignments: [], // populated below after assignments are built
       };
     }
@@ -477,6 +479,27 @@ export function registerRoutes(server: Server, app: Express) {
       project: projectMap[a.projectId] || null,
     }));
     res.json({ ...worker, assignments: enrichedAssignments, documents: workerDocs });
+  });
+
+  // ===== WORK EXPERIENCE =====
+  app.get("/api/workers/:id/work-experience", async (req: Request, res: Response) => {
+    const workerId = parseInt(req.params.id);
+    const entries = await storage.getWorkExperience(workerId);
+    res.json(entries);
+  });
+
+  app.post("/api/workers/:id/work-experience", async (req: Request, res: Response) => {
+    const workerId = parseInt(req.params.id);
+    const parsed = insertWorkExperienceSchema.safeParse({ ...req.body, workerId });
+    if (!parsed.success) return res.status(400).json({ error: parsed.error });
+    const entry = await storage.createWorkExperience(parsed.data);
+    res.status(201).json(entry);
+  });
+
+  app.delete("/api/work-experience/:id", async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    await storage.deleteWorkExperience(id);
+    res.status(204).send();
   });
 
   // ===== PROJECTS =====

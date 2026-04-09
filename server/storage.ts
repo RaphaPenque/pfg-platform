@@ -4,6 +4,7 @@ import { eq, and, gt, desc, sql } from "drizzle-orm";
 import {
   workers, projects, assignments, documents, oemTypes, roleSlots,
   users, sessions, magicLinks, auditLogs, projectLeads, payrollRules,
+  workExperience,
   type Worker, type InsertWorker,
   type Project, type InsertProject,
   type Assignment, type InsertAssignment,
@@ -13,6 +14,7 @@ import {
   type User, type InsertUser,
   type Session, type MagicLink, type AuditLog, type ProjectLead,
   type PayrollRule, type InsertPayrollRule,
+  type WorkExperience, type InsertWorkExperience,
 } from "@shared/schema";
 
 const pool = new Pool({
@@ -103,6 +105,12 @@ export interface IStorage {
   getPayrollRulesByCostCentre(costCentre: string): Promise<PayrollRule | undefined>;
   upsertPayrollRule(rule: InsertPayrollRule): Promise<PayrollRule>;
   deletePayrollRule(id: number): Promise<void>;
+
+  // Work Experience
+  getWorkExperience(workerId: number): Promise<WorkExperience[]>;
+  createWorkExperience(entry: InsertWorkExperience): Promise<WorkExperience>;
+  deleteWorkExperience(id: number): Promise<void>;
+  bulkCreateWorkExperience(entries: InsertWorkExperience[]): Promise<void>;
 }
 
 export class PostgresStorage implements IStorage {
@@ -430,6 +438,27 @@ export class PostgresStorage implements IStorage {
 
   async deletePayrollRule(id: number): Promise<void> {
     await pool.query(`DELETE FROM payroll_rules WHERE id = $1`, [id]);
+  }
+
+  // Work Experience
+  async getWorkExperience(workerId: number): Promise<WorkExperience[]> {
+    return db.select().from(workExperience)
+      .where(eq(workExperience.workerId, workerId))
+      .orderBy(desc(workExperience.startDate));
+  }
+
+  async createWorkExperience(entry: InsertWorkExperience): Promise<WorkExperience> {
+    const [row] = await db.insert(workExperience).values(entry).returning();
+    return row;
+  }
+
+  async deleteWorkExperience(id: number): Promise<void> {
+    await db.delete(workExperience).where(eq(workExperience.id, id));
+  }
+
+  async bulkCreateWorkExperience(entries: InsertWorkExperience[]): Promise<void> {
+    if (entries.length === 0) return;
+    await db.insert(workExperience).values(entries).execute();
   }
 }
 
