@@ -28,13 +28,15 @@ function computeHealth(
   const flags: string[] = [];
   let actionCount = 0;
 
-  // Workforce
+  // Workforce — per-slot filled count (not peak vs total assignments)
   const projectSlots = roleSlots.filter(s => s.projectId === project.id);
-  const totalSlotQty = calcPeakHeadcount(projectSlots);
   const projectAssignments = assignments.filter(
     a => a.projectId === project.id && (a.status === "active" || a.status === "flagged")
   );
-  const filledCount = projectAssignments.length;
+  const assignedPerSlot = new Map<number, number>();
+  projectAssignments.forEach(a => { if (a.roleSlotId) assignedPerSlot.set(a.roleSlotId, (assignedPerSlot.get(a.roleSlotId) || 0) + 1); });
+  const totalSlotQty = projectSlots.reduce((sum, s) => sum + s.quantity, 0);
+  const filledCount = projectSlots.reduce((sum, s) => sum + Math.min(assignedPerSlot.get(s.id) || 0, s.quantity), 0);
   const unfilled = Math.max(0, totalSlotQty - filledCount);
 
   let workforceStatus: HealthStatus = "green";
@@ -142,10 +144,12 @@ function ProjectCard({
   const health = computeHealth(project, roleSlots, assignments);
   const pct = timelinePercent(project.startDate, project.endDate);
   const days = daysRemaining(project.endDate);
-  const totalSlotQty = calcPeakHeadcount(roleSlots.filter(s => s.projectId === project.id));
-  const filledCount = assignments.filter(
-    a => a.projectId === project.id && (a.status === "active" || a.status === "flagged")
-  ).length;
+  const _pSlots = roleSlots.filter(s => s.projectId === project.id);
+  const _pAssigns = assignments.filter(a => a.projectId === project.id && (a.status === "active" || a.status === "flagged"));
+  const _aPerSlot = new Map<number, number>();
+  _pAssigns.forEach(a => { if (a.roleSlotId) _aPerSlot.set(a.roleSlotId, (_aPerSlot.get(a.roleSlotId) || 0) + 1); });
+  const totalSlotQty = _pSlots.reduce((sum, s) => sum + s.quantity, 0);
+  const filledCount = _pSlots.reduce((sum, s) => sum + Math.min(_aPerSlot.get(s.id) || 0, s.quantity), 0);
   const shiftLabel = project.shift || "Day";
 
   return (

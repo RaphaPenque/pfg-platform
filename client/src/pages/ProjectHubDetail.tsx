@@ -63,11 +63,16 @@ function computeHealth(
   let actionCount = 0;
 
   const projectSlots = roleSlots.filter(s => s.projectId === project.id);
-  const totalSlotQty = calcPeakHeadcount(projectSlots);
   const projectAssignments = assignments.filter(
     a => a.projectId === project.id && (a.status === "active" || a.status === "flagged")
   );
-  const filledCount = projectAssignments.length;
+  // Per-slot filled count: how many workers are assigned to each slot
+  const assignedPerSlot = new Map<number, number>();
+  projectAssignments.forEach(a => {
+    if (a.roleSlotId) assignedPerSlot.set(a.roleSlotId, (assignedPerSlot.get(a.roleSlotId) || 0) + 1);
+  });
+  const totalSlotQty = projectSlots.reduce((sum, s) => sum + s.quantity, 0);
+  const filledCount = projectSlots.reduce((sum, s) => sum + Math.min(assignedPerSlot.get(s.id) || 0, s.quantity), 0);
   const unfilled = Math.max(0, totalSlotQty - filledCount);
 
   let workforceStatus: HealthStatus = "green";
@@ -205,10 +210,12 @@ function OverviewTab({
   const pct = timelinePercent(project.startDate, project.endDate);
   const totalDays = project.startDate && project.endDate ? daysBetween(project.startDate, project.endDate) : 0;
   const curDay = project.startDate ? currentDay(project.startDate) : 0;
-  const totalSlotQty = calcPeakHeadcount(roleSlots.filter(s => s.projectId === project.id));
-  const filledCount = assignments.filter(
-    a => a.projectId === project.id && (a.status === "active" || a.status === "flagged")
-  ).length;
+  const _projectSlots2 = roleSlots.filter(s => s.projectId === project.id);
+  const _projectAssignments2 = assignments.filter(a => a.projectId === project.id && (a.status === "active" || a.status === "flagged"));
+  const _assignedPerSlot2 = new Map<number, number>();
+  _projectAssignments2.forEach(a => { if (a.roleSlotId) _assignedPerSlot2.set(a.roleSlotId, (_assignedPerSlot2.get(a.roleSlotId) || 0) + 1); });
+  const totalSlotQty = _projectSlots2.reduce((sum, s) => sum + s.quantity, 0);
+  const filledCount = _projectSlots2.reduce((sum, s) => sum + Math.min(_assignedPerSlot2.get(s.id) || 0, s.quantity), 0);
   const daysLeft = project.endDate ? Math.max(0, Math.ceil((new Date(project.endDate).getTime() - Date.now()) / 86400000)) : null;
   const ftePct = totalSlotQty > 0 ? Math.round((filledCount / totalSlotQty) * 100) : 0;
   const equipLabel = EQUIPMENT_TYPES.find(e => e.value === project.equipmentType)?.label || project.equipmentType || "—";
