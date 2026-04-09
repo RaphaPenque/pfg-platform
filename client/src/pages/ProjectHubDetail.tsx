@@ -1,13 +1,9 @@
 import { useState, useMemo, useCallback } from "react";
 import { Link } from "wouter";
 import { useDashboardData, type DashboardProject, type DashboardRoleSlot, type DashboardAssignment } from "@/hooks/use-dashboard-data";
-<<<<<<< HEAD
-import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, EQUIPMENT_TYPES, calcPeakHeadcount } from "@/lib/constants";
-=======
-import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, EQUIPMENT_TYPES, OEM_OPTIONS } from "@/lib/constants";
+import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, EQUIPMENT_TYPES, OEM_OPTIONS, calcPeakHeadcount } from "@/lib/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useAuth } from "@/context/AuthContext";
->>>>>>> 2b3eab13094225b82d4c75b9886495b5f30175aa
 import {
   LayoutDashboard, Users, UserCheck, ClipboardList, FileText,
   Truck, FolderOpen, DollarSign, Megaphone, Star,
