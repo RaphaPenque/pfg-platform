@@ -194,3 +194,37 @@ export const projectLeads = pgTable("project_leads", {
 });
 
 export type ProjectLead = typeof projectLeads.$inferSelect;
+
+// ===== PAYROLL RULES =====
+// One rule set per Cost Centre — drives payroll breakdown in the timesheet engine
+export const payrollRules = pgTable("payroll_rules", {
+  id: serial("id").primaryKey(),
+  costCentre: text("cost_centre").notNull().unique(), // must match COST_CENTRES constant
+  countryCode: text("country_code").notNull(),        // ISO 3166-1 alpha-2, e.g. "HR", "ES"
+  countryName: text("country_name").notNull(),
+
+  // Weekly OT threshold (null = no weekly OT tracking)
+  weeklyOtThresholdHours: integer("weekly_ot_threshold_hours"),
+
+  // Annual OT threshold (null = no annual OT tracking)
+  // For Spain: 1600 hrs/calendar year, hours above = OT
+  annualOtThresholdHours: integer("annual_ot_threshold_hours"),
+
+  // Night shift tracking (null start/end = not tracked)
+  nightShiftStart: text("night_shift_start"),  // "22:00"
+  nightShiftEnd: text("night_shift_end"),      // "06:00"
+
+  // Sunday hours tracked separately
+  trackSundayHours: boolean("track_sunday_hours").default(false).notNull(),
+
+  // Standby day rate (hours equivalent, default 8)
+  standbyDayHours: integer("standby_day_hours").default(8).notNull(),
+
+  notes: text("notes"),
+  updatedAt: timestamp("updated_at").defaultNow(),
+  updatedBy: integer("updated_by").references(() => users.id),
+});
+
+export const insertPayrollRulesSchema = createInsertSchema(payrollRules).omit({ id: true });
+export type PayrollRule = typeof payrollRules.$inferSelect;
+export type InsertPayrollRule = typeof insertPayrollRulesSchema._type;

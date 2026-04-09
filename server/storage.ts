@@ -3,7 +3,7 @@ import { Pool } from "pg";
 import { eq, and, gt, desc, sql } from "drizzle-orm";
 import {
   workers, projects, assignments, documents, oemTypes, roleSlots,
-  users, sessions, magicLinks, auditLogs, projectLeads,
+  users, sessions, magicLinks, auditLogs, projectLeads, payrollRules,
   type Worker, type InsertWorker,
   type Project, type InsertProject,
   type Assignment, type InsertAssignment,
@@ -12,6 +12,7 @@ import {
   type RoleSlot, type InsertRoleSlot,
   type User, type InsertUser,
   type Session, type MagicLink, type AuditLog, type ProjectLead,
+  type PayrollRule, type InsertPayrollRule,
 } from "@shared/schema";
 
 const pool = new Pool({
@@ -96,6 +97,12 @@ export interface IStorage {
   getProjectLead(projectId: number): Promise<ProjectLead | undefined>;
   setProjectLead(projectId: number, userId: number): Promise<ProjectLead>;
   removeProjectLead(projectId: number): Promise<void>;
+
+  // Payroll Rules
+  getPayrollRules(): Promise<PayrollRule[]>;
+  getPayrollRulesByCostCentre(costCentre: string): Promise<PayrollRule | undefined>;
+  upsertPayrollRule(rule: InsertPayrollRule): Promise<PayrollRule>;
+  deletePayrollRule(id: number): Promise<void>;
 }
 
 export class PostgresStorage implements IStorage {
@@ -351,6 +358,34 @@ export class PostgresStorage implements IStorage {
 
   async removeProjectLead(projectId: number): Promise<void> {
     await db.delete(projectLeads).where(eq(projectLeads.projectId, projectId));
+  }
+
+  // ─── Payroll Rules ──────────────────────────────────────────────────────────────
+  async getPayrollRules(): Promise<PayrollRule[]> {
+    return await this.db.select().from(payrollRules).orderBy(payrollRules.countryName);
+  }
+
+  async getPayrollRulesByCostCentre(costCentre: string): Promise<PayrollRule | undefined> {
+    return await this.db.select().from(payrollRules)
+      .where(eq(payrollRules.costCentre, costCentre)).limit(1)
+      .then(r => r[0]);
+  }
+
+  async upsertPayrollRule(rule: InsertPayrollRule): Promise<PayrollRule> {
+    const existing = await this.getPayrollRulesByCostCentre(rule.costCentre);
+    if (existing) {
+      const [updated] = await this.db.update(payrollRules)
+        .set({ ...rule, updatedAt: new Date() })
+        .where(eq(payrollRules.costCentre, rule.costCentre))
+        .returning();
+      return updated;
+    }
+    const [created] = await this.db.insert(payrollRules).values(rule).returning();
+    return created;
+  }
+
+  async deletePayrollRule(id: number): Promise<void> {
+    await this.db.delete(payrollRules).where(eq(payrollRules.id, id));
   }
 }
 
