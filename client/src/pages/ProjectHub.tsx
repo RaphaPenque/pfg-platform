@@ -1,8 +1,11 @@
 import { useState, useMemo } from "react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useDashboardData, type DashboardProject, type DashboardRoleSlot, type DashboardAssignment } from "@/hooks/use-dashboard-data";
-import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, calcPeakHeadcount } from "@/lib/constants";
-import { ChevronDown, ChevronUp, AlertTriangle, Users, Clock, Activity } from "lucide-react";
+import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, calcPeakHeadcount, OEM_OPTIONS, EQUIPMENT_TYPES } from "@/lib/constants";
+import { ChevronDown, ChevronUp, AlertTriangle, Users, Clock, Activity, Plus, X } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 // ─── Health computation ──────────────────────────────────────────
 
@@ -277,11 +280,289 @@ function ProjectCard({
   );
 }
 
+// ─── Create Project Modal ────────────────────────────────────────
+
+function CreateProjectModal({ onClose }: { onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [, navigate] = useLocation();
+  const { toast } = useToast();
+  const [saving, setSaving] = useState(false);
+
+  const [form, setForm] = useState({
+    code: "",
+    name: "",
+    status: "active" as "active" | "potential",
+    customer: "",
+    location: "",
+    siteName: "",
+    equipmentType: "",
+    startDate: "",
+    endDate: "",
+    shift: "Day" as "Day" | "Night" | "Day/Night",
+    contractType: "",
+    notes: "",
+  });
+
+  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!form.code.trim() || !form.name.trim()) {
+      toast({ title: "Project code and name are required", variant: "destructive" });
+      return;
+    }
+    setSaving(true);
+    try {
+      const project = await apiRequest("POST", "/api/projects", {
+        code: form.code.trim().toUpperCase(),
+        name: form.name.trim(),
+        status: form.status,
+        customer: form.customer || null,
+        location: form.location || null,
+        siteName: form.siteName || null,
+        equipmentType: form.equipmentType || null,
+        startDate: form.startDate || null,
+        endDate: form.endDate || null,
+        shift: form.shift,
+        contractType: form.contractType || null,
+        notes: form.notes || null,
+      });
+      const created = await project.json();
+      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      toast({ title: `Project ${created.code} created` });
+      onClose();
+      navigate(`/projects/${created.code}`);
+    } catch (err: any) {
+      toast({ title: "Failed to create project", description: err.message, variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const inputCls = "w-full rounded-lg border text-[13px] px-3 py-2 outline-none focus:ring-2 focus:ring-pfg-navy/30 bg-white";
+  const labelCls = "block text-[11px] font-semibold uppercase tracking-wide mb-1" ;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.45)" }}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b">
+          <div>
+            <h2 className="text-[16px] font-bold text-pfg-navy font-display">New Project</h2>
+            <p className="text-[12px] mt-0.5" style={{ color: "var(--pfg-steel)" }}>Create a confirmed project or capacity planning entry</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-gray-100 transition">
+            <X className="w-4 h-4" style={{ color: "var(--pfg-steel)" }} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="overflow-y-auto flex-1 px-6 py-5 space-y-5">
+
+          {/* Status toggle */}
+          <div>
+            <p className={labelCls} style={{ color: "var(--pfg-steel)" }}>Project Type</p>
+            <div className="flex gap-2">
+              {(["active", "potential"] as const).map(s => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => set("status", s)}
+                  className="flex-1 py-2 rounded-lg text-[12px] font-semibold border transition"
+                  style={form.status === s ? {
+                    background: s === "active" ? "var(--pfg-navy)" : "var(--amber-bg)",
+                    color: s === "active" ? "#fff" : "var(--amber)",
+                    borderColor: s === "active" ? "var(--pfg-navy)" : "var(--amber)",
+                  } : { background: "transparent", color: "var(--pfg-steel)", borderColor: "hsl(var(--border))" }}
+                >
+                  {s === "active" ? "✓ Confirmed Project" : "⟳ Capacity Planning"}
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] mt-1.5" style={{ color: "var(--pfg-steel)" }}>
+              {form.status === "active"
+                ? "A live, confirmed project that will appear in the Active section."
+                : "A forecast/pipeline project for capacity planning. Appears in the Planning section."}
+            </p>
+          </div>
+
+          {/* Code + Name */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={labelCls} style={{ color: "var(--pfg-steel)" }}>Project Code *</label>
+              <input
+                className={inputCls}
+                placeholder="e.g. GNT-001"
+                value={form.code}
+                onChange={e => set("code", e.target.value)}
+                required
+                style={{ borderColor: "hsl(var(--border))" }}
+              />
+            </div>
+            <div>
+              <label className={labelCls} style={{ color: "var(--pfg-steel)" }}>Project Name *</label>
+              <input
+                className={inputCls}
+                placeholder="e.g. Tynagh GT Major Inspection"
+                value={form.name}
+                onChange={e => set("name", e.target.value)}
+                required
+                style={{ borderColor: "hsl(var(--border))" }}
+              />
+            </div>
+          </div>
+
+          {/* Customer + Location */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={labelCls} style={{ color: "var(--pfg-steel)" }}>Customer / OEM</label>
+              <select
+                className={inputCls}
+                value={form.customer}
+                onChange={e => set("customer", e.target.value)}
+                style={{ borderColor: "hsl(var(--border))" }}
+              >
+                <option value="">— Select OEM —</option>
+                {OEM_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls} style={{ color: "var(--pfg-steel)" }}>Location</label>
+              <input
+                className={inputCls}
+                placeholder="e.g. Tynagh, Ireland"
+                value={form.location}
+                onChange={e => set("location", e.target.value)}
+                style={{ borderColor: "hsl(var(--border))" }}
+              />
+            </div>
+          </div>
+
+          {/* Site Name + Equipment */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={labelCls} style={{ color: "var(--pfg-steel)" }}>Site Name</label>
+              <input
+                className={inputCls}
+                placeholder="e.g. Tynagh Energy"
+                value={form.siteName}
+                onChange={e => set("siteName", e.target.value)}
+                style={{ borderColor: "hsl(var(--border))" }}
+              />
+            </div>
+            <div>
+              <label className={labelCls} style={{ color: "var(--pfg-steel)" }}>Equipment Type</label>
+              <select
+                className={inputCls}
+                value={form.equipmentType}
+                onChange={e => set("equipmentType", e.target.value)}
+                style={{ borderColor: "hsl(var(--border))" }}
+              >
+                <option value="">— Select —</option>
+                {EQUIPMENT_TYPES.map(et => <option key={et.value} value={et.value}>{et.label}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Dates */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={labelCls} style={{ color: "var(--pfg-steel)" }}>Start Date</label>
+              <input
+                type="date"
+                className={inputCls}
+                value={form.startDate}
+                onChange={e => set("startDate", e.target.value)}
+                style={{ borderColor: "hsl(var(--border))" }}
+              />
+            </div>
+            <div>
+              <label className={labelCls} style={{ color: "var(--pfg-steel)" }}>End Date</label>
+              <input
+                type="date"
+                className={inputCls}
+                value={form.endDate}
+                onChange={e => set("endDate", e.target.value)}
+                style={{ borderColor: "hsl(var(--border))" }}
+              />
+            </div>
+          </div>
+
+          {/* Shift + Contract Type */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={labelCls} style={{ color: "var(--pfg-steel)" }}>Shift</label>
+              <select
+                className={inputCls}
+                value={form.shift}
+                onChange={e => set("shift", e.target.value)}
+                style={{ borderColor: "hsl(var(--border))" }}
+              >
+                <option value="Day">Day</option>
+                <option value="Night">Night</option>
+                <option value="Day/Night">Day / Night</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelCls} style={{ color: "var(--pfg-steel)" }}>Contract Type</label>
+              <select
+                className={inputCls}
+                value={form.contractType}
+                onChange={e => set("contractType", e.target.value)}
+                style={{ borderColor: "hsl(var(--border))" }}
+              >
+                <option value="">— Select —</option>
+                <option value="Lump Sum">Lump Sum</option>
+                <option value="Reimbursable">Reimbursable</option>
+                <option value="Time & Materials">Time &amp; Materials</option>
+                <option value="Framework">Framework</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label className={labelCls} style={{ color: "var(--pfg-steel)" }}>Notes</label>
+            <textarea
+              className={inputCls}
+              rows={2}
+              placeholder="Any additional context..."
+              value={form.notes}
+              onChange={e => set("notes", e.target.value)}
+              style={{ borderColor: "hsl(var(--border))", resize: "vertical" }}
+            />
+          </div>
+        </form>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between px-6 py-4 border-t bg-gray-50 rounded-b-2xl">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2 rounded-lg text-[13px] font-medium border hover:bg-gray-100 transition"
+            style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-steel)" }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit as any}
+            disabled={saving}
+            className="px-5 py-2 rounded-lg text-[13px] font-semibold text-white transition disabled:opacity-50"
+            style={{ background: "var(--pfg-navy)" }}
+          >
+            {saving ? "Creating…" : `Create ${form.status === "potential" ? "Planning Entry" : "Project"}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ───────────────────────────────────────────────────
 
 export default function ProjectHub() {
   const { data, isLoading } = useDashboardData();
   const [showCompleted, setShowCompleted] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
 
   const projects = data?.projects || [];
   const roleSlots = data?.roleSlots || [];
@@ -332,6 +613,8 @@ export default function ProjectHub() {
 
   return (
     <div className="space-y-8">
+      {showCreate && <CreateProjectModal onClose={() => setShowCreate(false)} />}
+
       {/* Page header */}
       <div className="flex items-center justify-between">
         <div>
@@ -340,6 +623,15 @@ export default function ProjectHub() {
             {active.length} active · {planning.length} planning · {completed.length} completed
           </p>
         </div>
+        <button
+          onClick={() => setShowCreate(true)}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold text-white transition hover:opacity-90"
+          style={{ background: "var(--pfg-navy)" }}
+          data-testid="button-create-project"
+        >
+          <Plus className="w-4 h-4" />
+          New Project
+        </button>
       </div>
 
       {/* ACTIVE section */}
@@ -425,9 +717,17 @@ export default function ProjectHub() {
         <div className="text-center py-20">
           <div className="text-[48px] mb-3 opacity-30">📋</div>
           <div className="text-lg font-semibold text-pfg-navy font-display">No projects yet</div>
-          <p className="text-[13px] mt-1" style={{ color: "var(--pfg-steel)" }}>
-            Create your first project from the Project Allocation page.
+          <p className="text-[13px] mt-1 mb-4" style={{ color: "var(--pfg-steel)" }}>
+            Get started by creating your first project.
           </p>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-[13px] font-semibold text-white transition hover:opacity-90"
+            style={{ background: "var(--pfg-navy)" }}
+          >
+            <Plus className="w-4 h-4" />
+            Create First Project
+          </button>
         </div>
       )}
     </div>
