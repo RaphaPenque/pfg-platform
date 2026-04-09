@@ -195,8 +195,17 @@ export function registerRoutes(server: Server, app: Express) {
         name: w.name,
         role: w.role,
         status: w.status,
+        nationality: w.nationality,
+        joined: w.joined,
+        englishLevel: w.englishLevel,
+        techLevel: w.techLevel,
+        costCentre: w.costCentre,
+        dateOfBirth: w.dateOfBirth,
+        age: w.age,
+        driversLicenseUploaded: w.driversLicenseUploaded,
         oemExperience: w.oemExperience ? JSON.parse(w.oemExperience) : [],
         documents: docs,
+        assignments: [], // populated below after assignments are built
       };
     }
 
@@ -208,12 +217,26 @@ export function registerRoutes(server: Server, app: Express) {
         projectId: a.projectId,
         roleSlotId: a.roleSlotId,
         task: a.role,
+        role: a.role,
         shift: a.shift,
         startDate: a.startDate,
         endDate: a.endDate,
         status: a.status,
         duration: a.duration,
+        // Enriched fields for SQEP work experience page
+        projectCode: project.code,
+        projectName: project.name,
+        customer: project.customer,
+        equipmentType: project.equipmentType,
+        location: project.location,
       }));
+
+    // Attach assignments to each worker object so SQEP PDF can render work experience
+    for (const a of assignments) {
+      if (workers[a.workerId]) {
+        workers[a.workerId].assignments.push(a);
+      }
+    }
 
     res.json({ project, roleSlots, assignments, workers });
   });
