@@ -63,8 +63,6 @@ export const CERT_DEFS = [
   { name: 'Welding' },
   { name: 'Appointed Person (Lifting)' },
   { name: 'Managing Safely (IOSH)' },
-  { name: 'Banksman / Slinger' },
-  { name: 'Asbestos Awareness' },
 ];
 
 // OEM options for dropdowns
