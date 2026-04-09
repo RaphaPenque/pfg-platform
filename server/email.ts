@@ -198,6 +198,97 @@ export function magicLinkEmail(name: string, loginUrl: string): { subject: strin
   return { subject, html, text };
 }
 
+/** Temp assignment confirmation email — sent to worker */
+export function confirmationEmail(
+  workerName: string,
+  projectName: string,
+  role: string,
+  shift: string,
+  startDate: string,
+  endDate: string,
+  location: string,
+  confirmUrl: string,
+  declineUrl: string,
+): { subject: string; html: string; text: string } {
+  const firstName = workerName.split(" ")[0];
+  const respondBy = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  const subject = `Assignment Confirmation — ${projectName}`;
+  const GREEN_BTN = `
+    display: inline-block;
+    background: #16a34a;
+    color: #ffffff !important;
+    font-weight: 700;
+    font-size: 15px;
+    padding: 14px 32px;
+    border-radius: 8px;
+    text-decoration: none;
+    margin: 8px 6px;
+  `;
+  const RED_BTN = `
+    display: inline-block;
+    background: #dc2626;
+    color: #ffffff !important;
+    font-weight: 700;
+    font-size: 15px;
+    padding: 14px 32px;
+    border-radius: 8px;
+    text-decoration: none;
+    margin: 8px 6px;
+  `;
+  const html = baseTemplate(`
+    <h2 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#1A1D23;">Hi ${firstName},</h2>
+    <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
+      You have been assigned to a project. Please review the details below and confirm your availability.
+    </p>
+    <table style="width:100%;border-collapse:collapse;margin:16px 0;">
+      <tr><td style="padding:6px 12px;font-size:13px;color:#6b7280;border-bottom:1px solid #f0f0f0;">Project</td><td style="padding:6px 12px;font-size:14px;font-weight:600;color:#1A1D23;border-bottom:1px solid #f0f0f0;">${projectName}</td></tr>
+      <tr><td style="padding:6px 12px;font-size:13px;color:#6b7280;border-bottom:1px solid #f0f0f0;">Role</td><td style="padding:6px 12px;font-size:14px;font-weight:600;color:#1A1D23;border-bottom:1px solid #f0f0f0;">${role}</td></tr>
+      <tr><td style="padding:6px 12px;font-size:13px;color:#6b7280;border-bottom:1px solid #f0f0f0;">Shift</td><td style="padding:6px 12px;font-size:14px;font-weight:600;color:#1A1D23;border-bottom:1px solid #f0f0f0;">${shift}</td></tr>
+      <tr><td style="padding:6px 12px;font-size:13px;color:#6b7280;border-bottom:1px solid #f0f0f0;">Dates</td><td style="padding:6px 12px;font-size:14px;font-weight:600;color:#1A1D23;border-bottom:1px solid #f0f0f0;">${startDate} &ndash; ${endDate}</td></tr>
+      <tr><td style="padding:6px 12px;font-size:13px;color:#6b7280;">Location</td><td style="padding:6px 12px;font-size:14px;font-weight:600;color:#1A1D23;">${location || "TBC"}</td></tr>
+    </table>
+    <div style="text-align:center;margin:24px 0;">
+      <a href="${confirmUrl}" style="${GREEN_BTN}">&#10003; Confirm Assignment</a>
+      <a href="${declineUrl}" style="${RED_BTN}">&#10007; Decline Assignment</a>
+    </div>
+    <p style="margin:16px 0 0;font-size:12px;color:#9ca3af;text-align:center;">
+      Please respond by <strong>${respondBy}</strong>.
+    </p>
+  `);
+  const text = `Hi ${firstName},\n\nYou have been assigned to ${projectName}.\n\nRole: ${role}\nShift: ${shift}\nDates: ${startDate} – ${endDate}\nLocation: ${location || "TBC"}\n\nConfirm: ${confirmUrl}\nDecline: ${declineUrl}\n\nPlease respond by ${respondBy}.`;
+  return { subject, html, text };
+}
+
+/** Notification to RM when worker responds to confirmation */
+export function confirmationResultEmail(
+  rmName: string,
+  workerName: string,
+  projectName: string,
+  response: "confirmed" | "declined",
+): { subject: string; html: string; text: string } {
+  const isConfirmed = response === "confirmed";
+  const emoji = isConfirmed ? "&#10003;" : "&#10007;";
+  const color = isConfirmed ? "#16a34a" : "#dc2626";
+  const label = isConfirmed ? "Confirmed" : "Declined";
+  const subject = `${workerName} has ${response} — ${projectName}`;
+  const html = baseTemplate(`
+    <h2 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#1A1D23;">Hi ${rmName.split(" ")[0]},</h2>
+    <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
+      <strong>${workerName}</strong> has responded to their assignment confirmation for <strong>${projectName}</strong>.
+    </p>
+    <div style="text-align:center;margin:20px 0;">
+      <span style="display:inline-block;padding:12px 28px;border-radius:8px;font-size:16px;font-weight:700;color:#fff;background:${color};">
+        ${emoji} ${label}
+      </span>
+    </div>
+    <p style="margin:16px 0 0;font-size:13px;color:#6b7280;text-align:center;">
+      ${isConfirmed ? "The assignment is now confirmed and the worker is committed." : "You may need to find a replacement for this slot."}
+    </p>
+  `);
+  const text = `Hi ${rmName.split(" ")[0]},\n\n${workerName} has ${response} their assignment for ${projectName}.\n\n${isConfirmed ? "The assignment is now confirmed." : "You may need to find a replacement."}`;
+  return { subject, html, text };
+}
+
 /** New user welcome / invite email */
 export function welcomeEmail(name: string, role: string, loginUrl: string): { subject: string; html: string; text: string } {
   const roleLabel: Record<string, string> = {

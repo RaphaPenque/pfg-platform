@@ -1264,7 +1264,7 @@ export default function WorkforceTable() {
         if (!filterOem.some(o => workerOems.includes(o))) return false;
       }
       if (filterAssigned.length > 0) {
-        const hasActive = w.assignments.some(a => a.status === "active" || a.status === "flagged");
+        const hasActive = w.assignments.some(a => a.status === "active" || a.status === "flagged" || a.status === "confirmed" || a.status === "pending_confirmation");
         if (filterAssigned.includes("Assigned") && !hasActive) return false;
         if (filterAssigned.includes("Available") && hasActive) return false;
       }
@@ -1314,7 +1314,7 @@ export default function WorkforceTable() {
   // Summary stats
   const totalFte = workers.filter(w => w.status === "FTE").length;
   const totalTemp = workers.filter(w => w.status === "Temp").length;
-  const isAssigned = (a: DashboardAssignment) => a.status === "active" || a.status === "flagged";
+  const isAssigned = (a: DashboardAssignment) => a.status === "active" || a.status === "flagged" || a.status === "confirmed" || a.status === "pending_confirmation";
   const fteWithActive = workers.filter(w => w.status === "FTE" && w.assignments.some(isAssigned)).length;
   const fteUtilPct = totalFte > 0 ? Math.round((fteWithActive / totalFte) * 100) : 0;
   const availFte = workers.filter(w => w.status === "FTE" && !w.assignments.some(isAssigned)).length;
@@ -1416,11 +1416,16 @@ export default function WorkforceTable() {
                 const util = calcUtilisation(w.assignments);
                 const today = new Date().toISOString().split("T")[0];
                 const activeAssignment = w.assignments.find(a =>
-                  (a.status === "active" || a.status === "flagged") &&
+                  (a.status === "active" || a.status === "flagged" || a.status === "confirmed" || a.status === "pending_confirmation") &&
                   a.startDate && a.endDate &&
                   a.startDate <= today && a.endDate >= today
                 );
                 const availabilityLabel = w.status === "FTE" ? "Available" : "Potentially Available";
+                const assignmentLabel = activeAssignment
+                  ? activeAssignment.status === "pending_confirmation"
+                    ? `Pending Confirmation — ${activeAssignment.projectName}`
+                    : `${activeAssignment.projectCode} — ${activeAssignment.projectName}`
+                  : availabilityLabel;
                 return {
                   Name: w.name,
                   Role: w.role,
@@ -1430,7 +1435,7 @@ export default function WorkforceTable() {
                   "Measuring Skills": w.measuringSkills || "",
                   "OEM Experience": w.oemExperience.map(o => o.split(" - ")[0]).join("; "),
                   "Utilisation %": util.pct,
-                  "Current Assignment": activeAssignment ? `${activeAssignment.projectCode} — ${activeAssignment.projectName}` : availabilityLabel,
+                  "Current Assignment": assignmentLabel,
                 };
               });
               downloadCSV(rows, `pfg-workforce-${new Date().toISOString().split("T")[0]}.csv`);
@@ -1509,12 +1514,13 @@ export default function WorkforceTable() {
                   const isExpanded = expandedId === w.id;
                   const today = new Date().toISOString().split("T")[0];
                 const activeAssignment = w.assignments.find(a =>
-                  (a.status === "active" || a.status === "flagged") &&
+                  (a.status === "active" || a.status === "flagged" || a.status === "confirmed" || a.status === "pending_confirmation") &&
                   a.startDate && a.endDate &&
                   a.startDate <= today && a.endDate >= today
                 );
                 const availabilityLabel = w.status === "FTE" ? "Available" : "Potentially Available";
                   const hasFlagged = w.assignments.some(a => a.status === "flagged");
+                  const isPendingConfirmation = activeAssignment?.status === "pending_confirmation";
                   return (
                     <Fragment key={w.id}>
                       <tr data-testid={`worker-row-${w.id}`} onClick={() => setExpandedId(isExpanded ? null : w.id)}
@@ -1547,10 +1553,16 @@ export default function WorkforceTable() {
                         <td className="px-2.5 py-2.5"><UtilBar assignments={w.assignments} /></td>
                         <td className="px-2.5 py-2.5 whitespace-nowrap">
                           {activeAssignment ? (
-                            <span className="text-xs font-medium">
-                              {hasFlagged && <span style={{ color: "var(--red, #dc2626)" }} title="Flagged for review" data-testid={`flagged-badge-${w.id}`}>&#9888;&#xFE0F; </span>}
-                              {activeAssignment.projectCode} — {activeAssignment.projectName}
-                            </span>
+                            isPendingConfirmation ? (
+                              <span className="text-xs font-medium" style={{ color: "var(--amber, #D97706)" }}>
+                                Pending Confirmation &mdash; {activeAssignment.projectName}
+                              </span>
+                            ) : (
+                              <span className="text-xs font-medium">
+                                {hasFlagged && <span style={{ color: "var(--red, #dc2626)" }} title="Flagged for review" data-testid={`flagged-badge-${w.id}`}>&#9888;&#xFE0F; </span>}
+                                {activeAssignment.projectCode} — {activeAssignment.projectName}
+                              </span>
+                            )
                           ) : (
                             <span className={`badge ${w.status === "FTE" ? "badge-green" : "badge-accent"}`}>{availabilityLabel}</span>
                           )}

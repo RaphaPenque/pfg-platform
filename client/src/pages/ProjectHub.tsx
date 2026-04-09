@@ -28,27 +28,38 @@ function computeHealth(
   const flags: string[] = [];
   let actionCount = 0;
 
-  // Workforce — per-slot filled count (not peak vs total assignments)
+  // Workforce — per-slot filled count with confirmation awareness
   const projectSlots = roleSlots.filter(s => s.projectId === project.id);
+  const FILLED_STATUSES = ["active", "flagged", "confirmed", "pending_confirmation"];
   const projectAssignments = assignments.filter(
-    a => a.projectId === project.id && (a.status === "active" || a.status === "flagged")
+    a => a.projectId === project.id && FILLED_STATUSES.includes(a.status || "")
   );
   const assignedPerSlot = new Map<number, number>();
   projectAssignments.forEach(a => { if (a.roleSlotId) assignedPerSlot.set(a.roleSlotId, (assignedPerSlot.get(a.roleSlotId) || 0) + 1); });
   const totalSlotQty = projectSlots.reduce((sum, s) => sum + s.quantity, 0);
   const filledCount = projectSlots.reduce((sum, s) => sum + Math.min(assignedPerSlot.get(s.id) || 0, s.quantity), 0);
   const unfilled = Math.max(0, totalSlotQty - filledCount);
+  const pendingCount = projectAssignments.filter(a => a.status === "pending_confirmation").length;
+  const declinedCount = assignments.filter(a => a.projectId === project.id && a.status === "declined").length;
 
   let workforceStatus: HealthStatus = "green";
   let workforceNote = "All slots filled";
   if (totalSlotQty === 0) {
     workforceStatus = "grey";
     workforceNote = "No roles planned";
-  } else if (unfilled > 0) {
+  } else if (unfilled > 0 || declinedCount > 0) {
     workforceStatus = "red";
-    workforceNote = `${unfilled} slot${unfilled > 1 ? "s" : ""} unfilled`;
-    flags.push(`${unfilled} slot${unfilled > 1 ? "s" : ""} unfilled`);
-    actionCount += unfilled;
+    const parts: string[] = [];
+    if (unfilled > 0) parts.push(`${unfilled} slot${unfilled > 1 ? "s" : ""} unfilled`);
+    if (declinedCount > 0) parts.push(`${declinedCount} declined`);
+    workforceNote = parts.join(", ");
+    flags.push(workforceNote);
+    actionCount += unfilled + declinedCount;
+  } else if (pendingCount > 0) {
+    workforceStatus = "amber";
+    workforceNote = `${pendingCount} pending confirmation`;
+    flags.push(workforceNote);
+    actionCount += pendingCount;
   }
 
   // Planning: check signatory

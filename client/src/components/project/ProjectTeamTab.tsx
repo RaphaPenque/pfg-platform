@@ -27,6 +27,8 @@ import {
   Info,
   Undo2,
   Loader2,
+  Send,
+  Mail,
 } from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────────────────
@@ -61,6 +63,21 @@ function StatusBadge({ status }: { status: string }) {
       {status}
     </span>
   );
+}
+
+function ConfirmationBadge({ assignment }: { assignment: DashboardAssignment }) {
+  const status = assignment.status;
+  if (status === "confirmed") {
+    return <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: "var(--green-bg)", color: "var(--green)" }}>Confirmed</span>;
+  }
+  if (status === "pending_confirmation") {
+    return <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: "var(--amber-bg, hsl(var(--accent)))", color: "var(--amber, #D97706)" }}>Pending</span>;
+  }
+  if (status === "declined") {
+    return <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: "var(--red-bg)", color: "var(--red)" }}>Declined</span>;
+  }
+  // "active" temp with no token sent yet
+  return <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: "hsl(var(--muted))", color: "#9ca3af" }}>Not sent</span>;
 }
 
 const inputStyle = {
@@ -135,7 +152,7 @@ function workerIsAvailable(
   excludeProjectId?: number
 ): boolean {
   for (const a of worker.assignments) {
-    if (a.status !== "active" && a.status !== "flagged") continue;
+    if (a.status !== "active" && a.status !== "flagged" && a.status !== "confirmed" && a.status !== "pending_confirmation") continue;
     // For same-project assignments: only skip if dates DON'T overlap
     // (worker can be on multiple non-overlapping slots of the same project)
     if (excludeProjectId && a.projectId === excludeProjectId) {
@@ -169,13 +186,15 @@ export default function ProjectTeamTab({
     OEM_OPTIONS.find((o) => customer.includes(o)) || "";
   const editEquipment = project.equipmentType || "";
 
+  const TEAM_STATUSES = ["active", "flagged", "pending_confirmation", "confirmed", "declined"];
+
   // Build members array from dashboard data
   const members = useMemo(() => {
     return allAssignments
       .filter(
         (a: DashboardAssignment) =>
           a.projectId === project.id &&
-          (a.status === "active" || a.status === "flagged")
+          TEAM_STATUSES.includes(a.status || "")
       )
       .map((a: DashboardAssignment) => {
         const worker = allWorkers.find((w) => w.id === a.workerId);
@@ -224,6 +243,35 @@ export default function ProjectTeamTab({
     Set<number>
   >(new Set());
   const [saving, setSaving] = useState(false);
+  const [sendingConfirmation, setSendingConfirmation] = useState<number | null>(null);
+  const [sendingAll, setSendingAll] = useState(false);
+
+  const handleSendConfirmation = async (assignmentId: number) => {
+    setSendingConfirmation(assignmentId);
+    try {
+      await apiRequest("POST", `/api/assignments/${assignmentId}/send-confirmation`);
+      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      toast({ title: "Confirmation email sent" });
+      onUpdate();
+    } catch (e: any) {
+      toast({ title: "Error sending confirmation", description: e.message || "Unknown error", variant: "destructive" });
+    }
+    setSendingConfirmation(null);
+  };
+
+  const handleSendAllConfirmations = async () => {
+    setSendingAll(true);
+    try {
+      const res = await apiRequest("POST", `/api/projects/${project.id}/send-all-confirmations`);
+      const result = await res.json();
+      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      toast({ title: `Sent ${result.sent} confirmation${result.sent !== 1 ? "s" : ""}`, description: result.skipped > 0 ? `${result.skipped} skipped` : undefined });
+      onUpdate();
+    } catch (e: any) {
+      toast({ title: "Error sending confirmations", description: e.message || "Unknown error", variant: "destructive" });
+    }
+    setSendingAll(false);
+  };
 
   const handleRemove = async (assignmentId: number) => {
     try {
@@ -405,6 +453,13 @@ export default function ProjectTeamTab({
   const oemMatch =
     editOem && editEquipment ? `${editOem} - ${editEquipment}` : null;
 
+  // Temp confirmation stats
+  const tempMembers = members.filter(m => m.worker.status === "Temp");
+  const tempsAwaitingConfirmation = tempMembers.filter(
+    m => m.assignment.status === "active" || m.assignment.status === "pending_confirmation"
+  );
+  const showSendAllButton = tempsAwaitingConfirmation.length > 0;
+
   return (
     <div>
       <div className="flex items-center justify-between mb-5">
@@ -419,6 +474,24 @@ export default function ProjectTeamTab({
           >
             {activeCount}
           </span>
+        </div>
+        <div className="flex items-center gap-3">
+          {showSendAllButton && (
+            <div className="flex items-center gap-2">
+              <span className="text-[11px] font-medium" style={{ color: "var(--amber, #D97706)" }}>
+                {tempsAwaitingConfirmation.length} Temp{tempsAwaitingConfirmation.length !== 1 ? "s" : ""} awaiting confirmation
+              </span>
+              <button
+                onClick={handleSendAllConfirmations}
+                disabled={sendingAll}
+                className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg border transition"
+                style={{ borderColor: "var(--pfg-yellow)", background: "hsl(var(--accent))", color: "var(--pfg-navy)" }}
+              >
+                {sendingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                Send to All Temps
+              </button>
+            </div>
+          )}
         </div>
         {project.endDate &&
           members.some(
@@ -615,6 +688,27 @@ export default function ProjectTeamTab({
                         <div className="flex items-center gap-1.5 shrink-0">
                           <ShiftBadge shift={m.assignment.shift} />
                           <StatusBadge status={m.worker.status} />
+                          {m.worker.status === "Temp" && (
+                            <>
+                              <ConfirmationBadge assignment={m.assignment} />
+                              {m.assignment.status !== "confirmed" && (
+                                <button
+                                  onClick={() => handleSendConfirmation(m.assignment.id)}
+                                  disabled={sendingConfirmation === m.assignment.id}
+                                  className="text-[10px] font-semibold px-2 py-0.5 rounded-lg border flex items-center gap-1 transition"
+                                  style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-navy)" }}
+                                  title={m.assignment.status === "pending_confirmation" ? "Resend confirmation" : "Send confirmation"}
+                                >
+                                  {sendingConfirmation === m.assignment.id ? (
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                  ) : (
+                                    <Mail className="w-3 h-3" />
+                                  )}
+                                  {m.assignment.status === "pending_confirmation" ? "Resend" : "Send"}
+                                </button>
+                              )}
+                            </>
+                          )}
                           <button
                             onClick={() => handleRemove(m.assignment.id)}
                             className="ml-1 p-1 rounded hover:bg-[var(--red-bg)]"

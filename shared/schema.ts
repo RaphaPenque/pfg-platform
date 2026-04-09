@@ -99,6 +99,10 @@ export const assignments = pgTable("assignments", {
   endDate: text("end_date"),
   duration: integer("duration"),
   status: text("status").default("active"),
+  confirmationToken: text("confirmation_token"),
+  confirmationSentAt: text("confirmation_sent_at"),
+  confirmedAt: text("confirmed_at"),
+  declinedAt: text("declined_at"),
 });
 
 export const insertAssignmentSchema = createInsertSchema(assignments).omit({ id: true });

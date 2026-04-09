@@ -3,7 +3,7 @@ import type { Server } from "http";
 import { storage } from "./storage";
 import { insertWorkerSchema, insertProjectSchema, insertAssignmentSchema, insertDocumentSchema, insertOemTypeSchema, insertRoleSlotSchema } from "@shared/schema";
 import type { User } from "@shared/schema";
-import { sendMail, magicLinkEmail, welcomeEmail } from "./email";
+import { sendMail, magicLinkEmail, welcomeEmail, confirmationEmail, confirmationResultEmail } from "./email";
 import { insertPayrollRulesSchema } from "@shared/schema";
 import multer from "multer";
 import path from "path";
@@ -242,10 +242,103 @@ export function registerRoutes(server: Server, app: Express) {
     res.json({ project, roleSlots, assignments, workers });
   });
 
+  // ===== PUBLIC CONFIRMATION ROUTES (no auth) =====
+
+  app.get("/api/confirm/:token", async (req: Request, res: Response) => {
+    const { token } = req.params;
+    const allAssignments = await storage.getAssignments();
+    const assignment = allAssignments.find(a => a.confirmationToken === token);
+    if (!assignment) return res.status(404).json({ error: "Invalid or expired confirmation link" });
+
+    const worker = await storage.getWorker(assignment.workerId);
+    const project = await storage.getProject(assignment.projectId);
+    const roleSlots = assignment.roleSlotId ? await storage.getRoleSlotsByProject(assignment.projectId) : [];
+    const roleSlot = roleSlots.find(s => s.id === assignment.roleSlotId) || null;
+
+    const alreadyResponded = !!(assignment.confirmedAt || assignment.declinedAt);
+
+    res.json({
+      assignment: {
+        id: assignment.id,
+        role: assignment.role,
+        shift: assignment.shift,
+        startDate: assignment.startDate,
+        endDate: assignment.endDate,
+        status: assignment.status,
+        confirmedAt: assignment.confirmedAt,
+        declinedAt: assignment.declinedAt,
+      },
+      worker: worker ? { id: worker.id, name: worker.name } : null,
+      project: project ? { id: project.id, name: project.name, location: project.location, siteName: project.siteName } : null,
+      roleSlot: roleSlot ? { id: roleSlot.id, role: roleSlot.role, shift: roleSlot.shift } : null,
+      status: assignment.status,
+      alreadyResponded,
+    });
+  });
+
+  app.post("/api/confirm/:token/accept", async (req: Request, res: Response) => {
+    const { token } = req.params;
+    const allAssignments = await storage.getAssignments();
+    const assignment = allAssignments.find(a => a.confirmationToken === token);
+    if (!assignment) return res.status(404).json({ error: "Invalid confirmation link" });
+    if (assignment.confirmedAt) return res.json({ ok: true, message: "Already confirmed" });
+
+    const now = new Date().toISOString();
+    await storage.updateAssignment(assignment.id, { status: "confirmed", confirmedAt: now });
+
+    // Notify RM
+    const project = await storage.getProject(assignment.projectId);
+    const worker = await storage.getWorker(assignment.workerId);
+    if (project && worker) {
+      // Find RM who sent it — get project lead or fall back to all RMs
+      const lead = await storage.getProjectLead(project.id);
+      const allUsers = await storage.getUsers();
+      const rms = lead
+        ? allUsers.filter(u => u.id === lead.userId)
+        : allUsers.filter(u => u.role === "resource_manager" && u.isActive);
+      for (const rm of rms) {
+        const tmpl = confirmationResultEmail(rm.name, worker.name, project.name, "confirmed");
+        sendMail({ to: rm.email, subject: tmpl.subject, html: tmpl.html, text: tmpl.text })
+          .catch(err => console.error("[email] Confirmation result send error:", err));
+      }
+    }
+
+    res.json({ ok: true });
+  });
+
+  app.post("/api/confirm/:token/decline", async (req: Request, res: Response) => {
+    const { token } = req.params;
+    const allAssignments = await storage.getAssignments();
+    const assignment = allAssignments.find(a => a.confirmationToken === token);
+    if (!assignment) return res.status(404).json({ error: "Invalid confirmation link" });
+    if (assignment.declinedAt) return res.json({ ok: true, message: "Already declined" });
+
+    const now = new Date().toISOString();
+    await storage.updateAssignment(assignment.id, { status: "declined", declinedAt: now });
+
+    // Notify RM
+    const project = await storage.getProject(assignment.projectId);
+    const worker = await storage.getWorker(assignment.workerId);
+    if (project && worker) {
+      const lead = await storage.getProjectLead(project.id);
+      const allUsers = await storage.getUsers();
+      const rms = lead
+        ? allUsers.filter(u => u.id === lead.userId)
+        : allUsers.filter(u => u.role === "resource_manager" && u.isActive);
+      for (const rm of rms) {
+        const tmpl = confirmationResultEmail(rm.name, worker.name, project.name, "declined");
+        sendMail({ to: rm.email, subject: tmpl.subject, html: tmpl.html, text: tmpl.text })
+          .catch(err => console.error("[email] Confirmation result send error:", err));
+      }
+    }
+
+    res.json({ ok: true });
+  });
+
   // ===== ALL ROUTES BELOW REQUIRE AUTH =====
   app.use("/api", (req: Request, res: Response, next: NextFunction) => {
-    // Skip auth for auth routes and portal
-    if (req.path.startsWith("/auth/") || req.path.startsWith("/portal/")) return next();
+    // Skip auth for auth routes, portal, and confirmation
+    if (req.path.startsWith("/auth/") || req.path.startsWith("/portal/") || req.path.startsWith("/confirm/")) return next();
     // Skip auth for uploads serving (static files)
     if (req.path.startsWith("/uploads/")) return next();
     requireAuth(req, res, next);
@@ -518,6 +611,111 @@ export function registerRoutes(server: Server, app: Express) {
     }
 
     res.json({ sent, skipped, noEmail });
+  });
+
+  // ===== ASSIGNMENT CONFIRMATION =====
+
+  app.post("/api/assignments/:id/send-confirmation", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const allAssignments = await storage.getAssignments();
+    const assignment = allAssignments.find(a => a.id === id);
+    if (!assignment) return res.status(404).json({ error: "Assignment not found" });
+
+    const worker = await storage.getWorker(assignment.workerId);
+    if (!worker) return res.status(404).json({ error: "Worker not found" });
+    if (worker.status !== "Temp") return res.status(400).json({ error: "Only Temp workers require confirmation" });
+
+    const project = await storage.getProject(assignment.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const token = crypto.randomUUID();
+    const now = new Date().toISOString();
+    await storage.updateAssignment(id, {
+      confirmationToken: token,
+      confirmationSentAt: now,
+      status: "pending_confirmation",
+    });
+
+    const baseUrl = "https://pfg-platform.onrender.com";
+    const confirmUrl = `${baseUrl}/#/confirm/${token}`;
+    const declineUrl = `${baseUrl}/#/confirm/${token}`;
+
+    const recipientEmail = worker.personalEmail || worker.workEmail;
+    if (recipientEmail) {
+      const tmpl = confirmationEmail(
+        worker.name,
+        project.name,
+        assignment.role || worker.role,
+        assignment.shift || project.shift || "Day",
+        assignment.startDate || project.startDate || "",
+        assignment.endDate || project.endDate || "",
+        project.location || project.siteName || "",
+        confirmUrl,
+        declineUrl,
+      );
+      sendMail({ to: recipientEmail, subject: tmpl.subject, html: tmpl.html, text: tmpl.text })
+        .catch(err => console.error("[email] Confirmation send error:", err));
+    }
+
+    await logAudit(req.user!.id, "assignment.send_confirmation", "assignment", id, worker.name);
+    res.json({ ok: true, token });
+  });
+
+  app.post("/api/projects/:id/send-all-confirmations", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
+    const projectId = parseInt(req.params.id);
+    const project = await storage.getProject(projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const allAssignments = await storage.getAssignments();
+    const projectAssignments = allAssignments.filter(
+      a => a.projectId === projectId && (a.status === "active" || a.status === "pending_confirmation")
+    );
+
+    const allWorkers = await storage.getWorkers();
+    const workerMap = Object.fromEntries(allWorkers.map(w => [w.id, w]));
+
+    let sent = 0;
+    let skipped = 0;
+
+    for (const assignment of projectAssignments) {
+      const worker = workerMap[assignment.workerId];
+      if (!worker || worker.status !== "Temp") { skipped++; continue; }
+      if (assignment.confirmedAt || assignment.declinedAt) { skipped++; continue; }
+
+      const token = crypto.randomUUID();
+      const now = new Date().toISOString();
+      await storage.updateAssignment(assignment.id, {
+        confirmationToken: token,
+        confirmationSentAt: now,
+        status: "pending_confirmation",
+      });
+
+      const baseUrl = "https://pfg-platform.onrender.com";
+      const confirmUrl = `${baseUrl}/#/confirm/${token}`;
+      const declineUrl = `${baseUrl}/#/confirm/${token}`;
+
+      const recipientEmail = worker.personalEmail || worker.workEmail;
+      if (recipientEmail) {
+        const tmpl = confirmationEmail(
+          worker.name,
+          project.name,
+          assignment.role || worker.role,
+          assignment.shift || project.shift || "Day",
+          assignment.startDate || project.startDate || "",
+          assignment.endDate || project.endDate || "",
+          project.location || project.siteName || "",
+          confirmUrl,
+          declineUrl,
+        );
+        sendMail({ to: recipientEmail, subject: tmpl.subject, html: tmpl.html, text: tmpl.text })
+          .catch(err => console.error("[email] Confirmation send error:", err));
+      }
+
+      sent++;
+    }
+
+    await logAudit(req.user!.id, "assignment.send_all_confirmations", "project", projectId, project.name, { sent, skipped });
+    res.json({ sent, skipped });
   });
 
   // ===== NOTIFICATIONS (extension) =====
