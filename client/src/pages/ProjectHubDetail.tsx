@@ -7,6 +7,8 @@ import {
   Truck, FolderOpen, DollarSign, Megaphone, Star,
   ExternalLink, ChevronRight, AlertTriangle, CheckCircle2, Clock, Activity,
 } from "lucide-react";
+import ProjectRolePlanningTab from "@/components/project/ProjectRolePlanningTab";
+import ProjectTeamTab from "@/components/project/ProjectTeamTab";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -423,7 +425,7 @@ function OverviewTab({
 // ─── Main Page ───────────────────────────────────────────────────
 
 export default function ProjectHubDetail({ params }: { params: { code: string } }) {
-  const { data, isLoading } = useDashboardData();
+  const { data, isLoading, refetch } = useDashboardData();
   const [activeTab, setActiveTab] = useState("overview");
 
   const project = useMemo(
@@ -514,10 +516,10 @@ export default function ProjectHubDetail({ params }: { params: { code: string } 
           <OverviewTab project={project} roleSlots={roleSlots} assignments={assignments} />
         )}
         {activeTab === "rolePlanning" && (
-          <PlaceholderTab label="Role Planning" icon={<Users className="w-6 h-6" />} />
+          <ProjectRolePlanningTab project={project} onUpdate={() => refetch()} />
         )}
         {activeTab === "team" && (
-          <PlaceholderTab label="Team" icon={<UserCheck className="w-6 h-6" />} />
+          <ProjectTeamTab project={project} onUpdate={() => refetch()} />
         )}
         {activeTab === "timesheets" && (
           <PlaceholderTab label="Timesheets" icon={<ClipboardList className="w-6 h-6" />} />
