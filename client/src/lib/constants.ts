@@ -54,6 +54,17 @@ export const CERT_DEFS = [
   { name: 'Fork Lift License' },
   { name: 'Mobile Elevating Work Platform (MEWP)' },
   { name: "Driver's License" },
+  // Technical / OEM tool certs
+  { name: 'Riverhawk Hydraulic Tensioning' },
+  { name: 'Strobator' },
+  { name: 'Crane Operator' },
+  { name: 'Rigging & Slinging' },
+  { name: 'Safety Harness' },
+  { name: 'Welding' },
+  { name: 'Appointed Person (Lifting)' },
+  { name: 'Managing Safely (IOSH)' },
+  { name: 'Banksman / Slinger' },
+  { name: 'Asbestos Awareness' },
 ];
 
 // OEM options for dropdowns
