@@ -37,7 +37,7 @@ const upload = multer({
       cb(null, `${type}${ext}`);
     },
   }),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 25 * 1024 * 1024 }, // 25MB — covers scanned cert PDFs
 });
 
 // ─── Auth Middleware ──────────────────────────────────────────
