@@ -88,35 +88,33 @@ export function registerRoutes(server: Server, app: Express) {
 
   // ===== AUTH ROUTES (no auth required) =====
 
-  app.post("/api/auth/request-link", async (req: Request, res: Response) => {
+  app.post("/api/auth/request-link", (req: Request, res: Response) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: "Email required" });
 
-    const user = await storage.getUserByEmail(email);
-    // Always return the same response to prevent email enumeration
-    // If user doesn't exist or is inactive, silently succeed — no info leaked
-    if (!user || !user.isActive) {
-      // Delay response slightly to prevent timing attacks
-      await new Promise(resolve => setTimeout(resolve, 400));
-      return res.json({ message: "If that address is registered, a login link is on its way" });
-    }
-
-    const token = crypto.randomUUID();
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
-    await storage.createMagicLink({ email: email.toLowerCase(), token, expiresAt });
-
-    const loginUrl = `https://pfg-platform.onrender.com/#/auth/verify?token=${token}`;
-    // Always log for fallback/debugging
-    console.log(`[MAGIC-LINK] Login link for ${email}: ${loginUrl}`);
-
-    // Respond immediately — email sends in background (Graph can be slow on cold start)
+    // Respond IMMEDIATELY — never wait for DB or email (cold-start DB can take >10s)
+    // The neutral message prevents email enumeration regardless of outcome
     res.json({ message: "If that address is registered, a login link is on its way" });
 
-    // Send via Microsoft Graph after responding
-    const tmpl = magicLinkEmail(user.name, loginUrl);
-    setImmediate(() => {
-      sendMail({ to: email, subject: tmpl.subject, html: tmpl.html, text: tmpl.text })
-        .catch(err => console.error("[email] Magic link send error:", err));
+    // Do all async work in background after response is sent
+    setImmediate(async () => {
+      try {
+        const user = await storage.getUserByEmail(email);
+        if (!user || !user.isActive) return; // silently do nothing
+
+        const token = crypto.randomUUID();
+        const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+        await storage.createMagicLink({ email: email.toLowerCase(), token, expiresAt });
+
+        const loginUrl = `https://pfg-platform.onrender.com/#/auth/verify?token=${token}`;
+        console.log(`[MAGIC-LINK] Login link for ${email}: ${loginUrl}`);
+
+        const tmpl = magicLinkEmail(user.name, loginUrl);
+        await sendMail({ to: email, subject: tmpl.subject, html: tmpl.html, text: tmpl.text });
+        console.log(`[MAGIC-LINK] Email sent to ${email}`);
+      } catch (err: any) {
+        console.error("[MAGIC-LINK] Background error:", err?.message || err);
+      }
     });
   });
 
