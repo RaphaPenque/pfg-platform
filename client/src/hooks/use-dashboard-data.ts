@@ -72,6 +72,16 @@ export interface DashboardProject {
   headcount: number | null;
   notes: string | null;
   status: string | null;
+  contractType: string | null;
+  siteName: string | null;
+  siteAddress: string | null;
+  sourcingContact: string | null;
+  customerProjectManager: string | null;
+  siteManager: string | null;
+  dayShiftSignatoryName: string | null;
+  dayShiftSignatoryEmail: string | null;
+  nightShiftSignatoryName: string | null;
+  nightShiftSignatoryEmail: string | null;
 }
 
 export interface DashboardRoleSlot {

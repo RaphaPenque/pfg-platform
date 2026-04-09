@@ -7,6 +7,8 @@ import { Toaster } from "@/components/ui/toaster";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import WorkforceTable from "./pages/WorkforceTable";
 import ProjectAllocation from "./pages/ProjectAllocation";
+import ProjectHub from "./pages/ProjectHub";
+import ProjectHubDetail from "./pages/ProjectHubDetail";
 import GanttChart from "./pages/GanttChart";
 import PersonSchedule from "./pages/PersonSchedule";
 import CustomerPortal from "./pages/CustomerPortal";
@@ -33,7 +35,7 @@ const ROLE_COLORS: Record<string, string> = {
 
 const tabs = [
   { id: "workforce", label: "Workforce Table", path: "/" },
-  { id: "projects", label: "Project Allocation", path: "/projects" },
+  { id: "projects", label: "Project Hub", path: "/projects" },
   { id: "gantt", label: "Gantt Chart", path: "/gantt" },
   { id: "schedule", label: "Person Schedule", path: "/schedule" },
 ];
@@ -133,7 +135,9 @@ function MainLayout() {
       <main className="max-w-[1600px] mx-auto px-6 py-5 pb-10">
         <Switch>
           <Route path="/" component={WorkforceTable} />
-          <Route path="/projects" component={ProjectAllocation} />
+          <Route path="/projects" component={ProjectHub} />
+          <Route path="/projects/allocation" component={ProjectAllocation} />
+          <Route path="/projects/:code">{(params) => <ProjectHubDetail params={params} />}</Route>
           <Route path="/gantt" component={GanttChart} />
           <Route path="/schedule" component={PersonSchedule} />
           <Route path="/admin/payroll-rules" component={PayrollRules} />

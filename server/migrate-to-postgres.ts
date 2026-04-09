@@ -57,6 +57,18 @@ export async function runSchemaUpdates() {
       VALUES ('Powerforce Global S.L', 'ES', 'Spain', 1600, FALSE, 8, 'Spanish Labour Law: OT tracked annually above 1,600 hrs/calendar year')
       ON CONFLICT (cost_centre) DO NOTHING
     `);
+    // Project hub fields — added Phase 1
+    await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS contract_type TEXT`);
+    await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS site_name TEXT`);
+    await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS site_address TEXT`);
+    await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS sourcing_contact TEXT`);
+    await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS customer_project_manager TEXT`);
+    await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS site_manager TEXT`);
+    await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS day_shift_signatory_name TEXT`);
+    await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS day_shift_signatory_email TEXT`);
+    await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS night_shift_signatory_name TEXT`);
+    await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS night_shift_signatory_email TEXT`);
+
     console.log("Schema updates applied.");
   } catch (e: any) {
     console.error("Schema update error:", e.message);

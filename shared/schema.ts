@@ -57,6 +57,16 @@ export const projects = pgTable("projects", {
   headcount: integer("headcount"),
   notes: text("notes"),
   status: text("status").default("active"),
+  contractType: text("contract_type"),
+  siteName: text("site_name"),
+  siteAddress: text("site_address"),
+  sourcingContact: text("sourcing_contact"),
+  customerProjectManager: text("customer_project_manager"),
+  siteManager: text("site_manager"),
+  dayShiftSignatoryName: text("day_shift_signatory_name"),
+  dayShiftSignatoryEmail: text("day_shift_signatory_email"),
+  nightShiftSignatoryName: text("night_shift_signatory_name"),
+  nightShiftSignatoryEmail: text("night_shift_signatory_email"),
 });
 
 export const insertProjectSchema = createInsertSchema(projects).omit({ id: true });
