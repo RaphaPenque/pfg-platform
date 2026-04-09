@@ -186,10 +186,12 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
     y += 12;
   }
 
-  // Current / active assignments
-  const activeAssignments = worker.assignments.filter(a =>
-    a.status === "active" || a.status === "flagged"
-  );
+  // Current assignments — only those whose date range includes TODAY
+  const activeAssignments = worker.assignments.filter(a => {
+    if (a.status !== "active" && a.status !== "flagged") return false;
+    if (!a.startDate || !a.endDate) return false;
+    return a.startDate <= today && a.endDate >= today;
+  });
   if (activeAssignments.length > 0) {
     sectionTitle("Current Assignment" + (activeAssignments.length > 1 ? "s" : ""), y);
     y += 8;
@@ -218,6 +220,19 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
       doc.text(truncate((a as any).location || "—", 14), aCols[4].x, y);
       y += 7;
     }
+  } else {
+    // No active assignment today — show availability status
+    sectionTitle("Current Assignment", y);
+    y += 8;
+    const availLabel = worker.status === "FTE" ? "Available" : "Potentially Available";
+    const availColor = worker.status === "FTE" ? [34, 197, 94] as const : [245, 158, 11] as const;
+    doc.setFillColor(...availColor);
+    const lw = doc.getTextWidth(availLabel) + 10;
+    doc.roundedRect(14, y - 4, lw, 7, 1.5, 1.5, "F");
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8);
+    doc.setTextColor(255, 255, 255);
+    doc.text(availLabel, 19, y);
+    y += 10;
   }
 
   drawSqepFooter(doc, `Page 1 of ${doc.getNumberOfPages() + 2}`);

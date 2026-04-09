@@ -1414,7 +1414,13 @@ export default function WorkforceTable() {
             onClick={() => {
               const rows = sorted.map(w => {
                 const util = calcUtilisation(w.assignments);
-                const activeAssignment = w.assignments.find(a => a.status === "active" || a.status === "flagged");
+                const today = new Date().toISOString().split("T")[0];
+                const activeAssignment = w.assignments.find(a =>
+                  (a.status === "active" || a.status === "flagged") &&
+                  a.startDate && a.endDate &&
+                  a.startDate <= today && a.endDate >= today
+                );
+                const availabilityLabel = w.status === "FTE" ? "Available" : "Potentially Available";
                 return {
                   Name: w.name,
                   Role: w.role,
@@ -1424,7 +1430,7 @@ export default function WorkforceTable() {
                   "Measuring Skills": w.measuringSkills || "",
                   "OEM Experience": w.oemExperience.map(o => o.split(" - ")[0]).join("; "),
                   "Utilisation %": util.pct,
-                  "Current Assignment": activeAssignment ? `${activeAssignment.projectCode} — ${activeAssignment.projectName}` : "Available",
+                  "Current Assignment": activeAssignment ? `${activeAssignment.projectCode} — ${activeAssignment.projectName}` : availabilityLabel,
                 };
               });
               downloadCSV(rows, `pfg-workforce-${new Date().toISOString().split("T")[0]}.csv`);
@@ -1501,7 +1507,13 @@ export default function WorkforceTable() {
               ) : (
                 sorted.map(w => {
                   const isExpanded = expandedId === w.id;
-                  const activeAssignment = w.assignments.find(a => a.status === "active" || a.status === "flagged");
+                  const today = new Date().toISOString().split("T")[0];
+                const activeAssignment = w.assignments.find(a =>
+                  (a.status === "active" || a.status === "flagged") &&
+                  a.startDate && a.endDate &&
+                  a.startDate <= today && a.endDate >= today
+                );
+                const availabilityLabel = w.status === "FTE" ? "Available" : "Potentially Available";
                   const hasFlagged = w.assignments.some(a => a.status === "flagged");
                   return (
                     <Fragment key={w.id}>
@@ -1540,7 +1552,7 @@ export default function WorkforceTable() {
                               {activeAssignment.projectCode} — {activeAssignment.projectName}
                             </span>
                           ) : (
-                            <span className="badge badge-green">Available</span>
+                            <span className={`badge ${w.status === "FTE" ? "badge-green" : "badge-accent"}`}>{availabilityLabel}</span>
                           )}
                         </td>
                         <td className="px-2.5 py-2.5">
