@@ -1006,11 +1006,25 @@ export function registerRoutes(server: Server, app: Express) {
     const documentsByWorker: Record<number, any[]> = {};
     allWorkers.forEach((w, i) => { documentsByWorker[w.id] = allDocuments[i]; });
 
+    // Load OEM experience (relational) for all workers in one batch
+    const allOemExpRelational = await Promise.all(allWorkers.map(w => storage.getOemExperience(w.id)));
+    const oemExpByWorker: Record<number, any[]> = {};
+    allWorkers.forEach((w, i) => { oemExpByWorker[w.id] = allOemExpRelational[i]; });
+
     const enrichedWorkers = allWorkers.map(w => ({
       ...w,
       oemExperience: w.oemExperience ? JSON.parse(w.oemExperience) : [],
+      oemExperienceRelational: oemExpByWorker[w.id] || [],
       assignments: assignmentsByWorker[w.id] || [],
       documents: documentsByWorker[w.id] || [],
+      // Phase 6 new fields (passed through directly from DB record)
+      employmentType: (w as any).employmentType || null,
+      profileSummary: (w as any).profileSummary || null,
+      passportExpiry: (w as any).passportExpiry || null,
+      passportNumber: (w as any).passportNumber || null,
+      emergencyContactName: (w as any).emergencyContactName || null,
+      emergencyContactPhone: (w as any).emergencyContactPhone || null,
+      emergencyContactRelationship: (w as any).emergencyContactRelationship || null,
     }));
 
     const allRoleSlots: any[] = [];

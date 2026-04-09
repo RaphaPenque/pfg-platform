@@ -341,6 +341,14 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
   const [coverallSize, setCoverallSize] = useState(worker.coverallSize || "");
   const [bootSize, setBootSize] = useState(worker.bootSize || "");
   const [localAirport, setLocalAirport] = useState(worker.localAirport || "");
+  // Phase 6 new fields
+  const [profileSummary, setProfileSummary] = useState(worker.profileSummary || "");
+  const [passportExpiry, setPassportExpiry] = useState(worker.passportExpiry || "");
+  const [passportNumber, setPassportNumber] = useState(worker.passportNumber || "");
+  const [emergencyName, setEmergencyName] = useState(worker.emergencyContactName || "");
+  const [emergencyPhone, setEmergencyPhone] = useState(worker.emergencyContactPhone || "");
+  const [emergencyRel, setEmergencyRel] = useState(worker.emergencyContactRelationship || "");
+  const [employmentType, setEmploymentType] = useState(worker.employmentType || (worker.status === "FTE" ? "FTE" : "Temp"));
 
   // Step 2: Certs
   const [certData, setCertData] = useState<Record<string, { completionDate: string; validityDate: string; file: File | null; uploaded: boolean }>>(() => {
@@ -481,6 +489,14 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
         coverallSize: coverallSize || null,
         bootSize: bootSize || null,
         localAirport: localAirport || null,
+        // Phase 6 new fields
+        profileSummary: profileSummary || null,
+        passportExpiry: passportExpiry || null,
+        passportNumber: passportNumber || null,
+        emergencyContactName: emergencyName || null,
+        emergencyContactPhone: emergencyPhone || null,
+        emergencyContactRelationship: emergencyRel || null,
+        employmentType: employmentType || null,
       });
 
       // Save manual work experience entries
@@ -560,6 +576,22 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
               </select>
             </FormGroup>
 
+            <FormGroup label="Employment Type">
+              <div className="flex gap-2">
+                {["FTE", "Temp"].map(t => (
+                  <button key={t} type="button"
+                    onClick={() => setEmploymentType(t)}
+                    className="flex-1 py-1.5 rounded-lg text-[12px] font-semibold border transition"
+                    style={employmentType === t
+                      ? { background: t === "FTE" ? "var(--pfg-navy)" : "#FEF3C7", color: t === "FTE" ? "#fff" : "#92400E", borderColor: t === "FTE" ? "var(--pfg-navy)" : "#D97706" }
+                      : { background: "transparent", color: "var(--pfg-steel)", borderColor: "hsl(var(--border))" }}
+                    data-testid={`edit-employment-type-${t}`}>
+                    {t}
+                  </button>
+                ))}
+              </div>
+            </FormGroup>
+
             {status === "FTE" ? (
               <FormGroup label="Cost Centre">
                 <select className={inputCls} style={inputStyle} value={costCentre} onChange={(e) => setCostCentre(e.target.value)} data-testid="edit-cost-centre">
@@ -616,6 +648,13 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
               <FileDropZone label="photo" onFile={setPhotoFile} currentFile={photoFile?.name || (hasExistingPhoto ? "existing" : null)} accept=".jpg,.jpeg,.png" testId="edit-photo-upload" />
             </FormGroup>
 
+            <FormGroup label="Passport Number">
+              <input className={inputCls} style={inputStyle} value={passportNumber} onChange={(e) => setPassportNumber(e.target.value)} placeholder="e.g. P1234567" data-testid="edit-passport-number" />
+            </FormGroup>
+            <FormGroup label="Passport Expiry">
+              <input type="date" className={inputCls} style={inputStyle} value={passportExpiry} onChange={(e) => setPassportExpiry(e.target.value)} data-testid="edit-passport-expiry" />
+            </FormGroup>
+
             {/* Contact Information */}
             <div className="col-span-2 mt-2 mb-1">
               <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>Contact Information</div>
@@ -653,6 +692,33 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
             </FormGroup>
             <FormGroup label="Local Airport">
               <input className={inputCls} style={inputStyle} value={localAirport} onChange={(e) => setLocalAirport(e.target.value)} placeholder="e.g. LHR, MAD, LIS, OPO" data-testid="edit-local-airport" />
+            </FormGroup>
+
+            <FormGroup label="Profile Bio" full>
+              <textarea
+                className={`${inputCls} resize-y`}
+                style={inputStyle}
+                rows={3}
+                value={profileSummary}
+                onChange={(e) => setProfileSummary(e.target.value)}
+                placeholder="Worker profile summary for SQEP..."
+                data-testid="edit-profile-summary"
+              />
+            </FormGroup>
+
+            {/* Emergency Contact */}
+            <div className="col-span-2 mt-2 mb-1">
+              <div className="text-[11px] font-bold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>Emergency Contact</div>
+              <div className="border-b mt-1" style={{ borderColor: "hsl(var(--border))" }} />
+            </div>
+            <FormGroup label="Name">
+              <input className={inputCls} style={inputStyle} value={emergencyName} onChange={(e) => setEmergencyName(e.target.value)} placeholder="Emergency contact name" data-testid="edit-emergency-name" />
+            </FormGroup>
+            <FormGroup label="Phone">
+              <input type="tel" className={inputCls} style={inputStyle} value={emergencyPhone} onChange={(e) => setEmergencyPhone(e.target.value)} placeholder="+44 7700 900000" data-testid="edit-emergency-phone" />
+            </FormGroup>
+            <FormGroup label="Relationship">
+              <input className={inputCls} style={inputStyle} value={emergencyRel} onChange={(e) => setEmergencyRel(e.target.value)} placeholder="e.g. Spouse, Parent" data-testid="edit-emergency-rel" />
             </FormGroup>
           </div>
         )}
@@ -1071,6 +1137,40 @@ function WorkerDetail({ worker }: { worker: DashboardWorker }) {
   const workerRoles = parseRoles(worker);
   const age = worker.dateOfBirth ? calcAge(worker.dateOfBirth) : (worker.age || "—");
 
+  // OEM Experience (relational)
+  const { data: oemEntries = [], refetch: refetchOem } = useQuery<Array<{ id: number; oem: string; equipmentType: string; yearsExperience: number | null }>>(
+    {
+      queryKey: ['/api/workers', worker.id, 'oem-experience'],
+      queryFn: () => apiRequest('GET', `/api/workers/${worker.id}/oem-experience`).then((r: any) => r.json()),
+      initialData: worker.oemExperienceRelational,
+    }
+  );
+  const [showAddOem, setShowAddOem] = useState(false);
+  const [newOem, setNewOem] = useState("");
+  const [newEquip, setNewEquip] = useState("");
+  const [newYears, setNewYears] = useState("");
+  const [oemSaving, setOemSaving] = useState(false);
+
+  const handleAddOem = async () => {
+    if (!newOem || !newEquip) return;
+    setOemSaving(true);
+    try {
+      await apiRequest('POST', `/api/workers/${worker.id}/oem-experience`, {
+        oem: newOem,
+        equipmentType: newEquip,
+        yearsExperience: newYears ? parseFloat(newYears) : null,
+      });
+      await refetchOem();
+      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      setNewOem("");
+      setNewEquip("");
+      setNewYears("");
+      setShowAddOem(false);
+    } finally {
+      setOemSaving(false);
+    }
+  };
+
   const handleDelete = async () => {
     setDeleteState("deleting");
     setDeleteError(null);
@@ -1184,6 +1284,65 @@ function WorkerDetail({ worker }: { worker: DashboardWorker }) {
                 ))}
               </div>
 
+              {/* Employment Type badge */}
+              {(() => {
+                const empType = worker.employmentType || (worker.status === "FTE" ? "FTE" : null);
+                if (!empType) return null;
+                return (
+                  <div className="mt-3 flex items-center gap-2">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "hsl(var(--muted-foreground))" }}>Employment Type</span>
+                    <span
+                      data-testid={`employment-type-badge-${worker.id}`}
+                      className="text-[11px] font-bold px-2.5 py-0.5 rounded-full"
+                      style={empType === "FTE"
+                        ? { background: "var(--pfg-navy)", color: "#fff" }
+                        : { background: "#FEF3C7", color: "#92400E" }}
+                    >
+                      {empType}
+                    </span>
+                  </div>
+                );
+              })()}
+
+              {/* Passport fields */}
+              {(worker.passportExpiry || worker.passportNumber) && (
+                <>
+                  <div className="text-[10px] font-bold uppercase tracking-wide mt-3 pt-3 border-t" style={{ color: "var(--pfg-navy)", borderColor: "hsl(var(--border))" }}>Passport</div>
+                  <div className="space-y-1 mt-1.5">
+                    {worker.passportNumber && (
+                      <div className="flex flex-col gap-0.5">
+                        <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "hsl(var(--muted-foreground))" }}>Number</span>
+                        <span className="text-[13px] font-medium tabular-nums" data-testid={`passport-number-${worker.id}`}>{worker.passportNumber}</span>
+                      </div>
+                    )}
+                    {worker.passportExpiry && (() => {
+                      const today = new Date();
+                      const expiry = new Date(worker.passportExpiry!);
+                      const daysLeft = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                      const sixMonths = 180;
+                      const color = daysLeft <= 0 ? "var(--red)" : daysLeft < 30 ? "var(--red)" : daysLeft < sixMonths ? "var(--amber)" : "var(--green)";
+                      const label = daysLeft <= 0 ? "Expired" : daysLeft < 30 ? `Expires in ${daysLeft}d` : daysLeft < sixMonths ? `Expires ${worker.passportExpiry}` : `Valid — ${worker.passportExpiry}`;
+                      return (
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "hsl(var(--muted-foreground))" }}>Expiry</span>
+                          <span className="text-[13px] font-semibold" style={{ color }} data-testid={`passport-expiry-${worker.id}`}>{label}</span>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                </>
+              )}
+
+              {/* Emergency Contact */}
+              {(worker.emergencyContactName || worker.emergencyContactPhone || worker.emergencyContactRelationship) && (
+                <>
+                  <div className="text-[10px] font-bold uppercase tracking-wide mt-3 pt-3 border-t" style={{ color: "var(--pfg-navy)", borderColor: "hsl(var(--border))" }}>Emergency Contact</div>
+                  <div className="mt-1.5 text-[13px]" style={{ color: "var(--pfg-steel)" }} data-testid={`emergency-contact-${worker.id}`}>
+                    {[worker.emergencyContactName, worker.emergencyContactPhone, worker.emergencyContactRelationship].filter(Boolean).join(" · ")}
+                  </div>
+                </>
+              )}
+
               {/* Contact Info */}
               {(worker.phone || worker.personalEmail || worker.workEmail) && (
                 <>
@@ -1236,23 +1395,145 @@ function WorkerDetail({ worker }: { worker: DashboardWorker }) {
                 <span className="text-xs font-semibold">{worker.measuringSkills || "—"}</span>
               </div>
 
-              <div className="text-xs font-bold uppercase tracking-wide mt-4 mb-2 pt-3 border-t" style={{ color: "var(--pfg-navy)", borderColor: "hsl(var(--border))" }}>
-                OEM Experience
+              <div className="flex items-center justify-between mt-4 mb-2 pt-3 border-t" style={{ borderColor: "hsl(var(--border))" }}>
+                <div className="text-xs font-bold uppercase tracking-wide" style={{ color: "var(--pfg-navy)" }}>OEM Experience</div>
+                <button
+                  type="button"
+                  onClick={() => setShowAddOem(!showAddOem)}
+                  className="w-5 h-5 rounded-full flex items-center justify-center text-xs font-bold border transition-colors"
+                  style={{ borderColor: "var(--pfg-yellow)", color: "#8B6E00", background: showAddOem ? "var(--pfg-yellow)" : "transparent" }}
+                  data-testid={`oem-add-toggle-${worker.id}`}
+                  title="Add OEM experience"
+                >
+                  <Plus className="w-3 h-3" />
+                </button>
               </div>
-              <div className="flex flex-wrap gap-1">
-                {worker.oemExperience.length > 0 ? (
-                  worker.oemExperience.map((oem, i) => <OemPill key={oem} oem={oem} index={i} />)
-                ) : (
+
+              {/* Grouped OEM pills by OEM name */}
+              <div className="space-y-1">
+                {oemEntries.length > 0 ? (() => {
+                  // Group by OEM
+                  const grouped: Record<string, typeof oemEntries> = {};
+                  oemEntries.forEach(e => {
+                    if (!grouped[e.oem]) grouped[e.oem] = [];
+                    grouped[e.oem].push(e);
+                  });
+                  return Object.entries(grouped).map(([oemName, entries], gi) => (
+                    <div key={oemName} className="flex flex-wrap items-center gap-1">
+                      <span className="text-[11px] font-semibold" style={{ color: "var(--pfg-navy)", minWidth: 80 }}>{oemName}</span>
+                      {entries.map((e, ei) => (
+                        <div key={e.id} className="flex items-center gap-0.5">
+                          <OemPill oem={e.equipmentType} index={gi * 3 + ei} />
+                          {e.yearsExperience ? (
+                            <span className="text-[10px]" style={{ color: "hsl(var(--muted-foreground))" }}>{e.yearsExperience}y</span>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              await apiRequest('DELETE', `/api/oem-experience/${e.id}`);
+                              await refetchOem();
+                              await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+                            }}
+                            className="p-0.5 text-red-300 hover:text-red-600 transition-colors"
+                            data-testid={`oem-delete-${e.id}`}
+                            title="Remove"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ));
+                })() : (
                   <span className="text-xs" style={{ color: "hsl(var(--muted-foreground))" }}>None recorded</span>
                 )}
               </div>
+
+              {/* Inline Add OEM form */}
+              {showAddOem && (
+                <div className="mt-2 p-2.5 rounded-lg border space-y-2" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--background))" }} data-testid={`oem-add-form-${worker.id}`}>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="flex flex-col gap-0.5">
+                      <label className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>OEM</label>
+                      <select
+                        className="text-xs px-2 py-1.5 border rounded-lg"
+                        style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}
+                        value={newOem}
+                        onChange={(e) => setNewOem(e.target.value)}
+                        data-testid={`oem-new-oem-${worker.id}`}
+                      >
+                        <option value="">Select OEM...</option>
+                        {OEM_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      <label className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>Equipment Type</label>
+                      <select
+                        className="text-xs px-2 py-1.5 border rounded-lg"
+                        style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}
+                        value={newEquip}
+                        onChange={(e) => setNewEquip(e.target.value)}
+                        data-testid={`oem-new-equip-${worker.id}`}
+                      >
+                        <option value="">Select type...</option>
+                        {EQUIPMENT_TYPES.map(et => <option key={et.value} value={et.value}>{et.label}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-0.5">
+                    <label className="text-[10px] font-semibold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>Years Experience</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={50}
+                      step={0.5}
+                      className="text-xs px-2 py-1.5 border rounded-lg"
+                      style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}
+                      value={newYears}
+                      onChange={(e) => setNewYears(e.target.value)}
+                      placeholder="e.g. 3"
+                      data-testid={`oem-new-years-${worker.id}`}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleAddOem}
+                      disabled={!newOem || !newEquip || oemSaving}
+                      className="flex-1 text-xs font-bold py-1.5 rounded-lg disabled:opacity-40"
+                      style={{ background: "var(--pfg-yellow)", color: "var(--pfg-navy)" }}
+                      data-testid={`oem-add-submit-${worker.id}`}
+                    >
+                      {oemSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin mx-auto" /> : "Add"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddOem(false)}
+                      className="text-xs font-medium px-3 py-1.5 rounded-lg"
+                      style={{ color: "var(--pfg-steel)" }}
+                      data-testid={`oem-add-cancel-${worker.id}`}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* RIGHT: Comments + Utilisation */}
+            {/* RIGHT: Summary & Notes + Utilisation */}
             <div className="rounded-lg border p-4" style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))" }}>
               <div className="text-xs font-bold uppercase tracking-wide mb-3 pb-2 border-b text-pfg-navy" style={{ borderColor: "hsl(var(--border))" }}>
-                Comments
+                Summary &amp; Notes
               </div>
+
+              {/* Profile Bio */}
+              <div className="mb-3 p-2.5 rounded-lg" style={{ background: "hsl(var(--muted))", border: "1px solid hsl(var(--border))" }} data-testid={`profile-bio-${worker.id}`}>
+                <div className="text-[10px] font-bold uppercase tracking-wide mb-1" style={{ color: "var(--pfg-navy)" }}>Profile Bio</div>
+                <p className="text-[12px] leading-relaxed italic" style={{ color: worker.profileSummary ? "var(--pfg-steel)" : "hsl(var(--muted-foreground))" }}>
+                  {worker.profileSummary || "(No bio recorded)"}
+                </p>
+              </div>
+
               <p className="text-[13px] leading-relaxed" style={{ color: "var(--pfg-steel)" }}>
                 {worker.comments || "No comments"}
               </p>

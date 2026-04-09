@@ -38,6 +38,15 @@ export interface DashboardWorker {
   coverallSize: string | null;
   bootSize: string | null;
   localAirport: string | null;
+  // Phase 6 new fields
+  employmentType: string | null;
+  profileSummary: string | null;
+  passportExpiry: string | null;
+  passportNumber: string | null;
+  emergencyContactName: string | null;
+  emergencyContactPhone: string | null;
+  emergencyContactRelationship: string | null;
+  oemExperienceRelational?: Array<{ id: number; oem: string; equipmentType: string; yearsExperience: number | null }>;
 }
 
 export interface DashboardAssignment {
