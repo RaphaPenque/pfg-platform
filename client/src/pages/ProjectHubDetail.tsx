@@ -197,11 +197,13 @@ function OverviewTab({
   project,
   roleSlots,
   assignments,
+  workers,
   canEdit,
 }: {
   project: DashboardProject;
   roleSlots: DashboardRoleSlot[];
   assignments: DashboardAssignment[];
+  workers: { id: number; status: string }[];
   canEdit: boolean;
 }) {
   const color = getOemColor(project);
@@ -217,7 +219,12 @@ function OverviewTab({
   const totalSlotQty = _projectSlots2.reduce((sum, s) => sum + s.quantity, 0);
   const filledCount = _projectSlots2.reduce((sum, s) => sum + Math.min(_assignedPerSlot2.get(s.id) || 0, s.quantity), 0);
   const daysLeft = project.endDate ? Math.max(0, Math.ceil((new Date(project.endDate).getTime() - Date.now()) / 86400000)) : null;
-  const ftePct = totalSlotQty > 0 ? Math.round((filledCount / totalSlotQty) * 100) : 0;
+  // FTE Coverage = % of assigned workers who are FTE (not Temp)
+  const workerMap = new Map(workers.map(w => [w.id, w.status]));
+  const assignedWorkerIds = [...new Set(_projectAssignments2.map(a => a.workerId).filter(Boolean))];
+  const fteWorkers = assignedWorkerIds.filter(id => workerMap.get(id) === "FTE").length;
+  const totalAssigned = assignedWorkerIds.length;
+  const ftePct = totalAssigned > 0 ? Math.round((fteWorkers / totalAssigned) * 100) : 0;
   const equipLabel = EQUIPMENT_TYPES.find(e => e.value === project.equipmentType)?.label || project.equipmentType || "—";
 
   const saveField = useCallback(
@@ -459,7 +466,7 @@ function OverviewTab({
               <div className="text-[10px] font-semibold uppercase tracking-wide mt-0.5" style={{ color: "var(--pfg-steel)" }}>Days Remaining</div>
             </div>
             <div className="rounded-lg p-3 text-center" style={{ background: "hsl(var(--muted))" }}>
-              <div className="text-xl font-bold font-display" style={{ color: ftePct >= 100 ? "var(--green)" : ftePct >= 50 ? "var(--amber)" : "var(--red)" }}>{ftePct}%</div>
+              <div className="text-xl font-bold font-display" style={{ color: ftePct >= 60 ? "var(--green)" : ftePct >= 50 ? "var(--amber)" : "var(--red)" }}>{ftePct}%</div>
               <div className="text-[10px] font-semibold uppercase tracking-wide mt-0.5" style={{ color: "var(--pfg-steel)" }}>FTE Coverage</div>
             </div>
             <div className="rounded-lg p-3 text-center" style={{ background: "hsl(var(--muted))" }}>
@@ -570,7 +577,7 @@ export default function ProjectHubDetail({ params }: { params: { code: string } 
       {/* Tab content */}
       <div className="pt-5">
         {activeTab === "overview" && (
-          <OverviewTab project={project} roleSlots={roleSlots} assignments={assignments} canEdit={canEdit} />
+          <OverviewTab project={project} roleSlots={roleSlots} assignments={assignments} workers={data?.workers || []} canEdit={canEdit} />
         )}
         {activeTab === "rolePlanning" && (
           <ProjectRolePlanningTab project={project} onUpdate={() => refetch()} />
