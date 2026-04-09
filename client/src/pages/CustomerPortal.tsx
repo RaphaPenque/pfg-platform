@@ -75,6 +75,9 @@ interface HistogramRow {
 // ═══════════════════════════════════════════════════════════════════
 
 export default function CustomerPortal({ params }: { params: { projectCode: string } }) {
+  // All hooks must be at the top — before any conditional returns
+  const [downloading, setDownloading] = useState(false);
+
   // Public endpoint — no auth required
   const { data, isLoading } = useQuery({
     queryKey: ["/api/portal", params.projectCode],
@@ -188,7 +191,6 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
 
   const { project, customer, color, teamMembers, histogramRows, weekColumns, projectRoleSlots } = portalData;
   const today = new Date();
-  const [downloading, setDownloading] = useState(false);
 
   return (
     <div className="min-h-screen" style={{ background: "hsl(var(--background))" }}>
