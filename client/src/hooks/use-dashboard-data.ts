@@ -47,6 +47,18 @@ export interface DashboardWorker {
   emergencyContactPhone: string | null;
   emergencyContactRelationship: string | null;
   oemExperienceRelational?: Array<{ id: number; oem: string; equipmentType: string; yearsExperience: number | null }>;
+  documents: Array<{
+    id: number;
+    type: string | null;
+    name: string;
+    fileName: string | null;
+    filePath: string | null;
+    fileSize: number | null;
+    mimeType: string | null;
+    expiryDate: string | null;
+    issuedDate: string | null;
+    status: string | null;
+  }>;
 }
 
 export interface DashboardAssignment {

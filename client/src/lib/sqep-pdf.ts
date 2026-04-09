@@ -161,9 +161,12 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
     doc.setFont("helvetica", "bold"); doc.setFontSize(7);
     doc.setTextColor(99, 117, 140);
     doc.text(fields[i][0].toUpperCase(), fx, fy);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    // Reduce font for long values (e.g. Cost Centre)
+    const valFontSize = fields[i][1].length > 30 ? 7.5 : 10;
+    doc.setFontSize(valFontSize);
     doc.setTextColor(26, 29, 35);
-    doc.text(fields[i][1], fx, fy + 6);
+    doc.text(truncate(fields[i][1], 38), fx, fy + 6);
   }
   y += Math.ceil(fields.length / 2) * 16 + 8;
 
@@ -203,7 +206,7 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
       { label: "End Date",   x: 172 },  // ~25mm wide
     ];
     tableHeader(aCols, y);
-    y += 6;
+    y += 8;
     doc.setFont("helvetica", "normal"); doc.setFontSize(8);
     for (let i = 0; i < activeAssignments.length; i++) {
       const a = activeAssignments[i];
@@ -290,7 +293,7 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
     doc.text("No work experience recorded.", 14, y);
   } else {
     tableHeader(wCols, y);
-    y += 6;
+    y += 8;
     doc.setFont("helvetica", "normal"); doc.setFontSize(7.5);
     for (let i = 0; i < allWorkRows.length; i++) {
       const a = allWorkRows[i];
@@ -299,7 +302,7 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
         doc.addPage();
         drawSqepHeader(doc, logoUrl, `Work Experience — ${name} (cont.)`);
         y = SQEP_HEADER_H + 12;
-        tableHeader(wCols, y); y += 6;
+        tableHeader(wCols, y); y += 8;
         doc.setFont("helvetica", "normal"); doc.setFontSize(7.5);
       }
       if (i % 2 === 1) {
@@ -336,7 +339,7 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
     { label: "Expiry",       x: 148 },
     { label: "Notes",        x: 174 },
   ];
-  tableHeader(cCols, y); y += 6;
+  tableHeader(cCols, y); y += 8;
 
   // Get worker's actual documents for cross-referencing
   const workerDocs = (worker as any).documents as Array<{
@@ -353,7 +356,7 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
       doc.addPage();
       drawSqepHeader(doc, logoUrl, `Certificates — ${name} (cont.)`);
       y = SQEP_HEADER_H + 12;
-      tableHeader(cCols, y); y += 6;
+      tableHeader(cCols, y); y += 8;
       doc.setFontSize(8);
     }
     if (i % 2 === 1) {
@@ -414,7 +417,7 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
       { label: "Expiry",       x: 163 },
       { label: "Status",       x: 186 },
     ];
-    tableHeader(dCols, y); y += 6;
+    tableHeader(dCols, y); y += 8;
     doc.setFont("helvetica", "normal"); doc.setFontSize(7.5);
     for (let i = 0; i < workerDocs.length; i++) {
       const d = workerDocs[i];
@@ -425,7 +428,8 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
       const isExp = d.expiryDate ? d.expiryDate < today : false;
       const isExpiring2 = d.expiryDate ? d.expiryDate >= today && d.expiryDate <= new Date(Date.now()+90*24*60*60*1000).toISOString().split("T")[0] : false;
       doc.setTextColor(26, 29, 35);
-      doc.text(truncate(d.name, 36), dCols[0].x, y);
+      const prettyName = d.name.replace(/^cert_/, '').replace(/_+/g, ' ').replace(/\b\w/g, (l: string) => l.toUpperCase());
+      doc.text(truncate(prettyName, 36), dCols[0].x, y);
       doc.setTextColor(99, 117, 140);
       doc.text(truncate(d.fileName || "—", 28), dCols[1].x, y);
       doc.setTextColor(26, 29, 35);
