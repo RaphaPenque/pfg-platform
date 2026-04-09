@@ -4,7 +4,7 @@ import { eq, and, gt, desc, sql } from "drizzle-orm";
 import {
   workers, projects, assignments, documents, oemTypes, roleSlots,
   users, sessions, magicLinks, auditLogs, projectLeads, payrollRules,
-  workExperience,
+  workExperience, oemExperience,
   type Worker, type InsertWorker,
   type Project, type InsertProject,
   type Assignment, type InsertAssignment,
@@ -15,6 +15,7 @@ import {
   type Session, type MagicLink, type AuditLog, type ProjectLead,
   type PayrollRule, type InsertPayrollRule,
   type WorkExperience, type InsertWorkExperience,
+  type OemExperience, type InsertOemExperience,
 } from "@shared/schema";
 
 const pool = new Pool({
@@ -111,6 +112,11 @@ export interface IStorage {
   createWorkExperience(entry: InsertWorkExperience): Promise<WorkExperience>;
   deleteWorkExperience(id: number): Promise<void>;
   bulkCreateWorkExperience(entries: InsertWorkExperience[]): Promise<void>;
+  // OEM Experience
+  getOemExperience(workerId: number): Promise<OemExperience[]>;
+  upsertOemExperience(workerId: number, oem: string, equipmentType: string, yearsExperience?: number): Promise<OemExperience>;
+  deleteOemExperience(id: number): Promise<void>;
+  replaceOemExperience(workerId: number, entries: InsertOemExperience[]): Promise<void>;
 }
 
 export class PostgresStorage implements IStorage {
@@ -459,6 +465,42 @@ export class PostgresStorage implements IStorage {
   async bulkCreateWorkExperience(entries: InsertWorkExperience[]): Promise<void> {
     if (entries.length === 0) return;
     await db.insert(workExperience).values(entries).execute();
+  }
+
+  // ── OEM Experience ──────────────────────────────────────────────
+  async getOemExperience(workerId: number): Promise<OemExperience[]> {
+    return db.select().from(oemExperience)
+      .where(eq(oemExperience.workerId, workerId))
+      .orderBy(oemExperience.oem);
+  }
+
+  async upsertOemExperience(workerId: number, oem: string, equipmentType: string, yearsExperience?: number): Promise<OemExperience> {
+    // Try update first
+    const existing = await db.select().from(oemExperience)
+      .where(and(eq(oemExperience.workerId, workerId), eq(oemExperience.oem, oem), eq(oemExperience.equipmentType, equipmentType)))
+      .limit(1);
+    if (existing.length > 0) {
+      const updated = await db.update(oemExperience)
+        .set({ yearsExperience: yearsExperience ?? existing[0].yearsExperience })
+        .where(eq(oemExperience.id, existing[0].id))
+        .returning();
+      return updated[0];
+    }
+    const created = await db.insert(oemExperience)
+      .values({ workerId, oem, equipmentType, yearsExperience })
+      .returning();
+    return created[0];
+  }
+
+  async deleteOemExperience(id: number): Promise<void> {
+    await db.delete(oemExperience).where(eq(oemExperience.id, id));
+  }
+
+  async replaceOemExperience(workerId: number, entries: InsertOemExperience[]): Promise<void> {
+    await db.delete(oemExperience).where(eq(oemExperience.workerId, workerId));
+    if (entries.length > 0) {
+      await db.insert(oemExperience).values(entries).execute();
+    }
   }
 }
 

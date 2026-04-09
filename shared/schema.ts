@@ -37,6 +37,18 @@ export const workers = pgTable("workers", {
   coverallSize: text("coverall_size"),
   bootSize: text("boot_size"),
   localAirport: text("local_airport"),
+  // Passport metadata
+  passportExpiry: text("passport_expiry"),
+  passportNumber: text("passport_number"),
+  passportIssuingCountry: text("passport_issuing_country"),
+  // Emergency contact
+  emergencyContactName: text("emergency_contact_name"),
+  emergencyContactPhone: text("emergency_contact_phone"),
+  emergencyContactRelationship: text("emergency_contact_relationship"),
+  // Profile / SQEP
+  profileSummary: text("profile_summary"),
+  // Employment type — clean separation from availability status
+  employmentType: text("employment_type"), // 'FTE' | 'Temp'
 });
 
 export const insertWorkerSchema = createInsertSchema(workers).omit({ id: true });
@@ -104,6 +116,8 @@ export const assignments = pgTable("assignments", {
   confirmationSentAt: text("confirmation_sent_at"),
   confirmedAt: text("confirmed_at"),
   declinedAt: text("declined_at"),
+  // Populated by timesheet engine — drives real utilisation calc
+  actualDaysWorked: integer("actual_days_worked"),
 });
 
 export const insertAssignmentSchema = createInsertSchema(assignments).omit({ id: true });
@@ -259,3 +273,19 @@ export const workExperience = pgTable("work_experience", {
 export const insertWorkExperienceSchema = createInsertSchema(workExperience).omit({ id: true });
 export type InsertWorkExperience = z.infer<typeof insertWorkExperienceSchema>;
 export type WorkExperience = typeof workExperience.$inferSelect;
+
+// ===== OEM EXPERIENCE =====
+// Proper relational table — enables fast queries like:
+// "All Tech2+ available in April with GE STV experience and B1+ English"
+export const oemExperience = pgTable("oem_experience", {
+  id: serial("id").primaryKey(),
+  workerId: integer("worker_id").notNull().references(() => workers.id, { onDelete: "cascade" }),
+  oem: text("oem").notNull(),               // e.g. 'GE Vernova', 'Mitsubishi Power'
+  equipmentType: text("equipment_type").notNull(), // e.g. 'GT', 'ST', 'STV'
+  yearsExperience: real("years_experience"), // derived from work_experience entries
+  notes: text("notes"),
+});
+
+export const insertOemExperienceSchema = createInsertSchema(oemExperience).omit({ id: true });
+export type InsertOemExperience = z.infer<typeof insertOemExperienceSchema>;
+export type OemExperience = typeof oemExperience.$inferSelect;

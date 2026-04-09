@@ -127,12 +127,16 @@ export function getHighestRole(roles: string[]): string {
 export const ENGLISH_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'TBC'];
 
 // Utilisation calculation: 187 working days baseline, 2 days mob/demob per assignment
-export function calcUtilisation(assignments: any[]): { days: number; pct: number } {
-  if (!assignments || assignments.length === 0) return { days: 0, pct: 0 };
-  const rawDays = assignments.reduce((sum: number, a: any) => sum + (a.duration || 0), 0);
+// Uses actualDaysWorked (timesheet-confirmed) when available, falls back to planned duration
+export function calcUtilisation(assignments: any[]): { days: number; pct: number; confirmed: boolean } {
+  if (!assignments || assignments.length === 0) return { days: 0, pct: 0, confirmed: false };
+  const hasActual = assignments.some((a: any) => a.actualDaysWorked != null);
+  const rawDays = assignments.reduce((sum: number, a: any) => {
+    return sum + (a.actualDaysWorked != null ? a.actualDaysWorked : (a.duration || 0));
+  }, 0);
   const mobDemob = assignments.length * 2;
   const effectiveDays = Math.max(0, rawDays - mobDemob);
-  return { days: effectiveDays, pct: Math.round(effectiveDays / 187 * 100) };
+  return { days: effectiveDays, pct: Math.round(effectiveDays / 187 * 100), confirmed: hasActual };
 }
 // Auto-deploy test Wed Apr  8 16:53:59 UTC 2026
 

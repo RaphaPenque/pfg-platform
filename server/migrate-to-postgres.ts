@@ -105,6 +105,49 @@ export async function runSchemaUpdates() {
       )
     `);
 
+    // ── OEM Experience — proper relational table for fast workforce queries ──
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS oem_experience (
+        id SERIAL PRIMARY KEY,
+        worker_id INTEGER NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
+        oem TEXT NOT NULL,
+        equipment_type TEXT NOT NULL,
+        years_experience REAL,
+        notes TEXT
+      )
+    `);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_oem_exp_worker ON oem_experience(worker_id)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_oem_exp_oem ON oem_experience(oem)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_oem_exp_equip ON oem_experience(equipment_type)`);
+
+    // ── Worker — passport metadata ──
+    await db.execute(sql`ALTER TABLE workers ADD COLUMN IF NOT EXISTS passport_expiry TEXT`);
+    await db.execute(sql`ALTER TABLE workers ADD COLUMN IF NOT EXISTS passport_number TEXT`);
+    await db.execute(sql`ALTER TABLE workers ADD COLUMN IF NOT EXISTS passport_issuing_country TEXT`);
+
+    // ── Worker — emergency contact ──
+    await db.execute(sql`ALTER TABLE workers ADD COLUMN IF NOT EXISTS emergency_contact_name TEXT`);
+    await db.execute(sql`ALTER TABLE workers ADD COLUMN IF NOT EXISTS emergency_contact_phone TEXT`);
+    await db.execute(sql`ALTER TABLE workers ADD COLUMN IF NOT EXISTS emergency_contact_relationship TEXT`);
+
+    // ── Worker — profile summary (bio for SQEP) ──
+    await db.execute(sql`ALTER TABLE workers ADD COLUMN IF NOT EXISTS profile_summary TEXT`);
+
+    // ── Worker — employment type (clean separation from status/availability) ──
+    await db.execute(sql`ALTER TABLE workers ADD COLUMN IF NOT EXISTS employment_type TEXT`);
+    // Backfill: FTE workers have costCentre set; Temp workers don't
+    await db.execute(sql`
+      UPDATE workers SET employment_type = 'FTE'
+      WHERE status = 'FTE' AND employment_type IS NULL
+    `);
+    await db.execute(sql`
+      UPDATE workers SET employment_type = 'Temp'
+      WHERE status != 'FTE' AND employment_type IS NULL
+    `);
+
+    // ── Assignments — actual days worked (populated by timesheet engine) ──
+    await db.execute(sql`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS actual_days_worked INTEGER`);
+
     console.log("Schema updates applied.");
   } catch (e: any) {
     console.error("Schema update error:", e.message);

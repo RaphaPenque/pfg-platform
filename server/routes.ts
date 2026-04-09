@@ -502,6 +502,37 @@ export function registerRoutes(server: Server, app: Express) {
     res.status(204).send();
   });
 
+  // ===== OEM EXPERIENCE =====
+  // GET  /api/workers/:id/oem-experience  — list for one worker
+  // PUT  /api/workers/:id/oem-experience  — replace full set (used by profile editor)
+  // POST /api/workers/:id/oem-experience  — add single entry
+  // DELETE /api/oem-experience/:id        — remove one entry
+  app.get("/api/workers/:id/oem-experience", async (req: Request, res: Response) => {
+    const workerId = parseInt(req.params.id);
+    res.json(await storage.getOemExperience(workerId));
+  });
+
+  app.post("/api/workers/:id/oem-experience", async (req: Request, res: Response) => {
+    const workerId = parseInt(req.params.id);
+    const { oem, equipmentType, yearsExperience } = req.body;
+    if (!oem || !equipmentType) return res.status(400).json({ error: "oem and equipmentType required" });
+    const entry = await storage.upsertOemExperience(workerId, oem, equipmentType, yearsExperience);
+    res.status(201).json(entry);
+  });
+
+  app.put("/api/workers/:id/oem-experience", async (req: Request, res: Response) => {
+    const workerId = parseInt(req.params.id);
+    const entries = req.body; // array of {oem, equipmentType, yearsExperience}
+    if (!Array.isArray(entries)) return res.status(400).json({ error: "Expected array" });
+    await storage.replaceOemExperience(workerId, entries.map((e: any) => ({ workerId, oem: e.oem, equipmentType: e.equipmentType, yearsExperience: e.yearsExperience })));
+    res.json(await storage.getOemExperience(workerId));
+  });
+
+  app.delete("/api/oem-experience/:id", async (req: Request, res: Response) => {
+    await storage.deleteOemExperience(parseInt(req.params.id));
+    res.status(204).send();
+  });
+
   // ===== PROJECTS =====
   app.get("/api/projects", async (_req: Request, res: Response) => {
     const allProjects = await storage.getProjects();

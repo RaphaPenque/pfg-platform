@@ -1430,10 +1430,24 @@ export default function WorkforceTable() {
   const totalFte = workers.filter(w => w.status === "FTE").length;
   const totalTemp = workers.filter(w => w.status === "Temp").length;
   const isAssigned = (a: DashboardAssignment) => a.status === "active" || a.status === "flagged" || a.status === "confirmed" || a.status === "pending_confirmation";
-  const fteWithActive = workers.filter(w => w.status === "FTE" && w.assignments.some(isAssigned)).length;
-  const fteUtilPct = totalFte > 0 ? Math.round((fteWithActive / totalFte) * 100) : 0;
-  const availFte = workers.filter(w => w.status === "FTE" && !w.assignments.some(isAssigned)).length;
-  const availTemp = workers.filter(w => w.status === "Temp" && !w.assignments.some(isAssigned)).length;
+  const today = new Date().toISOString().split("T")[0];
+  // Current active assignments (date-scoped to today)
+  const isCurrentlyAssigned = (w: any) => w.assignments.some((a: DashboardAssignment) =>
+    isAssigned(a) && a.startDate && a.endDate && a.startDate <= today && a.endDate >= today
+  );
+  const fteOnProject = workers.filter(w => w.status === "FTE" && isCurrentlyAssigned(w)).length;
+  const tempOnProject = workers.filter(w => w.status !== "FTE" && isCurrentlyAssigned(w)).length;
+  const availFte = workers.filter(w => w.status === "FTE" && !isCurrentlyAssigned(w)).length;
+  const availTemp = workers.filter(w => w.status !== "FTE" && !isCurrentlyAssigned(w)).length;
+
+  // FTE Utilisation — live from assignment durations (actualDaysWorked when available)
+  const fteWorkers = workers.filter(w => w.status === "FTE");
+  const avgFteUtil = fteWorkers.length > 0
+    ? Math.round(fteWorkers.reduce((sum, w) => sum + calcUtilisation(w.assignments).pct, 0) / fteWorkers.length)
+    : 0;
+  const fullyUtilised = fteWorkers.filter(w => calcUtilisation(w.assignments).pct >= 80).length;
+  const underUtilised = fteWorkers.filter(w => calcUtilisation(w.assignments).pct < 50 && w.assignments.length > 0).length;
+  const notDeployed = fteWorkers.filter(w => w.assignments.length === 0).length;
 
   const ccCounts = workers.reduce<Record<string, number>>((acc, w) => {
     const cc = w.status === "FTE" ? (w.costCentre || "Unassigned") : "Temp";
@@ -1459,23 +1473,75 @@ export default function WorkforceTable() {
     <div>
       {/* Summary Cards */}
       <div className="grid grid-cols-5 gap-4 mb-5" data-testid="summary-cards">
+
+        {/* Card 1 — Headcount split */}
         <div className="rounded-xl border p-5" style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--card-border))", boxShadow: "var(--shadow-sm)" }}>
-          <div className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: "hsl(var(--muted-foreground))" }}>Total Headcount</div>
-          <div className="text-[28px] font-bold tabular-nums font-display text-pfg-navy leading-tight">{workers.length}</div>
-          <div className="text-xs mt-1.5" style={{ color: "var(--pfg-steel)" }}><span className="font-semibold">{totalFte}</span> FTE · <span className="font-semibold">{totalTemp}</span> Temp</div>
-        </div>
-        <div className="rounded-xl border p-5" style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--card-border))", boxShadow: "var(--shadow-sm)" }}>
-          <div className="text-[11px] font-semibold uppercase tracking-wide mb-2 flex items-center gap-1" style={{ color: "hsl(var(--muted-foreground))" }}>
-            FTE Utilisation
-            <span className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold cursor-help" style={{ background: "hsl(var(--border))", color: "var(--pfg-steel)" }} title="Percentage of FTE workers currently assigned to active projects">?</span>
+          <div className="text-[11px] font-semibold uppercase tracking-wide mb-3" style={{ color: "hsl(var(--muted-foreground))" }}>Headcount</div>
+          <div className="flex items-end gap-3">
+            <div>
+              <div className="text-[26px] font-bold tabular-nums font-display text-pfg-navy leading-none">{totalFte}</div>
+              <div className="text-[10px] font-semibold mt-0.5" style={{ color: "var(--pfg-steel)" }}>FTE</div>
+            </div>
+            <div className="text-[18px] font-light mb-1" style={{ color: "hsl(var(--border))" }}>·</div>
+            <div>
+              <div className="text-[26px] font-bold tabular-nums font-display leading-none" style={{ color: "var(--pfg-steel)" }}>{totalTemp}</div>
+              <div className="text-[10px] font-semibold mt-0.5" style={{ color: "var(--pfg-steel)" }}>Temp</div>
+            </div>
           </div>
-          <div className="text-[28px] font-bold tabular-nums font-display text-pfg-navy leading-tight">{fteUtilPct}%</div>
-          <div className="text-xs mt-1.5" style={{ color: "var(--pfg-steel)" }}><span className="font-semibold">{fteWithActive}</span> of {totalFte} FTE assigned</div>
+          <div className="mt-3 h-1.5 rounded-full overflow-hidden" style={{ background: "hsl(var(--muted))" }}>
+            <div className="h-full rounded-full" style={{ width: `${workers.length > 0 ? Math.round(totalFte / workers.length * 100) : 0}%`, background: "var(--pfg-navy)" }} />
+          </div>
+          <div className="text-[10px] mt-1" style={{ color: "var(--pfg-steel)" }}>{workers.length > 0 ? Math.round(totalFte / workers.length * 100) : 0}% FTE ratio</div>
         </div>
+
+        {/* Card 2 — FTE Utilisation (live from assignments) */}
         <div className="rounded-xl border p-5" style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--card-border))", boxShadow: "var(--shadow-sm)" }}>
-          <div className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: "hsl(var(--muted-foreground))" }}>Available Now</div>
-          <div className="text-[28px] font-bold tabular-nums font-display leading-tight" style={{ color: availFte > 0 ? "var(--red)" : "var(--green)" }}>{availFte}</div>
-          <div className="text-xs mt-1.5" style={{ color: "var(--pfg-steel)" }}>FTE · <span className="font-semibold">{availTemp}</span> Temps available</div>
+          <div className="text-[11px] font-semibold uppercase tracking-wide mb-3" style={{ color: "hsl(var(--muted-foreground))" }}>FTE Utilisation</div>
+          <div className="text-[26px] font-bold tabular-nums font-display leading-none" style={{ color: avgFteUtil >= 80 ? "var(--green)" : avgFteUtil >= 50 ? "var(--amber)" : "var(--red)" }}>
+            {avgFteUtil}%
+          </div>
+          <div className="text-[10px] mt-0.5 mb-3" style={{ color: "var(--pfg-steel)" }}>avg across {totalFte} FTE · 187-day basis</div>
+          <div className="space-y-1">
+            <div className="flex justify-between text-[10px]">
+              <span style={{ color: "var(--green)" }}>≥80% utilised</span>
+              <span className="font-semibold">{fullyUtilised}</span>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span style={{ color: "var(--amber)" }}>&lt;50% utilised</span>
+              <span className="font-semibold">{underUtilised}</span>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span style={{ color: "var(--pfg-steel)" }}>Never deployed</span>
+              <span className="font-semibold">{notDeployed}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Card 3 — On Project vs Available (FTE + Temp split) */}
+        <div className="rounded-xl border p-5" style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--card-border))", boxShadow: "var(--shadow-sm)" }}>
+          <div className="text-[11px] font-semibold uppercase tracking-wide mb-3" style={{ color: "hsl(var(--muted-foreground))" }}>Deployed Today</div>
+          <div className="space-y-2.5">
+            <div>
+              <div className="flex justify-between text-[11px] mb-1">
+                <span className="font-semibold text-pfg-navy">FTE</span>
+                <span className="font-bold tabular-nums">{fteOnProject} <span style={{ color: "var(--pfg-steel)", fontWeight: 400 }}>on project</span></span>
+              </div>
+              <div className="h-2 rounded-full overflow-hidden" style={{ background: "hsl(var(--muted))" }}>
+                <div className="h-full rounded-full" style={{ width: `${totalFte > 0 ? Math.round(fteOnProject / totalFte * 100) : 0}%`, background: "var(--pfg-navy)" }} />
+              </div>
+              <div className="text-[10px] mt-0.5" style={{ color: "var(--pfg-steel)" }}>{availFte} available</div>
+            </div>
+            <div>
+              <div className="flex justify-between text-[11px] mb-1">
+                <span className="font-semibold" style={{ color: "var(--pfg-steel)" }}>Temp</span>
+                <span className="font-bold tabular-nums">{tempOnProject} <span style={{ color: "var(--pfg-steel)", fontWeight: 400 }}>on project</span></span>
+              </div>
+              <div className="h-2 rounded-full overflow-hidden" style={{ background: "hsl(var(--muted))" }}>
+                <div className="h-full rounded-full" style={{ width: `${totalTemp > 0 ? Math.round(tempOnProject / totalTemp * 100) : 0}%`, background: "var(--amber)" }} />
+              </div>
+              <div className="text-[10px] mt-0.5" style={{ color: "var(--pfg-steel)" }}>{availTemp} potentially available</div>
+            </div>
+          </div>
         </div>
         <div className="rounded-xl border p-5" style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--card-border))", boxShadow: "var(--shadow-sm)" }}>
           <div className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: "hsl(var(--muted-foreground))" }}>Cost Centre Distribution</div>
