@@ -279,7 +279,7 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
         doc.rect(14, y - 3, pageW - 28, 6.5, "F");
       }
       doc.setTextColor(26, 29, 35);
-      doc.text(truncate(`${a.projectName} (${a.projectCode})`, 26), wCols[0].x, y);
+      doc.text(truncate((a as any).siteName || `${a.projectName} (${a.projectCode})`, 26), wCols[0].x, y);
       doc.text(a.startDate || "—", wCols[1].x, y);
       doc.text(a.endDate || "—", wCols[2].x, y);
       doc.text(truncate(a.role || a.task || worker.role, 14), wCols[3].x, y);
@@ -287,7 +287,7 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
       doc.text(truncate(a.customer || "—", 16), wCols[4].x, y);
       doc.text(truncate(a.equipmentType || "—", 10), wCols[5].x, y);
       doc.setTextColor(26, 29, 35);
-      doc.text(truncate(a.task || a.role || "—", 26), wCols[6].x, y);
+      doc.text(truncate((a as any).scopeOfWork || a.task || a.role || "—", 26), wCols[6].x, y);
       y += 6.5;
     }
   }

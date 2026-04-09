@@ -69,6 +69,8 @@ export async function runSchemaUpdates() {
     await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS night_shift_signatory_name TEXT`);
     await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS night_shift_signatory_email TEXT`);
 
+    await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS scope_of_work TEXT`);
+
     // Consolidate day/night signatory fields into single timesheet signatory
     await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS timesheet_signatory_name TEXT`);
     await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS timesheet_signatory_email TEXT`);

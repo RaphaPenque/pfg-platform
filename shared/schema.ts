@@ -60,6 +60,7 @@ export const projects = pgTable("projects", {
   contractType: text("contract_type"),
   siteName: text("site_name"),
   siteAddress: text("site_address"),
+  scopeOfWork: text("scope_of_work"),
   sourcingContact: text("sourcing_contact"),
   customerProjectManager: text("customer_project_manager"),
   siteManager: text("site_manager"),

@@ -57,6 +57,8 @@ export interface DashboardAssignment {
   customer: string;
   location: string;
   equipmentType?: string | null;
+  scopeOfWork?: string | null;
+  siteName?: string | null;
 }
 
 export interface DashboardProject {
@@ -78,6 +80,7 @@ export interface DashboardProject {
   sourcingContact: string | null;
   customerProjectManager: string | null;
   siteManager: string | null;
+  scopeOfWork: string | null;
   timesheetSignatoryName: string | null;
   timesheetSignatoryEmail: string | null;
 }

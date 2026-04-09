@@ -300,6 +300,12 @@ function OverviewTab({
               </div>
             </div>
             <div>
+              <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>Scope of Work</span>
+              <div className="mt-0.5">
+                <InlineField value={project.scopeOfWork} onSave={saveField("scopeOfWork")} canEdit={canEdit} placeholder="e.g. GT Major Inspection" />
+              </div>
+            </div>
+            <div>
               <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>Start Date</span>
               <div className="mt-0.5">
                 <InlineField value={project.startDate} onSave={saveField("startDate")} type="date" canEdit={canEdit} />

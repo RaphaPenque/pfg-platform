@@ -230,6 +230,7 @@ export function registerRoutes(server: Server, app: Express) {
         customer: project.customer,
         equipmentType: project.equipmentType,
         location: project.location,
+        scopeOfWork: project.scopeOfWork,
       }));
 
     // Attach assignments to each worker object so SQEP PDF can render work experience
@@ -738,6 +739,8 @@ export function registerRoutes(server: Server, app: Express) {
         customer: proj?.customer || "",
         location: proj?.location || "",
         equipmentType: proj?.equipmentType || "",
+        scopeOfWork: proj?.scopeOfWork || "",
+        siteName: proj?.siteName || "",
       });
     });
 
