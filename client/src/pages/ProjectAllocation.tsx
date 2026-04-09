@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { useDashboardData, type DashboardWorker, type DashboardProject, type DashboardAssignment, type DashboardRoleSlot } from "@/hooks/use-dashboard-data";
-import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, OEM_OPTIONS, EQUIPMENT_TYPES, PROJECT_ROLES, COST_CENTRES, CERT_DEFS, calcUtilisation, sortSlots, cleanName } from "@/lib/constants";
+import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, OEM_OPTIONS, EQUIPMENT_TYPES, PROJECT_ROLES, COST_CENTRES, CERT_DEFS, calcUtilisation, sortSlots, cleanName, calcPeakHeadcount } from "@/lib/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Plus, X, ExternalLink, Trash2, Undo2, Search, ChevronDown, ChevronUp, Check, Loader2, CheckCircle2, XCircle, Sparkles, RotateCcw, AlertTriangle, Download, Info, Mail, Save } from "lucide-react";
 import { downloadCSV } from "@/lib/csv-export";
@@ -411,7 +411,7 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
   };
 
   const canProceedStep1 = code.trim() && projectName.trim() && startDate && endDate;
-  const totalSlots = roleSlots.reduce((sum, s) => sum + s.quantity, 0);
+  const totalSlots = calcPeakHeadcount(roleSlots);
 
   // --- helpers for Step 3: Assign Staff ---
 
@@ -1626,7 +1626,7 @@ function EditProjectModal({
   const [nextRoleKey, setNextRoleKey] = useState(1);
   const [deletedSlotIds, setDeletedSlotIds] = useState<number[]>([]);
   // Headcount auto-calculated from role slot quantities
-  const computedHeadcount = roleSlotEdits.reduce((sum, s) => sum + (s.quantity || 0), 0) || (card.project.headcount || 0);
+  const computedHeadcount = calcPeakHeadcount(roleSlotEdits) || (card.project.headcount || 0);
   const [slotSaving, setSlotSaving] = useState<number | null>(null);
   const [slotConflicts, setSlotConflicts] = useState<Record<number, string[]>>({});
   const [conflictModalData, setConflictModalData] = useState<ConflictModalState | null>(null);

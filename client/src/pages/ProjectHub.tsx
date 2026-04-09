@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { useDashboardData, type DashboardProject, type DashboardRoleSlot, type DashboardAssignment } from "@/hooks/use-dashboard-data";
-import { OEM_BRAND_COLORS, PROJECT_CUSTOMER } from "@/lib/constants";
+import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, calcPeakHeadcount } from "@/lib/constants";
 import { ChevronDown, ChevronUp, AlertTriangle, Users, Clock, Activity } from "lucide-react";
 
 // ─── Health computation ──────────────────────────────────────────
@@ -30,7 +30,7 @@ function computeHealth(
 
   // Workforce
   const projectSlots = roleSlots.filter(s => s.projectId === project.id);
-  const totalSlotQty = projectSlots.reduce((sum, s) => sum + s.quantity, 0);
+  const totalSlotQty = calcPeakHeadcount(projectSlots);
   const projectAssignments = assignments.filter(
     a => a.projectId === project.id && (a.status === "active" || a.status === "flagged")
   );
@@ -142,7 +142,7 @@ function ProjectCard({
   const health = computeHealth(project, roleSlots, assignments);
   const pct = timelinePercent(project.startDate, project.endDate);
   const days = daysRemaining(project.endDate);
-  const totalSlotQty = roleSlots.filter(s => s.projectId === project.id).reduce((sum, s) => sum + s.quantity, 0);
+  const totalSlotQty = calcPeakHeadcount(roleSlots.filter(s => s.projectId === project.id));
   const filledCount = assignments.filter(
     a => a.projectId === project.id && (a.status === "active" || a.status === "flagged")
   ).length;

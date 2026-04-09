@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { useDashboardData, type DashboardProject, type DashboardRoleSlot, type DashboardAssignment } from "@/hooks/use-dashboard-data";
-import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, EQUIPMENT_TYPES } from "@/lib/constants";
+import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, EQUIPMENT_TYPES, calcPeakHeadcount } from "@/lib/constants";
 import {
   LayoutDashboard, Users, UserCheck, ClipboardList, FileText,
   Truck, FolderOpen, DollarSign, Megaphone, Star,
@@ -58,7 +58,7 @@ function computeHealth(
   let actionCount = 0;
 
   const projectSlots = roleSlots.filter(s => s.projectId === project.id);
-  const totalSlotQty = projectSlots.reduce((sum, s) => sum + s.quantity, 0);
+  const totalSlotQty = calcPeakHeadcount(projectSlots);
   const projectAssignments = assignments.filter(
     a => a.projectId === project.id && (a.status === "active" || a.status === "flagged")
   );
@@ -185,7 +185,7 @@ function OverviewTab({
   const pct = timelinePercent(project.startDate, project.endDate);
   const totalDays = project.startDate && project.endDate ? daysBetween(project.startDate, project.endDate) : 0;
   const curDay = project.startDate ? currentDay(project.startDate) : 0;
-  const totalSlotQty = roleSlots.filter(s => s.projectId === project.id).reduce((sum, s) => sum + s.quantity, 0);
+  const totalSlotQty = calcPeakHeadcount(roleSlots.filter(s => s.projectId === project.id));
   const filledCount = assignments.filter(
     a => a.projectId === project.id && (a.status === "active" || a.status === "flagged")
   ).length;

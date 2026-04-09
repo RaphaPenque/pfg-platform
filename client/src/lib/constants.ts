@@ -138,6 +138,33 @@ export function cleanName(name: string): string {
   return name.replace(/\s*\([^)]*\)\s*$/g, "").trim();
 }
 
+// ─── Peak concurrent headcount ───────────────────────────────────────────────
+// Returns the maximum number of concurrent role slots on any single day.
+// This is the correct headcount — NOT the sum of all slot quantities.
+export function calcPeakHeadcount(slots: { quantity: number; startDate?: string | null; endDate?: string | null }[]): number {
+  const dated = slots.filter(s => s.startDate && s.endDate);
+  if (dated.length === 0) return slots.reduce((sum, s) => sum + (s.quantity || 0), 0);
+
+  // Collect all unique dates
+  const allDates = new Set<string>();
+  dated.forEach(s => {
+    const start = new Date(s.startDate!);
+    const end = new Date(s.endDate!);
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      allDates.add(d.toISOString().split('T')[0]);
+    }
+  });
+
+  let peak = 0;
+  allDates.forEach(dateStr => {
+    const concurrent = dated
+      .filter(s => s.startDate! <= dateStr && s.endDate! >= dateStr)
+      .reduce((sum, s) => sum + (s.quantity || 0), 0);
+    if (concurrent > peak) peak = concurrent;
+  });
+  return peak || slots.reduce((sum, s) => sum + (s.quantity || 0), 0);
+}
+
 export function sortSlots<T extends { role: string; shift?: string }>(slots: T[]): T[] {
   return [...slots].sort((a, b) => {
     const shiftA = SHIFT_ORDER[a.shift ?? 'Day'] ?? 0;
