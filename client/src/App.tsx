@@ -10,6 +10,7 @@ import ProjectAllocation from "./pages/ProjectAllocation";
 import GanttChart from "./pages/GanttChart";
 import PersonSchedule from "./pages/PersonSchedule";
 import CustomerPortal from "./pages/CustomerPortal";
+import PayrollRules from "./pages/PayrollRules";
 import Login from "./pages/Login";
 import NotFound from "./pages/not-found";
 import { LogOut, Loader2 } from "lucide-react";
@@ -102,6 +103,24 @@ function AppHeader() {
             </Link>
           );
         })}
+        {/* Admin-only section divider + Payroll Rules link */}
+        {user?.role === "admin" && (
+          <>
+            <div className="w-px my-2 mx-2" style={{ background: "hsl(var(--border))" }} />
+            <Link href="/admin/payroll-rules">
+              <div
+                className={`px-5 py-3 text-[13px] font-medium cursor-pointer border-b-2 transition-all ${
+                  location === "/admin/payroll-rules"
+                    ? "text-pfg-navy border-pfg-yellow"
+                    : "text-pfg-steel border-transparent hover:text-pfg-navy"
+                }`}
+                data-testid="tab-payroll-rules"
+              >
+                ⚙ Payroll Rules
+              </div>
+            </Link>
+          </>
+        )}
       </nav>
     </>
   );
@@ -117,6 +136,7 @@ function MainLayout() {
           <Route path="/projects" component={ProjectAllocation} />
           <Route path="/gantt" component={GanttChart} />
           <Route path="/schedule" component={PersonSchedule} />
+          <Route path="/admin/payroll-rules" component={PayrollRules} />
           <Route component={NotFound} />
         </Switch>
       </main>

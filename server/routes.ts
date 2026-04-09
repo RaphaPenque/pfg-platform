@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { insertWorkerSchema, insertProjectSchema, insertAssignmentSchema, insertDocumentSchema, insertOemTypeSchema, insertRoleSlotSchema } from "@shared/schema";
 import type { User } from "@shared/schema";
 import { sendMail, magicLinkEmail, welcomeEmail } from "./email";
+import { insertPayrollRulesSchema } from "@shared/schema";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
@@ -641,6 +642,23 @@ export function registerRoutes(server: Server, app: Express) {
     if (!parsed.success) return res.status(400).json({ error: parsed.error });
     const oemType = await storage.createOemType(parsed.data);
     res.status(201).json(oemType);
+  });
+
+  // ===== PAYROLL RULES =====
+  app.get("/api/payroll-rules", async (_req: Request, res: Response) => {
+    res.json(await storage.getPayrollRules());
+  });
+
+  app.put("/api/payroll-rules", async (req: Request, res: Response) => {
+    const parsed = insertPayrollRulesSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: parsed.error });
+    const rule = await storage.upsertPayrollRule(parsed.data);
+    res.json(rule);
+  });
+
+  app.delete("/api/payroll-rules/:id", async (req: Request, res: Response) => {
+    await storage.deletePayrollRule(Number(req.params.id));
+    res.json({ ok: true });
   });
 
   // ===== FILE UPLOADS =====

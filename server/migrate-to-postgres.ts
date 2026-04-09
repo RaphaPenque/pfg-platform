@@ -241,6 +241,56 @@ async function migrate(db: ReturnType<typeof drizzle>) {
     )
   `);
 
+  // Payroll rules table (additive — never truncated)
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS payroll_rules (
+      id SERIAL PRIMARY KEY,
+      cost_centre TEXT NOT NULL UNIQUE,
+      country_code TEXT NOT NULL,
+      country_name TEXT NOT NULL,
+      weekly_ot_threshold_hours INTEGER,
+      annual_ot_threshold_hours INTEGER,
+      night_shift_start TEXT,
+      night_shift_end TEXT,
+      track_sunday_hours BOOLEAN NOT NULL DEFAULT FALSE,
+      standby_day_hours INTEGER NOT NULL DEFAULT 8,
+      notes TEXT,
+      updated_at TIMESTAMP DEFAULT NOW(),
+      updated_by INTEGER REFERENCES users(id)
+    )
+  `);
+
+  // Seed the two known payroll rule sets (upsert-safe)
+  await db.execute(sql`
+    INSERT INTO payroll_rules (cost_centre, country_code, country_name, weekly_ot_threshold_hours, night_shift_start, night_shift_end, track_sunday_hours, standby_day_hours, notes)
+    VALUES (
+      'Powerforce Maintenance d.o.o.',
+      'HR',
+      'Croatia',
+      40,
+      '22:00',
+      '06:00',
+      TRUE,
+      8,
+      'Croatian Labour Law: OT above 40hrs/week, night shift 22:00–06:00, Sunday hours tracked separately'
+    )
+    ON CONFLICT (cost_centre) DO NOTHING
+  `);
+
+  await db.execute(sql`
+    INSERT INTO payroll_rules (cost_centre, country_code, country_name, annual_ot_threshold_hours, track_sunday_hours, standby_day_hours, notes)
+    VALUES (
+      'Powerforce Global S.L',
+      'ES',
+      'Spain',
+      1600,
+      FALSE,
+      8,
+      'Spanish Labour Law: OT tracked annually above 1,600 hrs/calendar year'
+    )
+    ON CONFLICT (cost_centre) DO NOTHING
+  `);
+
   // Truncate in reverse dependency order (idempotent)
   console.log("Clearing existing data...");
   await db.execute(sql`TRUNCATE project_leads, audit_logs, sessions, magic_links, assignments, role_slots, documents, projects, workers, oem_types, users RESTART IDENTITY CASCADE`);
