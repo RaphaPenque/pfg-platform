@@ -21,6 +21,50 @@ function createPool(url: string) {
 }
 
 // Called on server startup — only migrates if DB is empty
+// Always runs on every boot — creates new tables added after initial migration
+export async function runSchemaUpdates() {
+  const DATABASE_URL = process.env.DATABASE_URL;
+  if (!DATABASE_URL) return;
+  const pool = createPool(DATABASE_URL);
+  const db = drizzle(pool);
+  try {
+    // payroll_rules table — added after initial migration, must always be created if missing
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS payroll_rules (
+        id SERIAL PRIMARY KEY,
+        cost_centre TEXT NOT NULL UNIQUE,
+        country_code TEXT NOT NULL,
+        country_name TEXT NOT NULL,
+        weekly_ot_threshold_hours INTEGER,
+        annual_ot_threshold_hours INTEGER,
+        night_shift_start TEXT,
+        night_shift_end TEXT,
+        track_sunday_hours BOOLEAN NOT NULL DEFAULT FALSE,
+        standby_day_hours INTEGER NOT NULL DEFAULT 8,
+        notes TEXT,
+        updated_at TIMESTAMP DEFAULT NOW(),
+        updated_by INTEGER REFERENCES users(id)
+      )
+    `);
+    // Seed default rules (safe to run repeatedly)
+    await db.execute(sql`
+      INSERT INTO payroll_rules (cost_centre, country_code, country_name, weekly_ot_threshold_hours, night_shift_start, night_shift_end, track_sunday_hours, standby_day_hours, notes)
+      VALUES ('Powerforce Maintenance d.o.o.', 'HR', 'Croatia', 40, '22:00', '06:00', TRUE, 8, 'Croatian Labour Law: OT above 40hrs/week, night shift 22:00-06:00, Sunday hours tracked separately')
+      ON CONFLICT (cost_centre) DO NOTHING
+    `);
+    await db.execute(sql`
+      INSERT INTO payroll_rules (cost_centre, country_code, country_name, annual_ot_threshold_hours, track_sunday_hours, standby_day_hours, notes)
+      VALUES ('Powerforce Global S.L', 'ES', 'Spain', 1600, FALSE, 8, 'Spanish Labour Law: OT tracked annually above 1,600 hrs/calendar year')
+      ON CONFLICT (cost_centre) DO NOTHING
+    `);
+    console.log("Schema updates applied.");
+  } catch (e: any) {
+    console.error("Schema update error:", e.message);
+  } finally {
+    await pool.end();
+  }
+}
+
 export async function runMigrationIfNeeded() {
   const DATABASE_URL = process.env.DATABASE_URL;
   if (!DATABASE_URL) {

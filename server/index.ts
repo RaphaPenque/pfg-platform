@@ -63,9 +63,10 @@ app.use((req, res, next) => {
 });
 
 (async () => {
-  // Run data migration on first boot (when database is empty)
+  // Always run schema updates (creates new tables like payroll_rules if missing)
   try {
-    const { runMigrationIfNeeded } = await import("./migrate-to-postgres");
+    const { runSchemaUpdates, runMigrationIfNeeded } = await import("./migrate-to-postgres");
+    await runSchemaUpdates();
     await runMigrationIfNeeded();
   } catch (e: any) {
     console.error("Migration check failed:", e.message);
