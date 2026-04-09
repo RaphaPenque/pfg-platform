@@ -170,20 +170,43 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
   }
   y += Math.ceil(fields.length / 2) * 16 + 8;
 
-  // OEM Experience
-  if (worker.oemExperience.length > 0) {
+  // OEM Experience — use relational table (deduped by OEM+equipment), fall back to legacy JSON
+  const oemRelational: Array<{ oem: string; equipmentType: string }> =
+    (worker.oemExperienceRelational && worker.oemExperienceRelational.length > 0)
+      ? worker.oemExperienceRelational
+      : worker.oemExperience.map((s: string) => { const p = s.split(' - '); return { oem: p[0] || s, equipmentType: p[1] || '' }; });
+
+  // Deduplicate by oem+equipmentType, then group by OEM
+  const oemMap: Record<string, Set<string>> = {};
+  for (const e of oemRelational) {
+    if (!e.oem) continue;
+    if (!oemMap[e.oem]) oemMap[e.oem] = new Set();
+    if (e.equipmentType) oemMap[e.oem].add(e.equipmentType);
+  }
+  const oemEntries = Object.entries(oemMap); // [["GE Vernova", Set{"GT","ST"}], ...]
+
+  if (oemEntries.length > 0) {
     sectionTitle("OEM Experience", y);
     y += 8;
     let oemX = 14;
-    for (const oem of worker.oemExperience) {
-      const label = oem.split(" - ")[0];
-      const tw = doc.getTextWidth(label) + 8;
+    for (const [oemName, equipSet] of oemEntries) {
+      const equipStr = Array.from(equipSet).sort().join(' · ');
+      const label = equipStr ? `${oemName}  ${equipStr}` : oemName;
+      doc.setFont("helvetica", "bold"); doc.setFontSize(8);
+      const tw = doc.getTextWidth(label) + 10;
       if (oemX + tw > pageW - 14) { oemX = 14; y += 9; }
       doc.setFillColor(244, 245, 247);
       doc.roundedRect(oemX, y - 4, tw, 7, 1.5, 1.5, "F");
-      doc.setFont("helvetica", "bold"); doc.setFontSize(8);
       doc.setTextColor(26, 29, 35);
-      doc.text(label, oemX + 4, y + 1);
+      // OEM name bold, equipment type lighter
+      doc.text(oemName, oemX + 4, y + 1);
+      if (equipStr) {
+        const oemW = doc.getTextWidth(oemName);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7);
+        doc.setTextColor(99, 117, 140);
+        doc.text(equipStr, oemX + 5 + oemW, y + 1);
+      }
       oemX += tw + 3;
     }
     y += 12;
