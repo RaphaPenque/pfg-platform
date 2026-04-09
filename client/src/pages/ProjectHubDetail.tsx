@@ -1,12 +1,21 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { Link } from "wouter";
 import { useDashboardData, type DashboardProject, type DashboardRoleSlot, type DashboardAssignment } from "@/hooks/use-dashboard-data";
+<<<<<<< HEAD
 import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, EQUIPMENT_TYPES, calcPeakHeadcount } from "@/lib/constants";
+=======
+import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, EQUIPMENT_TYPES, OEM_OPTIONS } from "@/lib/constants";
+import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useAuth } from "@/context/AuthContext";
+>>>>>>> 2b3eab13094225b82d4c75b9886495b5f30175aa
 import {
   LayoutDashboard, Users, UserCheck, ClipboardList, FileText,
   Truck, FolderOpen, DollarSign, Megaphone, Star,
   ExternalLink, ChevronRight, AlertTriangle, CheckCircle2, Clock, Activity,
 } from "lucide-react";
+import ProjectRolePlanningTab from "@/components/project/ProjectRolePlanningTab";
+import ProjectTeamTab from "@/components/project/ProjectTeamTab";
+import InlineField from "@/components/project/InlineField";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -170,14 +179,29 @@ function PlaceholderTab({ label, icon }: { label: string; icon: React.ReactNode 
 
 // ─── Overview Tab ────────────────────────────────────────────────
 
+const CONTRACT_TYPE_OPTIONS = [
+  { value: "T&M", label: "T&M" },
+  { value: "SOW", label: "SOW" },
+];
+
+const SHIFT_OPTIONS = [
+  { value: "Day", label: "Day" },
+  { value: "Night", label: "Night" },
+  { value: "Day & Night", label: "Day & Night" },
+];
+
+const OEM_SELECT_OPTIONS = OEM_OPTIONS.map((o) => ({ value: o, label: o }));
+
 function OverviewTab({
   project,
   roleSlots,
   assignments,
+  canEdit,
 }: {
   project: DashboardProject;
   roleSlots: DashboardRoleSlot[];
   assignments: DashboardAssignment[];
+  canEdit: boolean;
 }) {
   const color = getOemColor(project);
   const customer = project.customer || PROJECT_CUSTOMER[project.code] || "";
@@ -193,13 +217,25 @@ function OverviewTab({
   const ftePct = totalSlotQty > 0 ? Math.round((filledCount / totalSlotQty) * 100) : 0;
   const equipLabel = EQUIPMENT_TYPES.find(e => e.value === project.equipmentType)?.label || project.equipmentType || "—";
 
+  const saveField = useCallback(
+    (fieldName: string) => async (newValue: string) => {
+      let payload: Record<string, unknown> = { [fieldName]: newValue || null };
+      if (fieldName === "headcount") {
+        payload[fieldName] = newValue ? Number(newValue) : null;
+      }
+      await apiRequest("PATCH", `/api/projects/${project.id}`, payload);
+      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+    },
+    [project.id],
+  );
+
   // Stakeholder rows
   const stakeholders = [
-    { label: "Sourcing Contact", value: project.sourcingContact },
-    { label: "Customer Project Manager", value: project.customerProjectManager },
-    { label: "Site Manager", value: project.siteManager },
-    { label: "Day Shift Signatory", value: project.dayShiftSignatoryName, email: project.dayShiftSignatoryEmail },
-    { label: "Night Shift Signatory", value: project.nightShiftSignatoryName, email: project.nightShiftSignatoryEmail },
+    { label: "Sourcing Contact", nameField: "sourcingContact" as const, value: project.sourcingContact },
+    { label: "Customer Project Manager", nameField: "customerProjectManager" as const, value: project.customerProjectManager },
+    { label: "Site Manager", nameField: "siteManager" as const, value: project.siteManager },
+    { label: "Day Shift Signatory", nameField: "dayShiftSignatoryName" as const, value: project.dayShiftSignatoryName, emailField: "dayShiftSignatoryEmail" as const, email: project.dayShiftSignatoryEmail },
+    { label: "Night Shift Signatory", nameField: "nightShiftSignatoryName" as const, value: project.nightShiftSignatoryName, emailField: "nightShiftSignatoryEmail" as const, email: project.nightShiftSignatoryEmail },
   ];
 
   return (
@@ -219,47 +255,70 @@ function OverviewTab({
               </div>
             </div>
             <div>
+              <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>Project Name</span>
+              <div className="mt-0.5">
+                <InlineField value={project.name} onSave={saveField("name")} canEdit={canEdit} placeholder="Project name" />
+              </div>
+            </div>
+            <div>
               <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>Customer / OEM</span>
-              <div className="mt-0.5 flex items-center gap-2">
-                {customer && (
-                  <span className="oem-pill rounded-full text-white font-semibold" style={{ background: color }}>
-                    {customer}
-                  </span>
-                )}
-                {!customer && <span style={{ color: "var(--pfg-steel)" }}>—</span>}
+              <div className="mt-0.5">
+                <InlineField value={project.customer} onSave={saveField("customer")} type="select" options={OEM_SELECT_OPTIONS} canEdit={canEdit} />
               </div>
             </div>
             <div>
               <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>Equipment</span>
-              <div className="font-medium text-pfg-navy mt-0.5">{equipLabel}</div>
+              <div className="mt-0.5">
+                <InlineField value={project.equipmentType} onSave={saveField("equipmentType")} type="select" options={EQUIPMENT_TYPES} canEdit={canEdit} />
+              </div>
             </div>
             <div>
               <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>Contract Type</span>
-              <div className="font-medium text-pfg-navy mt-0.5">{project.contractType || "—"}</div>
+              <div className="mt-0.5">
+                <InlineField value={project.contractType} onSave={saveField("contractType")} type="select" options={CONTRACT_TYPE_OPTIONS} canEdit={canEdit} />
+              </div>
             </div>
             <div>
               <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>Site Name</span>
-              <div className="font-medium text-pfg-navy mt-0.5">{project.siteName || "—"}</div>
+              <div className="mt-0.5">
+                <InlineField value={project.siteName} onSave={saveField("siteName")} canEdit={canEdit} placeholder="Site name" />
+              </div>
             </div>
             <div>
               <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>Site Address</span>
-              <div className="font-medium text-pfg-navy mt-0.5">{project.siteAddress || "—"}</div>
+              <div className="mt-0.5">
+                <InlineField value={project.siteAddress} onSave={saveField("siteAddress")} canEdit={canEdit} placeholder="Site address" />
+              </div>
             </div>
             <div>
               <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>Start Date</span>
-              <div className="font-medium text-pfg-navy mt-0.5">{project.startDate || "—"}</div>
+              <div className="mt-0.5">
+                <InlineField value={project.startDate} onSave={saveField("startDate")} type="date" canEdit={canEdit} />
+              </div>
             </div>
             <div>
               <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>End Date</span>
-              <div className="font-medium text-pfg-navy mt-0.5">{project.endDate || "—"}</div>
+              <div className="mt-0.5">
+                <InlineField value={project.endDate} onSave={saveField("endDate")} type="date" canEdit={canEdit} />
+              </div>
             </div>
             <div>
               <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>Shift Pattern</span>
-              <div className="font-medium text-pfg-navy mt-0.5">{project.shift || "Day"}</div>
+              <div className="mt-0.5">
+                <InlineField value={project.shift} onSave={saveField("shift")} type="select" options={SHIFT_OPTIONS} canEdit={canEdit} />
+              </div>
             </div>
             <div>
               <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>Headcount</span>
-              <div className="font-medium text-pfg-navy mt-0.5">{totalSlotQty || project.headcount || "—"}</div>
+              <div className="mt-0.5">
+                <InlineField value={project.headcount} onSave={saveField("headcount")} type="number" canEdit={canEdit} placeholder="0" />
+              </div>
+            </div>
+            <div className="col-span-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>Notes</span>
+              <div className="mt-0.5">
+                <InlineField value={project.notes} onSave={saveField("notes")} type="textarea" canEdit={canEdit} placeholder="Project notes..." />
+              </div>
             </div>
           </div>
         </div>
@@ -308,15 +367,11 @@ function OverviewTab({
                   <tr key={s.label} style={{ borderTop: "1px solid hsl(var(--border))" }}>
                     <td className="px-4 py-2.5 font-medium text-pfg-navy">{s.label}</td>
                     <td className="px-4 py-2.5">
-                      {s.value ? (
-                        <span className="text-pfg-navy">{s.value}</span>
-                      ) : (
-                        <span style={{ color: "#9ca3af" }}>Not set</span>
-                      )}
+                      <InlineField value={s.value} onSave={saveField(s.nameField)} canEdit={canEdit} placeholder="Name" emptyLabel="Not set" />
                     </td>
                     <td className="px-4 py-2.5">
-                      {(s as any).email ? (
-                        <span className="text-pfg-navy">{(s as any).email}</span>
+                      {s.emailField ? (
+                        <InlineField value={s.email ?? null} onSave={saveField(s.emailField)} type="email" canEdit={canEdit} placeholder="email@example.com" emptyLabel="—" />
                       ) : (
                         <span style={{ color: "#9ca3af" }}>—</span>
                       )}
@@ -423,8 +478,10 @@ function OverviewTab({
 // ─── Main Page ───────────────────────────────────────────────────
 
 export default function ProjectHubDetail({ params }: { params: { code: string } }) {
-  const { data, isLoading } = useDashboardData();
+  const { data, isLoading, refetch } = useDashboardData();
+  const { user } = useAuth();
   const [activeTab, setActiveTab] = useState("overview");
+  const canEdit = user?.role === "admin" || user?.role === "resource_manager";
 
   const project = useMemo(
     () => data?.projects.find(p => p.code === params.code) || null,
@@ -511,13 +568,13 @@ export default function ProjectHubDetail({ params }: { params: { code: string } 
       {/* Tab content */}
       <div className="pt-5">
         {activeTab === "overview" && (
-          <OverviewTab project={project} roleSlots={roleSlots} assignments={assignments} />
+          <OverviewTab project={project} roleSlots={roleSlots} assignments={assignments} canEdit={canEdit} />
         )}
         {activeTab === "rolePlanning" && (
-          <PlaceholderTab label="Role Planning" icon={<Users className="w-6 h-6" />} />
+          <ProjectRolePlanningTab project={project} onUpdate={() => refetch()} />
         )}
         {activeTab === "team" && (
-          <PlaceholderTab label="Team" icon={<UserCheck className="w-6 h-6" />} />
+          <ProjectTeamTab project={project} onUpdate={() => refetch()} />
         )}
         {activeTab === "timesheets" && (
           <PlaceholderTab label="Timesheets" icon={<ClipboardList className="w-6 h-6" />} />
