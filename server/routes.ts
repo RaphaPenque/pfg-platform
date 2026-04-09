@@ -109,12 +109,15 @@ export function registerRoutes(server: Server, app: Express) {
     // Always log for fallback/debugging
     console.log(`[MAGIC-LINK] Login link for ${email}: ${loginUrl}`);
 
-    // Send via Microsoft Graph
-    const tmpl = magicLinkEmail(user.name, loginUrl);
-    sendMail({ to: email, subject: tmpl.subject, html: tmpl.html, text: tmpl.text })
-      .catch(err => console.error("[email] Magic link send error:", err));
-
+    // Respond immediately — email sends in background (Graph can be slow on cold start)
     res.json({ message: "If that address is registered, a login link is on its way" });
+
+    // Send via Microsoft Graph after responding
+    const tmpl = magicLinkEmail(user.name, loginUrl);
+    setImmediate(() => {
+      sendMail({ to: email, subject: tmpl.subject, html: tmpl.html, text: tmpl.text })
+        .catch(err => console.error("[email] Magic link send error:", err));
+    });
   });
 
   app.get("/api/auth/verify", async (req: Request, res: Response) => {
