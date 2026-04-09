@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import {
   useDashboardData,
@@ -10,6 +10,9 @@ import {
 import {
   OEM_OPTIONS,
   PROJECT_CUSTOMER,
+  PROJECT_ROLES,
+  COST_CENTRES,
+  CERT_DEFS,
   sortSlots,
   cleanName,
   calcUtilisation,
@@ -19,6 +22,7 @@ import {
   Plus,
   X,
   Search,
+  ChevronDown,
   ChevronUp,
   Info,
   Undo2,
@@ -64,6 +68,56 @@ const inputStyle = {
   background: "hsl(var(--card))",
 };
 
+function TeamMultiSelect({
+  label, options, selected, onChange,
+}: {
+  label: string; options: string[]; selected: string[]; onChange: (v: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const toggle = (val: string) => {
+    onChange(selected.includes(val) ? selected.filter(s => s !== val) : [...selected, val]);
+  };
+
+  const display = selected.length === 0 ? label : selected.length === 1 ? selected[0] : `${selected.length} sel.`;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button type="button" onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg border truncate"
+        style={{
+          borderColor: selected.length > 0 ? "var(--pfg-yellow)" : "hsl(var(--border))",
+          background: selected.length > 0 ? "hsl(var(--accent))" : "transparent",
+          color: selected.length > 0 ? "var(--pfg-navy)" : "hsl(var(--muted-foreground))",
+          maxWidth: "130px",
+        }}>
+        <span className="truncate">{display}</span>
+        <ChevronDown className="w-3 h-3 shrink-0" />
+      </button>
+      {open && (
+        <div className="absolute top-full mt-1 left-0 z-50 min-w-[180px] max-h-48 overflow-y-auto rounded-lg border p-1"
+          style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", boxShadow: "var(--shadow-md, 0 4px 12px rgba(0,0,0,0.1))" }}>
+          {options.map(opt => (
+            <label key={opt} className="flex items-center gap-2 px-2.5 py-1 text-[11px] cursor-pointer rounded hover:bg-black/5">
+              <input type="checkbox" checked={selected.includes(opt)} onChange={() => toggle(opt)} className="accent-[var(--pfg-yellow)]" />
+              {opt}
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function datesOverlap(
   aStart: string,
   aEnd: string,
@@ -82,7 +136,13 @@ function workerIsAvailable(
 ): boolean {
   for (const a of worker.assignments) {
     if (a.status !== "active" && a.status !== "flagged") continue;
-    if (excludeProjectId && a.projectId === excludeProjectId) continue;
+    // For same-project assignments: only skip if dates DON'T overlap
+    // (worker can be on multiple non-overlapping slots of the same project)
+    if (excludeProjectId && a.projectId === excludeProjectId) {
+      if (!datesOverlap(slotStart, slotEnd, a.startDate, a.endDate)) continue;
+      // Same project but overlapping dates — still unavailable
+      return false;
+    }
     if (datesOverlap(slotStart, slotEnd, a.startDate, a.endDate)) return false;
   }
   return true;
@@ -156,6 +216,10 @@ export default function ProjectTeamTab({
   const [editSlotFteOnly, setEditSlotFteOnly] = useState<
     Record<number, boolean>
   >({});
+  const [editSlotRoleFilter, setEditSlotRoleFilter] = useState<Record<number, string[]>>({});
+  const [editSlotCostCentreFilter, setEditSlotCostCentreFilter] = useState<Record<number, string[]>>({});
+  const [editSlotOemFilter, setEditSlotOemFilter] = useState<Record<number, string[]>>({});
+  const [editSlotCertFilter, setEditSlotCertFilter] = useState<Record<number, string[]>>({});
   const [editExpandedWorkers, setEditExpandedWorkers] = useState<
     Set<number>
   >(new Set());
@@ -230,7 +294,6 @@ export default function ProjectTeamTab({
 
     const base = allWorkers.filter((w) => {
       if (allAddedIds.has(w.id)) return false;
-      if (projectWorkerIds.has(w.id)) return false;
       if (!workerIsAvailable(w, slot.startDate, slot.endDate, project.id))
         return false;
       return true;
@@ -239,12 +302,35 @@ export default function ProjectTeamTab({
 
     const searchTerm = (editSlotSearch[slotKey] || "").toLowerCase();
     const fteOnly = editSlotFteOnly[slotKey] || false;
+    const roleFilter = editSlotRoleFilter[slotKey] || [];
+    const ccFilter = editSlotCostCentreFilter[slotKey] || [];
+    const oemFilterArr = editSlotOemFilter[slotKey] || [];
+    const certFilterArr = editSlotCertFilter[slotKey] || [];
+    const todayStr = new Date().toISOString().split("T")[0];
 
     const filtered = base
       .filter((w) => {
         if (searchTerm && !w.name.toLowerCase().includes(searchTerm))
           return false;
         if (fteOnly && w.status !== "FTE") return false;
+        if (roleFilter.length > 0 && !roleFilter.includes(w.role)) return false;
+        if (ccFilter.length > 0) {
+          const wcc = w.status === "FTE" ? (w.costCentre || "") : "Temp";
+          if (!ccFilter.includes(wcc)) return false;
+        }
+        if (oemFilterArr.length > 0) {
+          const workerOems = w.oemExperience.map((o: string) => o.split(" - ")[0]);
+          if (!oemFilterArr.some(o => workerOems.includes(o))) return false;
+        }
+        if (certFilterArr.length > 0) {
+          const docs = (w as any).documents as Array<{ type: string; expiryDate: string | null }> | undefined;
+          if (!docs) return false;
+          const hasAll = certFilterArr.every(certName => {
+            const certType = "cert_" + certName.toLowerCase().replace(/[^a-z0-9]/g, "_");
+            return docs.some((d: any) => d.type === certType && (!d.expiryDate || d.expiryDate >= todayStr));
+          });
+          if (!hasAll) return false;
+        }
         return true;
       })
       .sort((a, b) => {
@@ -622,6 +708,32 @@ export default function ProjectTeamTab({
                       >
                         {available.length} of {totalAvailable} workers
                       </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+                      <TeamMultiSelect
+                        label="Role"
+                        options={PROJECT_ROLES}
+                        selected={editSlotRoleFilter[slot.key] || []}
+                        onChange={(v) => setEditSlotRoleFilter(prev => ({ ...prev, [slot.key]: v }))}
+                      />
+                      <TeamMultiSelect
+                        label="Cost Centre"
+                        options={[...COST_CENTRES, "Temp"]}
+                        selected={editSlotCostCentreFilter[slot.key] || []}
+                        onChange={(v) => setEditSlotCostCentreFilter(prev => ({ ...prev, [slot.key]: v }))}
+                      />
+                      <TeamMultiSelect
+                        label="OEM"
+                        options={OEM_OPTIONS}
+                        selected={editSlotOemFilter[slot.key] || []}
+                        onChange={(v) => setEditSlotOemFilter(prev => ({ ...prev, [slot.key]: v }))}
+                      />
+                      <TeamMultiSelect
+                        label="Certificates"
+                        options={CERT_DEFS.map(c => c.name)}
+                        selected={editSlotCertFilter[slot.key] || []}
+                        onChange={(v) => setEditSlotCertFilter(prev => ({ ...prev, [slot.key]: v }))}
+                      />
                     </div>
                     <div className="max-h-[280px] overflow-y-auto space-y-0.5">
                       {available.length === 0 ? (

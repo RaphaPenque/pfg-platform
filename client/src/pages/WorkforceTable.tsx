@@ -1228,6 +1228,7 @@ export default function WorkforceTable() {
   const [filterEnglish, setFilterEnglish] = useState<string[]>([]);
   const [filterOem, setFilterOem] = useState<string[]>([]);
   const [filterAssigned, setFilterAssigned] = useState<string[]>([]);
+  const [filterCert, setFilterCert] = useState<string[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -1245,6 +1246,7 @@ export default function WorkforceTable() {
   const englishLevels = useMemo(() => Array.from(new Set(workers.map(w => w.englishLevel).filter(Boolean) as string[])).sort(), [workers]);
   const allOems = useMemo(() => Array.from(new Set(workers.flatMap(w => w.oemExperience.map(o => o.split(" - ")[0])))).sort(), [workers]);
   const assignedOptions = ["Assigned", "Available"];
+  const certOptions = useMemo(() => CERT_DEFS.map(c => c.name), []);
 
   // Filter
   const filtered = useMemo(() => {
@@ -1266,9 +1268,19 @@ export default function WorkforceTable() {
         if (filterAssigned.includes("Assigned") && !hasActive) return false;
         if (filterAssigned.includes("Available") && hasActive) return false;
       }
+      if (filterCert.length > 0) {
+        const today = new Date().toISOString().split("T")[0];
+        const docs = (w as any).documents as Array<{ type: string; expiryDate: string | null }> | undefined;
+        if (!docs) return false;
+        const hasAll = filterCert.every(certName => {
+          const certType = "cert_" + certName.toLowerCase().replace(/[^a-z0-9]/g, "_");
+          return docs.some(d => d.type === certType && (!d.expiryDate || d.expiryDate >= today));
+        });
+        if (!hasAll) return false;
+      }
       return true;
     });
-  }, [workers, search, filterRole, filterStatus, filterCostCentre, filterEnglish, filterOem, filterAssigned]);
+  }, [workers, search, filterRole, filterStatus, filterCostCentre, filterEnglish, filterOem, filterAssigned, filterCert]);
 
   // Sort
   const sorted = useMemo(() => {
@@ -1395,6 +1407,7 @@ export default function WorkforceTable() {
           <MultiSelect label="English" options={englishLevels} selected={filterEnglish} onChange={setFilterEnglish} testId="filter-english" />
           <MultiSelect label="OEM Experience" options={allOems} selected={filterOem} onChange={setFilterOem} testId="filter-oem" />
           <MultiSelect label="Assigned" options={assignedOptions} selected={filterAssigned} onChange={setFilterAssigned} testId="filter-assigned" />
+          <MultiSelect label="Certificates" options={certOptions} selected={filterCert} onChange={setFilterCert} testId="filter-cert" />
 
           {/* Export CSV button */}
           <button

@@ -31,6 +31,11 @@ export function getProjectColor(code: string): string {
   return customer ? (OEM_BRAND_COLORS[customer] || '#64748B') : '#64748B';
 }
 
+export function getProjectColorFromProject(project: { customer?: string | null; code: string }): string {
+  const source = project.customer || PROJECT_CUSTOMER[project.code] || "";
+  return source ? (OEM_BRAND_COLORS[source] || "#64748B") : "#64748B";
+}
+
 // Certificate definitions
 export const CERT_DEFS = [
   { name: 'Trade Diploma', alwaysGreen: true, completionOnly: true, noTradeAlt: 'Work Experience' },

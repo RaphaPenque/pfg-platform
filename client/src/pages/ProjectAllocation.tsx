@@ -467,7 +467,8 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
         if (oemFilter && !w.oemExperience.some(exp => exp.toLowerCase().includes(oemFilter.toLowerCase()))) return false;
         if (certFilter) {
           const certType = "cert_" + certFilter.toLowerCase().replace(/[^a-z0-9]/g, "_");
-          const hasCert = (w as any).documents?.some((d: any) => d.type === certType && d.filePath);
+          const today = new Date().toISOString().split("T")[0];
+          const hasCert = (w as any).documents?.some((d: any) => d.type === certType && (!d.expiryDate || d.expiryDate >= today));
           if (!hasCert) return false;
         }
         return true;

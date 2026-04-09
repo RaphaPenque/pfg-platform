@@ -666,7 +666,33 @@ export function registerRoutes(server: Server, app: Express) {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
     const workerId = req.params.id;
     const fileType = req.body?.type || "file";
-    const filePath = `/api/uploads/${workerId}/${req.file.filename}`;
+    let finalFilename = req.file.filename;
+
+    // Rename cert files to: CleanWorkerName_CertType_YYYY.ext
+    if (fileType.startsWith("cert_")) {
+      try {
+        const worker = await storage.getWorker(parseInt(workerId));
+        if (worker) {
+          const cleanWorkerName = worker.name.replace(/\s*\([^)]*\)\s*$/g, "").trim().replace(/\s+/g, "_");
+          const certLabel = fileType.replace(/^cert_/, "").replace(/_/g, " ");
+          const certClean = certLabel.replace(/[^a-zA-Z0-9 ]/g, "").replace(/\s+/g, "_");
+          const expiryYear = req.body?.expiryDate ? req.body.expiryDate.substring(0, 4) : String(new Date().getFullYear());
+          const ext = path.extname(req.file.originalname) || path.extname(req.file.filename) || ".pdf";
+          const newFilename = `${cleanWorkerName}_${certClean}_${expiryYear}${ext}`;
+          const oldPath = path.join(UPLOAD_BASE, workerId, req.file.filename);
+          const newPath = path.join(UPLOAD_BASE, workerId, newFilename);
+          if (fs.existsSync(oldPath)) {
+            fs.renameSync(oldPath, newPath);
+            finalFilename = newFilename;
+          }
+        }
+      } catch (e) {
+        console.error("File rename error:", e);
+        // Keep original filename on error
+      }
+    }
+
+    const filePath = `/api/uploads/${workerId}/${finalFilename}`;
 
     if (fileType === "photo") {
       await storage.updateWorker(parseInt(workerId), { profilePhotoPath: filePath });
@@ -674,7 +700,7 @@ export function registerRoutes(server: Server, app: Express) {
       await storage.updateWorker(parseInt(workerId), { passportPath: filePath });
     }
 
-    res.json({ path: filePath, filename: req.file.filename, type: fileType });
+    res.json({ path: filePath, filename: finalFilename, type: fileType });
   });
 
   app.get("/api/uploads/:workerId/:filename", (req: Request, res: Response) => {

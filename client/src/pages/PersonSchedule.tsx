@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useDashboardData, type DashboardWorker } from "@/hooks/use-dashboard-data";
-import { getProjectColor, calcUtilisation, cleanName } from "@/lib/constants";
+import { getProjectColor, getProjectColorFromProject, OEM_BRAND_COLORS, calcUtilisation, cleanName } from "@/lib/constants";
 import { Search, Check, Download } from "lucide-react";
 import { downloadCSV } from "@/lib/csv-export";
 
@@ -58,6 +58,13 @@ export default function PersonSchedule() {
 
   const workers = data?.workers ?? [];
   const projects = data?.projects ?? [];
+
+  // Map projectId -> project for colour lookups
+  const projectMap = useMemo(() => {
+    const map: Record<number, typeof projects[0]> = {};
+    projects.forEach(p => { map[p.id] = p; });
+    return map;
+  }, [projects]);
 
   // Build a map of projectId -> project status for filtering
   const projectStatusMap = useMemo(() => {
@@ -288,6 +295,7 @@ export default function PersonSchedule() {
                     todayMonth={todayMonth}
                     todayDayFrac={todayDayFrac}
                     visibleProjectIds={visibleProjectIds}
+                    projectMap={projectMap}
                   />
                 ))
               )}
@@ -304,11 +312,13 @@ function PersonRow({
   todayMonth,
   todayDayFrac,
   visibleProjectIds,
+  projectMap,
 }: {
   worker: DashboardWorker;
   todayMonth: number;
   todayDayFrac: number;
   visibleProjectIds: Set<number>;
+  projectMap: Record<number, { customer: string | null; code: string }>;
 }) {
   const util = calcUtilisation(worker.assignments);
   const utilColor = util.pct >= 80 ? "var(--green)" : util.pct >= 50 ? "var(--amber)" : "var(--red)";
@@ -320,7 +330,8 @@ function PersonRow({
   const assignmentBars = visibleAssignments.map((a) => {
     const startMonth = dateToMonthIndex(a.startDate);
     const endMonth = dateToMonthIndex(a.endDate);
-    const color = getProjectColor(a.projectCode);
+    const proj = projectMap[a.projectId];
+    const color = proj ? getProjectColorFromProject(proj) : getProjectColor(a.projectCode);
     const startFrac = a.startDate ? dateToDayFraction(a.startDate) : 0;
     const endFrac = a.endDate ? dateToDayFraction(a.endDate) : 1;
     const isFlagged = a.status === "flagged";

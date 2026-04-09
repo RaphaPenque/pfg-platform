@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useDashboardData } from "@/hooks/use-dashboard-data";
-import { getProjectColor, OEM_BRAND_COLORS, PROJECT_CUSTOMER, cleanName } from "@/lib/constants";
+import { getProjectColor, getProjectColorFromProject, OEM_BRAND_COLORS, PROJECT_CUSTOMER, cleanName } from "@/lib/constants";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip } from "recharts";
 import { Check } from "lucide-react";
 
@@ -71,7 +71,7 @@ export default function GanttChart() {
     const projectRows = filteredProjects.map((p) => {
       const startMonth = dateToMonthIndex(p.startDate);
       const endMonth = dateToMonthIndex(p.endDate);
-      const color = getProjectColor(p.code);
+      const color = getProjectColorFromProject(p);
       const status = (p.status || "active") as ProjectStatus;
 
       // Count active assignments

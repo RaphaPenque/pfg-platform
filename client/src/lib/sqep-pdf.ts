@@ -195,10 +195,10 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
     y += 8;
     const aCols = [
       { label: "Project",  x: 14 },
-      { label: "Role",     x: 90 },
-      { label: "Shift",    x: 130 },
-      { label: "Dates",    x: 152 },
-      { label: "Location", x: 185 },
+      { label: "Role",     x: 85 },
+      { label: "Shift",    x: 118 },
+      { label: "Dates",    x: 138 },
+      { label: "Location", x: 178 },
     ];
     tableHeader(aCols, y);
     y += 6;
@@ -210,12 +210,12 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
         doc.rect(14, y - 3.5, pageW - 28, 7, "F");
       }
       doc.setTextColor(26, 29, 35);
-      doc.text(truncate(`${a.projectCode} — ${a.projectName}`, 36), aCols[0].x, y);
-      doc.text(truncate(a.role || a.task || worker.role, 18), aCols[1].x, y);
+      doc.text(truncate(`${a.projectCode} — ${a.projectName}`, 32), aCols[0].x, y);
+      doc.text(truncate(a.role || a.task || worker.role, 16), aCols[1].x, y);
       doc.text(a.shift || "—", aCols[2].x, y);
-      doc.text(`${a.startDate || "—"} → ${a.endDate || "—"}`, aCols[3].x, y);
+      doc.text(truncate(`${a.startDate || "—"} → ${a.endDate || "—"}`, 22), aCols[3].x, y);
       doc.setTextColor(99, 117, 140);
-      doc.text(truncate((a as any).location || "—", 18), aCols[4].x, y);
+      doc.text(truncate((a as any).location || "—", 14), aCols[4].x, y);
       y += 7;
     }
   }
@@ -233,13 +233,13 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
   y = SQEP_HEADER_H + 12;
 
   const wCols = [
-    { label: "Site / Project",  x: 14,  w: 42 },
-    { label: "Start",           x: 56,  w: 20 },
-    { label: "End",             x: 76,  w: 20 },
-    { label: "Role",            x: 96,  w: 24 },
-    { label: "OEM",             x: 120, w: 24 },
-    { label: "Equip.",          x: 144, w: 16 },
-    { label: "Scope of Work",   x: 160, w: 36 },
+    { label: "Site / Project",  x: 14,  w: 38 },
+    { label: "Start",           x: 52,  w: 20 },
+    { label: "End",             x: 72,  w: 20 },
+    { label: "Role",            x: 92,  w: 22 },
+    { label: "OEM",             x: 114, w: 24 },
+    { label: "Equip.",          x: 138, w: 18 },
+    { label: "Scope of Work",   x: 156, w: 40 },
   ];
 
   if (pastAssignments.length === 0) {
@@ -265,15 +265,15 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
         doc.rect(14, y - 3, pageW - 28, 6.5, "F");
       }
       doc.setTextColor(26, 29, 35);
-      doc.text(truncate(`${a.projectName} (${a.projectCode})`, 30), wCols[0].x, y);
+      doc.text(truncate(`${a.projectName} (${a.projectCode})`, 26), wCols[0].x, y);
       doc.text(a.startDate || "—", wCols[1].x, y);
       doc.text(a.endDate || "—", wCols[2].x, y);
-      doc.text(truncate(a.role || a.task || worker.role, 16), wCols[3].x, y);
+      doc.text(truncate(a.role || a.task || worker.role, 14), wCols[3].x, y);
       doc.setTextColor(99, 117, 140);
       doc.text(truncate(a.customer || "—", 16), wCols[4].x, y);
-      doc.text(a.equipmentType || "—", wCols[5].x, y);
+      doc.text(truncate(a.equipmentType || "—", 10), wCols[5].x, y);
       doc.setTextColor(26, 29, 35);
-      doc.text(truncate(a.task || a.role || "—", 28), wCols[6].x, y);
+      doc.text(truncate(a.task || a.role || "—", 26), wCols[6].x, y);
       y += 6.5;
     }
   }
@@ -318,11 +318,9 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
       doc.setFillColor(250, 250, 252);
       doc.rect(14, y - 3, pageW - 28, 6.5, "F");
     }
-    // Match against uploaded docs
-    const matchedDoc = workerDocs.find(d =>
-      d.name.toLowerCase().includes(cert.name.toLowerCase().substring(0, 12)) ||
-      cert.name.toLowerCase().includes(d.name.toLowerCase().substring(0, 12))
-    );
+    // Match against uploaded docs by type field (cert_xxx format) or exact name
+    const certType = "cert_" + cert.name.toLowerCase().replace(/[^a-z0-9]/g, "_");
+    const matchedDoc = workerDocs.find(d => d.type === certType || d.name === cert.name);
     const hasDoc = !!matchedDoc;
     const isExpired = matchedDoc?.expiryDate ? matchedDoc.expiryDate < today : false;
     const isExpiring = matchedDoc?.expiryDate
@@ -648,7 +646,7 @@ export async function downloadCustomerPack(
     if (seenWorkers.has(worker.id)) continue;
     seenWorkers.add(worker.id);
 
-    const safeName = worker.name.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "");
+    const safeName = cleanName(worker.name).replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "");
     const workerFolder = projectFolder.folder(safeName)!;
 
     // SQEP PDF
