@@ -83,6 +83,12 @@ export async function runSchemaUpdates() {
         AND (day_shift_signatory_name IS NOT NULL OR night_shift_signatory_name IS NOT NULL)
     `);
 
+    // Assignment confirmation columns — Temp confirmation flow
+    await db.execute(sql`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS confirmation_token TEXT`);
+    await db.execute(sql`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS confirmation_sent_at TEXT`);
+    await db.execute(sql`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS confirmed_at TEXT`);
+    await db.execute(sql`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS declined_at TEXT`);
+
     console.log("Schema updates applied.");
   } catch (e: any) {
     console.error("Schema update error:", e.message);

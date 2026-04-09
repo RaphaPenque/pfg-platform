@@ -14,6 +14,7 @@ import PersonSchedule from "./pages/PersonSchedule";
 import CustomerPortal from "./pages/CustomerPortal";
 import PayrollRules from "./pages/PayrollRules";
 import Login from "./pages/Login";
+import ConfirmAssignment from "./pages/ConfirmAssignment";
 import NotFound from "./pages/not-found";
 import { LogOut, Loader2 } from "lucide-react";
 
@@ -187,6 +188,12 @@ function AuthVerifyRedirect() {
 function AppContent() {
   const [location] = useLocation();
   const { user, isLoading } = useAuth();
+
+  // Public confirmation route (no auth required)
+  if (location.startsWith("/confirm/")) {
+    const token = location.replace("/confirm/", "");
+    return <ConfirmAssignment params={{ token }} />;
+  }
 
   // Portal routes render standalone (no auth required)
   if (location.startsWith("/portal/")) {
