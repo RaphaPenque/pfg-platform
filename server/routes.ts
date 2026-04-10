@@ -881,8 +881,18 @@ export function registerRoutes(server: Server, app: Express) {
     res.status(201).json(doc);
   });
 
-  app.delete("/api/documents/:id", async (req: Request, res: Response) => {
-    await storage.deleteDocument(parseInt(req.params.id));
+  app.delete("/api/documents/:id", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const doc = await storage.getDocumentById(id);
+    if (doc?.filePath) {
+      // filePath is like /api/uploads/33/filename.pdf — strip prefix to get disk path
+      const relPath = doc.filePath.replace(/^\/api\/uploads\//, '');
+      const diskPath = path.join(UPLOAD_BASE, relPath);
+      if (fs.existsSync(diskPath)) {
+        try { fs.unlinkSync(diskPath); } catch(e) { console.error('[delete doc] unlink error:', e); }
+      }
+    }
+    await storage.deleteDocument(id);
     res.status(204).send();
   });
 

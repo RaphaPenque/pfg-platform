@@ -71,6 +71,7 @@ export interface IStorage {
   // Documents
   getDocumentsByWorker(workerId: number): Promise<Document[]>;
   createDocument(data: InsertDocument): Promise<Document>;
+  getDocumentById(id: number): Promise<Document | undefined>;
   deleteDocument(id: number): Promise<void>;
   upsertDocument(workerId: number, type: string, name: string, data: Partial<InsertDocument>): Promise<Document>;
 
@@ -227,6 +228,10 @@ export class PostgresStorage implements IStorage {
   async createDocument(data: InsertDocument): Promise<Document> {
     const [row] = await db.insert(documents).values(data).returning();
     return row;
+  }
+
+  async getDocumentById(id: number): Promise<Document | undefined> {
+    return db.select().from(documents).where(eq(documents.id, id)).limit(1).then(r => r[0]);
   }
 
   async deleteDocument(id: number): Promise<void> {

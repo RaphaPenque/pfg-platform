@@ -1203,7 +1203,64 @@ function WorkExperienceTab({ worker }: { worker: DashboardWorker }) {
 // CERTIFICATES TAB — reads from real uploaded documents
 // ───────────────────────────────────────────────────────────────
 function CertificatesTab({ worker }: { worker: DashboardWorker }) {
-  const docs = worker.documents || [];
+  const { toast } = useToast();
+  const { user: authUser } = useAuth();
+  const canEdit = authUser?.role === 'admin' || authUser?.role === 'resource_manager';
+  const [docs, setDocs] = useState(worker.documents || []);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [uploadingType, setUploadingType] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pendingUpload, setPendingUpload] = useState<{ certType: string; certName: string } | null>(null);
+  const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
+
+  // Refresh docs from server
+  const refreshDocs = async () => {
+    try {
+      const r = await apiRequest('GET', `/api/workers/${worker.id}/documents`);
+      const fresh = await r.json();
+      setDocs(fresh);
+      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+    } catch(e) { /* ignore */ }
+  };
+
+  const handleDelete = async (docId: number) => {
+    if (!window.confirm('Remove this certificate? This will delete the file permanently.')) return;
+    setDeletingId(docId);
+    try {
+      await apiRequest('DELETE', `/api/documents/${docId}`);
+      await refreshDocs();
+      toast({ title: 'Certificate removed' });
+    } catch(e: any) {
+      toast({ title: 'Failed to remove', description: e.message, variant: 'destructive' });
+    }
+    setDeletingId(null);
+  };
+
+  const handleReplace = (certType: string, certName: string) => {
+    setPendingUpload({ certType, certName });
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !pendingUpload) return;
+    e.target.value = '';
+    setUploadingType(pendingUpload.certType);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('type', pendingUpload.certType);
+      await fetch(`${API_BASE}/api/workers/${worker.id}/upload`, {
+        method: 'POST', body: formData, credentials: 'include',
+      });
+      await refreshDocs();
+      toast({ title: 'Certificate updated' });
+    } catch(e: any) {
+      toast({ title: 'Upload failed', description: e.message, variant: 'destructive' });
+    }
+    setUploadingType(null);
+    setPendingUpload(null);
+  };
 
   // Build a lookup: certType key → document
   const docByType: Record<string, typeof docs[0]> = {};
@@ -1224,10 +1281,11 @@ function CertificatesTab({ worker }: { worker: DashboardWorker }) {
     return d && getCertStatus(c, !!d.filePath, d.expiryDate).color === 'var(--green)';
   }).length;
 
-  const API_BASE = "__PORT_5000__".startsWith("__") ? "" : "__PORT_5000__";
-
   return (
     <div className="rounded-lg border overflow-hidden" style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))" }}>
+      {/* Hidden file input for replace */}
+      <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={handleFileSelected} />
+
       {/* Summary bar */}
       <div className="px-4 py-2.5 flex items-center gap-4 border-b text-[12px]" style={{ background: "hsl(var(--muted))", borderColor: "hsl(var(--border))" }}>
         <span className="font-semibold" style={{ color: "var(--pfg-navy)" }}>{uploadedCount} uploaded</span>
@@ -1295,22 +1353,52 @@ function CertificatesTab({ worker }: { worker: DashboardWorker }) {
                   {doc?.expiryDate || (uploaded ? 'No expiry' : '—')}
                 </td>
                 <td className="px-4 py-2.5">
-                  {doc?.filePath && (
-                    <a
-                      href={`${API_BASE}${doc.filePath}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center justify-center w-6 h-6 rounded hover:opacity-80 transition"
-                      style={{ background: "hsl(var(--muted))" }}
-                      title="Download certificate"
-                    >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--pfg-steel)" }}>
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                        <polyline points="7 10 12 15 17 10"/>
-                        <line x1="12" y1="15" x2="12" y2="3"/>
-                      </svg>
-                    </a>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {doc?.filePath && (
+                      <a
+                        href={`${API_BASE}${doc.filePath}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center justify-center w-6 h-6 rounded hover:opacity-80 transition"
+                        style={{ background: "hsl(var(--muted))" }}
+                        title="Download certificate"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--pfg-steel)" }}>
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                          <polyline points="7 10 12 15 17 10"/>
+                          <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                      </a>
+                    )}
+                    {canEdit && (
+                      <button
+                        onClick={() => handleReplace(key, cert.name)}
+                        disabled={uploadingType === key}
+                        className="inline-flex items-center justify-center w-6 h-6 rounded hover:opacity-80 transition"
+                        style={{ background: "hsl(var(--muted))" }}
+                        title={doc?.filePath ? 'Replace certificate' : 'Upload certificate'}
+                      >
+                        {uploadingType === key
+                          ? <Loader2 width={10} height={10} className="animate-spin" style={{ color: "var(--pfg-steel)" }} />
+                          : <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--pfg-steel)" }}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                        }
+                      </button>
+                    )}
+                    {canEdit && doc?.id && (
+                      <button
+                        onClick={() => handleDelete(doc.id)}
+                        disabled={deletingId === doc.id}
+                        className="inline-flex items-center justify-center w-6 h-6 rounded hover:opacity-80 transition"
+                        style={{ background: "hsl(var(--muted))" }}
+                        title="Delete certificate"
+                      >
+                        {deletingId === doc.id
+                          ? <Loader2 width={10} height={10} className="animate-spin" style={{ color: "var(--red)" }} />
+                          : <Trash2 width={10} height={10} style={{ color: "var(--red)" }} />
+                        }
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             );
@@ -1334,16 +1422,31 @@ function CertificatesTab({ worker }: { worker: DashboardWorker }) {
                 <td className="px-4 py-2.5 text-[12px]" style={{ color: "var(--pfg-steel)" }}>{doc.issuedDate || '—'}</td>
                 <td className="px-4 py-2.5 text-[12px]" style={{ color: "var(--pfg-steel)" }}>{doc.expiryDate || 'No expiry'}</td>
                 <td className="px-4 py-2.5">
-                  {doc.filePath && (
-                    <a href={`${API_BASE}${doc.filePath}`} target="_blank" rel="noopener noreferrer"
-                      className="inline-flex items-center justify-center w-6 h-6 rounded hover:opacity-80" style={{ background: "hsl(var(--muted))" }}>
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--pfg-steel)" }}>
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                        <polyline points="7 10 12 15 17 10"/>
-                        <line x1="12" y1="15" x2="12" y2="3"/>
-                      </svg>
-                    </a>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {doc.filePath && (
+                      <a href={`${API_BASE}${doc.filePath}`} target="_blank" rel="noopener noreferrer"
+                        className="inline-flex items-center justify-center w-6 h-6 rounded hover:opacity-80" style={{ background: "hsl(var(--muted))" }}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--pfg-steel)" }}>
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                          <polyline points="7 10 12 15 17 10"/>
+                          <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                      </a>
+                    )}
+                    {canEdit && doc.id && (
+                      <button
+                        onClick={() => handleDelete(doc.id)}
+                        disabled={deletingId === doc.id}
+                        className="inline-flex items-center justify-center w-6 h-6 rounded hover:opacity-80" style={{ background: "hsl(var(--muted))" }}
+                        title="Delete certificate"
+                      >
+                        {deletingId === doc.id
+                          ? <Loader2 width={10} height={10} className="animate-spin" style={{ color: "var(--red)" }} />
+                          : <Trash2 width={10} height={10} style={{ color: "var(--red)" }} />
+                        }
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             );
