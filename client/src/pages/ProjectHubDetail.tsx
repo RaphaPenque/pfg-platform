@@ -234,7 +234,7 @@ function OverviewTab({
   const daysLeft = project.endDate ? Math.max(0, Math.ceil((new Date(project.endDate).getTime() - Date.now()) / 86400000)) : null;
   // FTE Coverage = FTE workers assigned / total role slots
   const workerMap = new Map(workers.map(w => [w.id, w.status]));
-  const assignedWorkerIds = [...new Set(_projectAssignments2.map(a => a.workerId).filter(Boolean))];
+  const assignedWorkerIds = Array.from(new Set(_projectAssignments2.map(a => a.workerId).filter(Boolean)));
   const fteWorkers = assignedWorkerIds.filter(id => workerMap.get(id) === "FTE").length;
   const ftePct = totalSlotQty > 0 ? Math.round((fteWorkers / totalSlotQty) * 100) : 0;
   const equipLabel = EQUIPMENT_TYPES.find(e => e.value === project.equipmentType)?.label || project.equipmentType || "—";

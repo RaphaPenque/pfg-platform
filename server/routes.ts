@@ -185,7 +185,7 @@ export function registerRoutes(server: Server, app: Express) {
 
   // ===== PORTAL (no auth required) =====
   app.get("/api/portal/:code", async (req: Request, res: Response) => {
-    const project = await storage.getProjectByCode(req.params.code.toUpperCase());
+    const project = await storage.getProjectByCode((req.params.code as string).toUpperCase());
     if (!project) return res.status(404).json({ error: "Project not found" });
 
     const [projectAssignments, allWorkers, roleSlots] = await Promise.all([
@@ -197,9 +197,9 @@ export function registerRoutes(server: Server, app: Express) {
     const workerMap = Object.fromEntries(allWorkers.map(w => [w.id, w]));
 
     // Build enriched worker objects for assigned workers (with OEM experience parsed)
-    const assignedWorkerIds = new Set(
+    const assignedWorkerIds = Array.from(new Set(
       projectAssignments.filter(a => a.status === "active" || a.status === "flagged").map(a => a.workerId)
-    );
+    ));
     const workers: Record<number, any> = {};
     for (const wid of assignedWorkerIds) {
       const w = workerMap[wid];

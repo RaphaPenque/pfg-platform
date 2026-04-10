@@ -250,7 +250,7 @@ export async function generateSqepPdf(worker: DashboardWorker): Promise<jsPDF> {
     sectionTitle("Current Assignment", y);
     y += 8;
     const availLabel = worker.status === "FTE" ? "Available" : "Potentially Available";
-    const availColor = worker.status === "FTE" ? [34, 197, 94] as const : [245, 158, 11] as const;
+    const availColor: [number, number, number] = worker.status === "FTE" ? [34, 197, 94] : [245, 158, 11];
     doc.setFillColor(...availColor);
     const lw = doc.getTextWidth(availLabel) + 10;
     doc.roundedRect(14, y - 4, lw, 7, 1.5, 1.5, "F");

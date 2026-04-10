@@ -554,7 +554,7 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
         siteManager: siteManagerName.trim() || null,
         timesheetSignatoryName: signatoryName.trim() || null,
         timesheetSignatoryEmail: signatoryEmail.trim() || null,
-      });
+      }).then((r: any) => r.json());
 
       // 2. Create role slots and collect their server IDs
       const slotIdMap: Record<number, number> = {}; // key -> server id
@@ -566,7 +566,7 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
           endDate: slot.endDate,
           quantity: slot.quantity,
           shift: slot.shift,
-        });
+        }).then((r: any) => r.json());
         slotIdMap[slot.key] = created.id;
       }
 
@@ -590,7 +590,7 @@ function AddProjectModal({ onClose }: { onClose: () => void }) {
             endDate: slot.endDate,
             duration: durationDays,
             status: "active",
-          });
+          }).then((r: any) => r.json());
           if (tempWorkerIds.has(wid)) createdAssignmentIds.push(created.id);
         }
       }
@@ -1949,7 +1949,7 @@ function EditProjectModal({
             endDate: slot.endDate,
             quantity: slot.quantity,
             shift: slot.shift,
-          });
+          }).then((r: any) => r.json());
           newSlotIdMap[slot.key] = created.id;
         } else {
           // Existing slot — patch if changed
@@ -2196,16 +2196,16 @@ function EditProjectModal({
               <input className={inputCls} style={inputStyle} value={editSiteManager} onChange={(e) => setEditSiteManager(e.target.value)} placeholder="Name" data-testid="edit-site-manager" />
             </FormGroup>
             <FormGroup label="Timesheet Signatory Name">
-              <input className={inputCls} style={inputStyle} value={editSignatoryName} onChange={(e) => setEditDaySignatoryName(e.target.value)} placeholder="Name" data-testid="edit-day-signatory-name" />
+              <input className={inputCls} style={inputStyle} value={editSignatoryName} onChange={(e) => setEditSignatoryName(e.target.value)} placeholder="Name" data-testid="edit-day-signatory-name" />
             </FormGroup>
             <FormGroup label="Timesheet Signatory Email">
-              <input type="email" className={inputCls} style={inputStyle} value={editSignatoryEmail} onChange={(e) => setEditDaySignatoryEmail(e.target.value)} placeholder="email@customer.com" data-testid="edit-day-signatory-email" />
+              <input type="email" className={inputCls} style={inputStyle} value={editSignatoryEmail} onChange={(e) => setEditSignatoryEmail(e.target.value)} placeholder="email@customer.com" data-testid="edit-day-signatory-email" />
             </FormGroup>
             <FormGroup label="Timesheet Signatory Name">
-              <input className={inputCls} style={inputStyle} value={editSignatoryName} onChange={(e) => setEditNightSignatoryName(e.target.value)} placeholder="Name" data-testid="edit-night-signatory-name" />
+              <input className={inputCls} style={inputStyle} value={editSignatoryName} onChange={(e) => setEditSignatoryName(e.target.value)} placeholder="Name" data-testid="edit-night-signatory-name" />
             </FormGroup>
             <FormGroup label="Timesheet Signatory Email">
-              <input type="email" className={inputCls} style={inputStyle} value={editSignatoryEmail} onChange={(e) => setEditNightSignatoryEmail(e.target.value)} placeholder="email@customer.com" data-testid="edit-night-signatory-email" />
+              <input type="email" className={inputCls} style={inputStyle} value={editSignatoryEmail} onChange={(e) => setEditSignatoryEmail(e.target.value)} placeholder="email@customer.com" data-testid="edit-night-signatory-email" />
             </FormGroup>
           </div>
         )}
