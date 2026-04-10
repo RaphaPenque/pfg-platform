@@ -29,6 +29,7 @@ import {
   Loader2,
   Send,
   Mail,
+  PhoneCall,
 } from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────────────────
@@ -244,6 +245,7 @@ export default function ProjectTeamTab({
   >(new Set());
   const [saving, setSaving] = useState(false);
   const [sendingConfirmation, setSendingConfirmation] = useState<number | null>(null);
+  const [confirmingManually, setConfirmingManually] = useState<number | null>(null);
   const [sendingAll, setSendingAll] = useState(false);
 
   const handleSendConfirmation = async (assignmentId: number) => {
@@ -251,12 +253,25 @@ export default function ProjectTeamTab({
     try {
       await apiRequest("POST", `/api/assignments/${assignmentId}/send-confirmation`);
       await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
-      toast({ title: "Confirmation email sent" });
+      toast({ title: "Confirmation request sent" });
       onUpdate();
     } catch (e: any) {
       toast({ title: "Error sending confirmation", description: e.message || "Unknown error", variant: "destructive" });
     }
     setSendingConfirmation(null);
+  };
+
+  const handleManualConfirm = async (assignmentId: number) => {
+    setConfirmingManually(assignmentId);
+    try {
+      await apiRequest("POST", `/api/assignments/${assignmentId}/manual-confirm`);
+      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      toast({ title: "Confirmed manually" });
+      onUpdate();
+    } catch (e: any) {
+      toast({ title: "Error confirming", description: e.message || "Unknown error", variant: "destructive" });
+    }
+    setConfirmingManually(null);
   };
 
   const handleSendAllConfirmations = async () => {
@@ -692,20 +707,38 @@ export default function ProjectTeamTab({
                             <>
                               <ConfirmationBadge assignment={m.assignment} />
                               {m.assignment.status !== "confirmed" && (
-                                <button
-                                  onClick={() => handleSendConfirmation(m.assignment.id)}
-                                  disabled={sendingConfirmation === m.assignment.id}
-                                  className="text-[10px] font-semibold px-2 py-0.5 rounded-lg border flex items-center gap-1 transition"
-                                  style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-navy)" }}
-                                  title={m.assignment.status === "pending_confirmation" ? "Resend confirmation" : "Send confirmation"}
-                                >
-                                  {sendingConfirmation === m.assignment.id ? (
-                                    <Loader2 className="w-3 h-3 animate-spin" />
-                                  ) : (
-                                    <Mail className="w-3 h-3" />
-                                  )}
-                                  {m.assignment.status === "pending_confirmation" ? "Resend" : "Send"}
-                                </button>
+                                <div className="flex items-center gap-1">
+                                  {/* Send / Resend email confirmation request */}
+                                  <button
+                                    onClick={() => handleSendConfirmation(m.assignment.id)}
+                                    disabled={sendingConfirmation === m.assignment.id}
+                                    className="text-[10px] font-semibold px-2 py-0.5 rounded-lg border flex items-center gap-1 transition"
+                                    style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-navy)" }}
+                                    title={m.assignment.status === "pending_confirmation" ? "Resend confirmation request" : "Send confirmation request"}
+                                  >
+                                    {sendingConfirmation === m.assignment.id ? (
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      <Mail className="w-3 h-3" />
+                                    )}
+                                    {m.assignment.status === "pending_confirmation" ? "Resend Request" : "Send Confirmation Request"}
+                                  </button>
+                                  {/* Manual / telephone confirm */}
+                                  <button
+                                    onClick={() => handleManualConfirm(m.assignment.id)}
+                                    disabled={confirmingManually === m.assignment.id}
+                                    className="text-[10px] font-semibold px-2 py-0.5 rounded-lg border flex items-center gap-1 transition"
+                                    style={{ borderColor: "var(--green)", color: "var(--green)" }}
+                                    title="Mark as confirmed (e.g. confirmed by telephone)"
+                                  >
+                                    {confirmingManually === m.assignment.id ? (
+                                      <Loader2 className="w-3 h-3 animate-spin" />
+                                    ) : (
+                                      <PhoneCall className="w-3 h-3" />
+                                    )}
+                                    Confirm Manually
+                                  </button>
+                                </div>
                               )}
                             </>
                           )}

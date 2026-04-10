@@ -694,6 +694,19 @@ export function registerRoutes(server: Server, app: Express) {
 
   // ===== ASSIGNMENT CONFIRMATION =====
 
+  app.post("/api/assignments/:id/manual-confirm", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const allAssignments = await storage.getAssignments();
+    const assignment = allAssignments.find(a => a.id === id);
+    if (!assignment) return res.status(404).json({ error: "Assignment not found" });
+    if (assignment.status === "confirmed") return res.json({ ok: true, message: "Already confirmed" });
+
+    const now = new Date().toISOString();
+    await storage.updateAssignment(id, { status: "confirmed", confirmedAt: now });
+    await logAudit(req.user!.id, "assignment.manual_confirm", "assignment", id, `Manual confirmation by ${req.user!.name}`);
+    res.json({ ok: true });
+  });
+
   app.post("/api/assignments/:id/send-confirmation", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     const allAssignments = await storage.getAssignments();
