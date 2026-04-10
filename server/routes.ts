@@ -881,6 +881,13 @@ export function registerRoutes(server: Server, app: Express) {
     res.status(201).json(doc);
   });
 
+  app.patch("/api/documents/:id", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const updated = await storage.updateDocument(id, req.body);
+    if (!updated) return res.status(404).json({ error: 'Document not found' });
+    res.json(updated);
+  });
+
   app.delete("/api/documents/:id", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     const doc = await storage.getDocumentById(id);
