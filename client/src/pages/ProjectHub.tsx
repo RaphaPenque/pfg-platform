@@ -68,7 +68,7 @@ function computeHealth(
   // Planning: check signatory
   let planningStatus: HealthStatus = "green";
   let planningNote = "All items complete";
-  const hasSignatory = project.dayShiftSignatoryName || project.nightShiftSignatoryName;
+  const hasSignatory = project.timesheetSignatoryName;
   if (!hasSignatory) {
     planningStatus = "red";
     planningNote = "No signatory set";

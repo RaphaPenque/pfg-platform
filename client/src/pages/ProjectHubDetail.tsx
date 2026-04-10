@@ -224,18 +224,18 @@ function OverviewTab({
   const totalDays = project.startDate && project.endDate ? daysBetween(project.startDate, project.endDate) : 0;
   const curDay = project.startDate ? currentDay(project.startDate) : 0;
   const _projectSlots2 = roleSlots.filter(s => s.projectId === project.id);
-  const _projectAssignments2 = assignments.filter(a => a.projectId === project.id && (a.status === "active" || a.status === "flagged"));
+  const FILLED_STATUSES_DETAIL = ["active", "flagged", "confirmed", "pending_confirmation"];
+  const _projectAssignments2 = assignments.filter(a => a.projectId === project.id && FILLED_STATUSES_DETAIL.includes(a.status || ""));
   const _assignedPerSlot2 = new Map<number, number>();
   _projectAssignments2.forEach(a => { if (a.roleSlotId) _assignedPerSlot2.set(a.roleSlotId, (_assignedPerSlot2.get(a.roleSlotId) || 0) + 1); });
   const totalSlotQty = _projectSlots2.reduce((sum, s) => sum + s.quantity, 0);
   const filledCount = _projectSlots2.reduce((sum, s) => sum + Math.min(_assignedPerSlot2.get(s.id) || 0, s.quantity), 0);
   const daysLeft = project.endDate ? Math.max(0, Math.ceil((new Date(project.endDate).getTime() - Date.now()) / 86400000)) : null;
-  // FTE Coverage = % of assigned workers who are FTE (not Temp)
+  // FTE Coverage = FTE workers assigned / total role slots
   const workerMap = new Map(workers.map(w => [w.id, w.status]));
   const assignedWorkerIds = [...new Set(_projectAssignments2.map(a => a.workerId).filter(Boolean))];
   const fteWorkers = assignedWorkerIds.filter(id => workerMap.get(id) === "FTE").length;
-  const totalAssigned = assignedWorkerIds.length;
-  const ftePct = totalAssigned > 0 ? Math.round((fteWorkers / totalAssigned) * 100) : 0;
+  const ftePct = totalSlotQty > 0 ? Math.round((fteWorkers / totalSlotQty) * 100) : 0;
   const equipLabel = EQUIPMENT_TYPES.find(e => e.value === project.equipmentType)?.label || project.equipmentType || "—";
 
   const saveField = useCallback(
