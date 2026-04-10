@@ -1,4 +1,5 @@
 import { useState, useMemo, useCallback } from "react";
+import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
 import { useDashboardData, type DashboardProject, type DashboardRoleSlot, type DashboardAssignment } from "@/hooks/use-dashboard-data";
 import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, EQUIPMENT_TYPES, OEM_OPTIONS, calcPeakHeadcount } from "@/lib/constants";
@@ -7,7 +8,7 @@ import { useAuth } from "@/context/AuthContext";
 import {
   LayoutDashboard, Users, UserCheck, ClipboardList, FileText,
   Truck, FolderOpen, DollarSign, Megaphone, Star,
-  ExternalLink, ChevronRight, AlertTriangle, CheckCircle2, Clock, Activity,
+  ExternalLink, ChevronRight, AlertTriangle, CheckCircle2, Clock, Activity, XCircle, Loader2,
 } from "lucide-react";
 import ProjectRolePlanningTab from "@/components/project/ProjectRolePlanningTab";
 import ProjectTeamTab from "@/components/project/ProjectTeamTab";
@@ -503,6 +504,7 @@ export default function ProjectHubDetail({ params }: { params: { code: string } 
   const { data, isLoading, refetch } = useDashboardData();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState("overview");
+  const [cancelling, setCancelling] = useState(false);
   const canEdit = user?.role === "admin" || user?.role === "resource_manager";
 
   const project = useMemo(
@@ -512,6 +514,27 @@ export default function ProjectHubDetail({ params }: { params: { code: string } 
 
   const roleSlots = data?.roleSlots || [];
   const assignments: DashboardAssignment[] = data?.assignments || [];
+  const { toast } = useToast();
+
+  const handleCancelProject = useCallback(async () => {
+    if (!project) return;
+    const assignedCount = assignments.filter(
+      a => a.projectId === project.id && ["active","confirmed","pending_confirmation","flagged"].includes(a.status || "")
+    ).length;
+    const msg = assignedCount > 0
+      ? `Cancel "${project.name}"? This will release ${assignedCount} assigned worker${assignedCount !== 1 ? "s" : ""} back to available.`
+      : `Cancel "${project.name}"? This cannot be undone.`;
+    if (!window.confirm(msg)) return;
+    setCancelling(true);
+    try {
+      await apiRequest("PATCH", `/api/projects/${project.id}/status`, { status: "cancelled" });
+      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      toast({ title: "Project cancelled", description: assignedCount > 0 ? `${assignedCount} worker${assignedCount !== 1 ? "s" : ""} released back to available.` : undefined });
+    } catch (e: any) {
+      toast({ title: "Error cancelling project", description: e.message || "Unknown error", variant: "destructive" });
+    }
+    setCancelling(false);
+  }, [project, assignments, toast]);
 
   if (isLoading) {
     return (
@@ -560,6 +583,18 @@ export default function ProjectHubDetail({ params }: { params: { code: string } 
           )}
         </div>
         <div className="flex items-center gap-2">
+          {canEdit && project.status !== "cancelled" && project.status !== "completed" && (
+            <button
+              onClick={handleCancelProject}
+              disabled={cancelling}
+              className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg border transition-colors hover:bg-red-50"
+              style={{ borderColor: "var(--red)", color: "var(--red)" }}
+              title="Cancel project and release all assigned workers"
+            >
+              {cancelling ? <Loader2 className="w-3 h-3 animate-spin" /> : <XCircle className="w-3 h-3" />}
+              Cancel Project
+            </button>
+          )}
           <Link href={`/portal/${project.code}`}>
             <span className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg border transition-colors hover:bg-black/5" style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-steel)" }}>
               Customer Portal <ExternalLink className="w-3 h-3" />

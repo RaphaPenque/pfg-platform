@@ -606,10 +606,12 @@ export function registerRoutes(server: Server, app: Express) {
     const project = await storage.getProject(parseInt(req.params.id));
     if (!project) return res.status(404).json({ error: "Project not found" });
 
-    if (status === "cancelled" && project.status === "active") {
+    if (status === "cancelled") {
+      // Release all assigned workers back to available
       const projectAssignments = await storage.getAssignmentsByProject(project.id);
+      const FILLED = ["active", "confirmed", "pending_confirmation", "flagged"];
       for (const a of projectAssignments) {
-        if (a.status === "active") {
+        if (FILLED.includes(a.status || "")) {
           await storage.updateAssignment(a.id, { status: "removed" });
         }
       }
@@ -623,8 +625,16 @@ export function registerRoutes(server: Server, app: Express) {
   app.delete("/api/projects/:id", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
     const project = await storage.getProject(parseInt(req.params.id));
     if (!project) return res.status(404).json({ error: "Project not found" });
-    if (project.status !== "potential") {
-      return res.status(400).json({ error: "Only potential projects can be deleted" });
+    if (project.status !== "potential" && project.status !== "cancelled") {
+      return res.status(400).json({ error: "Only potential or cancelled projects can be deleted. Cancel the project first." });
+    }
+    // Release any remaining assignments before deleting
+    const projectAssignments = await storage.getAssignmentsByProject(project.id);
+    const FILLED = ["active", "confirmed", "pending_confirmation", "flagged"];
+    for (const a of projectAssignments) {
+      if (FILLED.includes(a.status || "")) {
+        await storage.updateAssignment(a.id, { status: "removed" });
+      }
     }
     await storage.deleteProject(project.id);
     await logAudit(req.user!.id, "project.delete", "project", project.id, project.name);
