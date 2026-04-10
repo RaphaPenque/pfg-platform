@@ -1,4 +1,23 @@
-import { useState, useMemo, useRef, useEffect, Fragment } from "react";
+import { useState, useMemo, useRef, useEffect, Fragment, Component } from "react";
+import type { ReactNode, ErrorInfo } from "react";
+
+// ── Error boundary so a bad work-exp row can't crash the whole profile ──
+class WeErrorBoundary extends Component<{ children: ReactNode }, { error: string | null }> {
+  constructor(props: { children: ReactNode }) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(e: Error) { return { error: e.message }; }
+  componentDidCatch(e: Error, info: ErrorInfo) { console.error('[WorkExperience crash]', e, info); }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="p-4 rounded-lg border text-[12px]" style={{ borderColor: "var(--red)", color: "var(--red)", background: "var(--red-bg)" }}>
+          <strong>Work experience failed to load.</strong> Try refreshing the page.
+          <div className="mt-1 opacity-60 text-[10px]">{this.state.error}</div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
 import { useDashboardData, type DashboardWorker, type DashboardAssignment } from "@/hooks/use-dashboard-data";
@@ -992,13 +1011,13 @@ function EditableWeRow({ exp, workerId }: { exp: WorkExperience; workerId: numbe
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
-    siteName: exp.siteName,
-    startDate: exp.startDate || '',
-    endDate: exp.endDate || '',
-    role: exp.role || '',
-    oem: exp.oem || '',
-    equipmentType: exp.equipmentType || '',
-    scopeOfWork: exp.scopeOfWork || '',
+    siteName: exp.siteName ?? '',
+    startDate: exp.startDate ?? '',
+    endDate: exp.endDate ?? '',
+    role: exp.role ?? '',
+    oem: exp.oem ?? '',
+    equipmentType: exp.equipmentType ?? '',
+    scopeOfWork: exp.scopeOfWork ?? '',
   });
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
@@ -1067,7 +1086,7 @@ function EditableWeRow({ exp, workerId }: { exp: WorkExperience; workerId: numbe
               {saving ? '...' : '✓'}
             </button>
             <button
-              onClick={() => { setEditing(false); setForm({ siteName: exp.siteName, startDate: exp.startDate || '', endDate: exp.endDate || '', role: exp.role || '', oem: exp.oem || '', equipmentType: exp.equipmentType || '', scopeOfWork: exp.scopeOfWork || '' }); }}
+              onClick={() => { setEditing(false); setForm({ siteName: exp.siteName ?? '', startDate: exp.startDate ?? '', endDate: exp.endDate ?? '', role: exp.role ?? '', oem: exp.oem ?? '', equipmentType: exp.equipmentType ?? '', scopeOfWork: exp.scopeOfWork ?? '' }); }}
               className="px-2 py-0.5 rounded text-[11px] font-semibold hover:bg-gray-200"
               style={{ color: "var(--pfg-steel)" }}
             >
@@ -1770,7 +1789,9 @@ function WorkerDetail({ worker }: { worker: DashboardWorker }) {
 
         {tab === "experience" && (
           <div>
-            <WorkExperienceTab worker={worker} />
+            <WeErrorBoundary>
+              <WorkExperienceTab worker={worker} />
+            </WeErrorBoundary>
             <div className="mt-3 flex justify-end">
               <button
                 disabled={sqepDownloading}
