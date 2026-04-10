@@ -99,8 +99,11 @@ export interface DashboardProject {
   siteName: string | null;
   siteAddress: string | null;
   sourcingContact: string | null;
+  sourcingContactEmail: string | null;
   customerProjectManager: string | null;
+  customerProjectManagerEmail: string | null;
   siteManager: string | null;
+  siteManagerEmail: string | null;
   scopeOfWork: string | null;
   timesheetSignatoryName: string | null;
   timesheetSignatoryEmail: string | null;

@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect, Fragment, Component } from "react";
+import { useToast } from "@/hooks/use-toast";
 import type { ReactNode, ErrorInfo } from "react";
 
 // ── Error boundary so a bad work-exp row can't crash the whole profile ──
@@ -1006,7 +1007,6 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
 // ───────────────────────────────────────────────────────────────
 // ── Inline-editable work experience row ───────────────────────────────────
 function EditableWeRow({ exp, workerId }: { exp: WorkExperience; workerId: number }) {
-  const qc = useQueryClient();
   const { toast } = useToast();
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1037,7 +1037,7 @@ function EditableWeRow({ exp, workerId }: { exp: WorkExperience; workerId: numbe
         equipmentType: form.equipmentType || null,
         scopeOfWork: form.scopeOfWork || null,
       });
-      await qc.invalidateQueries({ queryKey: ['/api/workers', workerId, 'work-experience'] });
+      await queryClient.invalidateQueries({ queryKey: ['/api/workers', workerId, 'work-experience'] });
       setEditing(false);
     } catch {
       toast({ title: 'Failed to save', variant: 'destructive' });
@@ -1048,7 +1048,7 @@ function EditableWeRow({ exp, workerId }: { exp: WorkExperience; workerId: numbe
 
   async function deleteEntry() {
     await apiRequest('DELETE', `/api/work-experience/${exp.id}`);
-    await qc.invalidateQueries({ queryKey: ['/api/workers', workerId, 'work-experience'] });
+    await queryClient.invalidateQueries({ queryKey: ['/api/workers', workerId, 'work-experience'] });
   }
 
   if (editing) {
