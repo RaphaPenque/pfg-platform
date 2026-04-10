@@ -1,6 +1,10 @@
 #!/bin/sh
 set -e
 
+echo "Type-checking client..."
+./node_modules/.bin/tsc --noEmit --project tsconfig.client.json
+echo "Type check passed."
+
 echo "Building client..."
 ./node_modules/.bin/vite build
 
