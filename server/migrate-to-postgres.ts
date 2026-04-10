@@ -148,6 +148,11 @@ export async function runSchemaUpdates() {
     // ── Assignments — actual days worked (populated by timesheet engine) ──
     await db.execute(sql`ALTER TABLE assignments ADD COLUMN IF NOT EXISTS actual_days_worked INTEGER`);
 
+    // ── Projects — stakeholder email fields ──
+    await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS sourcing_contact_email TEXT`);
+    await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS customer_project_manager_email TEXT`);
+    await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS site_manager_email TEXT`);
+
     console.log("Schema updates applied.");
   } catch (e: any) {
     console.error("Schema update error:", e.message);

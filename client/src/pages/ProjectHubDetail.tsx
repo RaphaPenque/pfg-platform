@@ -252,9 +252,9 @@ function OverviewTab({
 
   // Stakeholder rows
   const stakeholders = [
-    { label: "Sourcing Contact", nameField: "sourcingContact" as const, value: project.sourcingContact },
-    { label: "Customer Project Manager", nameField: "customerProjectManager" as const, value: project.customerProjectManager },
-    { label: "Site Manager", nameField: "siteManager" as const, value: project.siteManager },
+    { label: "Sourcing Contact", nameField: "sourcingContact" as const, value: project.sourcingContact, emailField: "sourcingContactEmail" as const, email: project.sourcingContactEmail },
+    { label: "Customer Project Manager", nameField: "customerProjectManager" as const, value: project.customerProjectManager, emailField: "customerProjectManagerEmail" as const, email: project.customerProjectManagerEmail },
+    { label: "Site Manager", nameField: "siteManager" as const, value: project.siteManager, emailField: "siteManagerEmail" as const, email: project.siteManagerEmail },
     { label: "Timesheet Signatory", nameField: "timesheetSignatoryName" as const, value: project.timesheetSignatoryName, emailField: "timesheetSignatoryEmail" as const, email: project.timesheetSignatoryEmail },
   ];
 
@@ -396,11 +396,7 @@ function OverviewTab({
                       <InlineField value={s.value} onSave={saveField(s.nameField)} canEdit={canEdit} placeholder="Name" emptyLabel="Not set" />
                     </td>
                     <td className="px-4 py-2.5">
-                      {s.emailField ? (
-                        <InlineField value={s.email ?? null} onSave={saveField(s.emailField)} type="email" canEdit={canEdit} placeholder="email@example.com" emptyLabel="—" />
-                      ) : (
-                        <span style={{ color: "#9ca3af" }}>—</span>
-                      )}
+                      <InlineField value={s.email ?? null} onSave={saveField(s.emailField)} type="email" canEdit={canEdit} placeholder="email@example.com" emptyLabel="—" />
                     </td>
                   </tr>
                 ))}

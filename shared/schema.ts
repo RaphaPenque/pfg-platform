@@ -74,8 +74,11 @@ export const projects = pgTable("projects", {
   siteAddress: text("site_address"),
   scopeOfWork: text("scope_of_work"),
   sourcingContact: text("sourcing_contact"),
+  sourcingContactEmail: text("sourcing_contact_email"),
   customerProjectManager: text("customer_project_manager"),
+  customerProjectManagerEmail: text("customer_project_manager_email"),
   siteManager: text("site_manager"),
+  siteManagerEmail: text("site_manager_email"),
   timesheetSignatoryName: text("timesheet_signatory_name"),
   timesheetSignatoryEmail: text("timesheet_signatory_email"),
 });
