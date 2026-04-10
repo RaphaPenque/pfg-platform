@@ -33,6 +33,16 @@ pool.on('error', (err) => {
 
 export const db = drizzle(pool);
 
+/** Warm up the DB connection pool at server start — prevents cold-start delays on first user request */
+export async function warmupDb(): Promise<void> {
+  try {
+    await pool.query('SELECT 1');
+    console.log('[DB] Connection pool warmed up');
+  } catch (err: any) {
+    console.error('[DB] Warmup failed:', err.message);
+  }
+}
+
 export interface IStorage {
   // Workers
   getWorkers(): Promise<Worker[]>;

@@ -97,25 +97,33 @@ export function registerRoutes(server: Server, app: Express) {
     res.json({ message: "If that address is registered, a login link is on its way" });
 
     // Do all async work in background after response is sent
-    setImmediate(async () => {
+    // Wrap in setTimeout(0) instead of setImmediate for broader Node.js compat
+    setTimeout(async () => {
+      console.log(`[MAGIC-LINK] Background job started for ${email}`);
       try {
-        const user = await storage.getUserByEmail(email);
-        if (!user || !user.isActive) return; // silently do nothing
+        const user = await Promise.race([
+          storage.getUserByEmail(email),
+          new Promise<undefined>((_, reject) => setTimeout(() => reject(new Error('DB timeout after 20s')), 20000))
+        ]);
+        if (!user || !user.isActive) {
+          console.log(`[MAGIC-LINK] No active user found for ${email} — skipping`);
+          return;
+        }
 
         const token = crypto.randomUUID();
         const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
         await storage.createMagicLink({ email: email.toLowerCase(), token, expiresAt });
 
         const loginUrl = `https://pfg-platform.onrender.com/#/auth/verify?token=${token}`;
-        console.log(`[MAGIC-LINK] Login link for ${email}: ${loginUrl}`);
+        console.log(`[MAGIC-LINK] Token created for ${email} — sending email`);
 
         const tmpl = magicLinkEmail(user.name, loginUrl);
-        await sendMail({ to: email, subject: tmpl.subject, html: tmpl.html, text: tmpl.text });
-        console.log(`[MAGIC-LINK] Email sent to ${email}`);
+        const sent = await sendMail({ to: email, subject: tmpl.subject, html: tmpl.html, text: tmpl.text });
+        console.log(`[MAGIC-LINK] Email ${sent ? 'sent' : 'FAILED'} for ${email}. Link: ${loginUrl}`);
       } catch (err: any) {
         console.error("[MAGIC-LINK] Background error:", err?.message || err);
       }
-    });
+    }, 0);
   });
 
   app.get("/api/auth/verify", async (req: Request, res: Response) => {

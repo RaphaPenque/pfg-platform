@@ -3,6 +3,7 @@ import cookieParser from "cookie-parser";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { warmupDb } from "./storage";
 
 const app = express();
 const httpServer = createServer(app);
@@ -63,6 +64,9 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Warm up DB connection pool immediately so first user request isn't slow
+  await warmupDb();
+
   // Always run schema updates (creates new tables like payroll_rules if missing)
   try {
     const { runSchemaUpdates, runMigrationIfNeeded } = await import("./migrate-to-postgres");
