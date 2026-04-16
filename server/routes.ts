@@ -859,6 +859,16 @@ export function registerRoutes(server: Server, app: Express) {
     const assignment = await storage.updateAssignment(id, req.body);
     if (!assignment) return res.status(404).json({ error: "Assignment not found" });
     await logAudit(req.user!.id, "assignment.update", "assignment", id);
+
+    // ── Extension cascade: if individual assignment end date extends past project end date, extend project ──
+    if (req.body.endDate && assignment.projectId) {
+      const project = await storage.getProject(assignment.projectId);
+      if (project && project.endDate && req.body.endDate > project.endDate) {
+        await storage.updateProject(assignment.projectId, { endDate: req.body.endDate });
+        console.log(`[EXTENSION] Project ${project.code} end date extended to ${req.body.endDate} via assignment ${id}`);
+      }
+    }
+
     res.json(assignment);
   });
 
@@ -940,6 +950,16 @@ export function registerRoutes(server: Server, app: Express) {
     const slot = await storage.updateRoleSlot(id, req.body);
     if (!slot) return res.status(404).json({ error: "Role slot not found" });
     await logAudit(req.user!.id, "role_slot.update", "role_slot", id);
+
+    // ── Extension cascade: if the new end date pushes past the project end date, extend the project ──
+    if (req.body.endDate && slot.projectId) {
+      const project = await storage.getProject(slot.projectId);
+      if (project && project.endDate && req.body.endDate > project.endDate) {
+        await storage.updateProject(slot.projectId, { endDate: req.body.endDate });
+        console.log(`[EXTENSION] Project ${project.code} end date extended to ${req.body.endDate} via role slot ${id}`);
+      }
+    }
+
     res.json(slot);
   });
 
