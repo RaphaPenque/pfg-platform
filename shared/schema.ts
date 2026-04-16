@@ -358,6 +358,7 @@ export const commentsLog = pgTable("comments_log", {
   enteredAt: timestamp("entered_at").defaultNow(),
   enteredBy: integer("entered_by").notNull().references(() => users.id),
   entry: text("entry").notNull(),
+  logDate: text("log_date"), // yyyy-mm-dd — the date the entry is FOR (may differ from enteredAt for back-dated entries)
 });
 export const insertCommentsLogSchema = createInsertSchema(commentsLog).omit({ id: true });
 export type CommentsLog = typeof commentsLog.$inferSelect;

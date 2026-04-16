@@ -1330,13 +1330,14 @@ export function registerRoutes(server: Server, app: Express) {
 
   app.post("/api/projects/:projectId/comments-log", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
     const projectId = parseInt(req.params.projectId);
-    const { entry, reportId } = req.body;
+    const { entry, reportId, logDate } = req.body;
     if (!entry) return res.status(400).json({ error: "entry required" });
     const logEntry = await storage.createCommentsLogEntry({
       projectId,
       entry,
       enteredBy: req.user!.id,
       reportId: reportId || null,
+      logDate: logDate || new Date().toISOString().slice(0, 10),
     });
     res.status(201).json(logEntry);
   });

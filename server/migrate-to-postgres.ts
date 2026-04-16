@@ -400,6 +400,8 @@ export async function runSchemaUpdates() {
       entered_by INTEGER NOT NULL REFERENCES users(id),
       entry TEXT NOT NULL
     )`);
+    // Back-dated entries support
+    await db.execute(sql`ALTER TABLE comments_log ADD COLUMN IF NOT EXISTS log_date TEXT`);
 
     console.log("Schema updates applied.");
   } catch (e: any) {

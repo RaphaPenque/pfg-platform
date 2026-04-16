@@ -690,7 +690,7 @@ export class PostgresStorage implements IStorage {
   async getCommentsLog(projectId: number): Promise<CommentsLog[]> {
     return db.select().from(commentsLog)
       .where(eq(commentsLog.projectId, projectId))
-      .orderBy(desc(commentsLog.enteredAt));
+      .orderBy(desc(commentsLog.logDate), desc(commentsLog.enteredAt));
   }
 
   async createCommentsLogEntry(data: InsertCommentsLog): Promise<CommentsLog> {

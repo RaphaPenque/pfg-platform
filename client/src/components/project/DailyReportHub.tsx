@@ -15,6 +15,9 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
+import { CalendarIcon } from "lucide-react";
 
 // ─── Props ──────────────────────────────────────────────────────────
 
@@ -327,6 +330,8 @@ function PMReportTab({
   const [newComment, setNewComment] = useState("");
   const [commentSearch, setCommentSearch] = useState("");
   const [addingComment, setAddingComment] = useState(false);
+  const [commentDate, setCommentDate] = useState<Date>(new Date());
+  const [commentDateOpen, setCommentDateOpen] = useState(false);
 
   // Sync local state when report data loads
   useMemo(() => {
@@ -400,7 +405,12 @@ function PMReportTab({
     if (!newComment.trim()) return;
     setAddingComment(true);
     try {
-      await apiRequest("POST", `/api/projects/${project.id}/comments-log`, { text: newComment });
+      const logDate = [
+        commentDate.getFullYear(),
+        String(commentDate.getMonth() + 1).padStart(2, '0'),
+        String(commentDate.getDate()).padStart(2, '0'),
+      ].join('-');
+      await apiRequest("POST", `/api/projects/${project.id}/comments-log`, { entry: newComment, logDate });
       setNewComment("");
       refetchComments();
       toast({ title: "Comment added" });
@@ -415,9 +425,18 @@ function PMReportTab({
     const q = commentSearch.toLowerCase();
     return commentsLog.filter(
       (c: any) =>
-        c.text?.toLowerCase().includes(q) || c.user?.toLowerCase().includes(q)
+        (c.entry || c.text || '').toLowerCase().includes(q) || c.user?.toLowerCase().includes(q)
     );
   }, [commentsLog, commentSearch]);
+
+  // Sort comments by logDate descending (most recent first, back-dated entries slot in correctly)
+  const sortedComments = useMemo(() => {
+    return [...filteredComments].sort((a, b) => {
+      const da = a.logDate || a.date || a.enteredAt || '';
+      const db = b.logDate || b.date || b.enteredAt || '';
+      return db.localeCompare(da);
+    });
+  }, [filteredComments]);
 
   if (reportLoading) {
     return (
@@ -838,24 +857,50 @@ function PMReportTab({
           }
         />
         {/* Add entry */}
-        <div className="flex gap-2 mb-4">
-          <textarea
-            value={newComment}
-            onChange={(e) => setNewComment(e.target.value)}
-            placeholder="Add a comment or concern..."
-            rows={2}
-            className="flex-1 px-3 py-2 rounded-lg border text-[12px] resize-none"
-            style={{ borderColor: "hsl(var(--border))" }}
-          />
-          <button
-            onClick={handleAddComment}
-            disabled={addingComment || !newComment.trim()}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[12px] font-semibold self-start disabled:opacity-50"
-            style={{ background: "var(--pfg-navy)", color: "#fff" }}
-          >
-            {addingComment ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-            Add Entry
-          </button>
+        <div className="flex flex-col gap-2 mb-4">
+          <div className="flex gap-2 items-start">
+            {/* Date picker */}
+            <div className="flex-shrink-0">
+              <Popover open={commentDateOpen} onOpenChange={setCommentDateOpen}>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg border text-[12px] font-medium hover:border-pfg-navy transition-colors"
+                    style={{ borderColor: "hsl(var(--border))", minWidth: 120, background: "hsl(var(--card))" }}
+                  >
+                    <CalendarIcon className="w-3.5 h-3.5" style={{ color: "var(--pfg-steel)" }} />
+                    <span>{commentDate.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</span>
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start" style={{ zIndex: 99999 }}>
+                  <Calendar
+                    mode="single"
+                    selected={commentDate}
+                    onSelect={(d) => { if (d) { setCommentDate(d); setCommentDateOpen(false); } }}
+                    initialFocus
+                    defaultMonth={commentDate}
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+            <textarea
+              value={newComment}
+              onChange={(e) => setNewComment(e.target.value)}
+              placeholder="Add a comment or concern..."
+              rows={2}
+              className="flex-1 px-3 py-2 rounded-lg border text-[12px] resize-none"
+              style={{ borderColor: "hsl(var(--border))" }}
+            />
+            <button
+              onClick={handleAddComment}
+              disabled={addingComment || !newComment.trim()}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-[12px] font-semibold self-start disabled:opacity-50"
+              style={{ background: "var(--pfg-navy)", color: "#fff" }}
+            >
+              {addingComment ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+              Add Entry
+            </button>
+          </div>
         </div>
         {/* Search */}
         <div className="relative mb-3">
@@ -872,17 +917,17 @@ function PMReportTab({
         {/* Log */}
         {commentsLoading ? (
           <Skeleton className="h-20" />
-        ) : filteredComments.length === 0 ? (
+        ) : sortedComments.length === 0 ? (
           <EmptyState message="No comments logged yet." />
         ) : (
           <div className="space-y-2 max-h-64 overflow-y-auto">
-            {filteredComments.map((c: any, i: number) => (
+            {sortedComments.map((c: any, i: number) => (
               <div key={i} className="rounded-lg px-3 py-2 text-[12px]" style={{ background: "hsl(var(--muted))" }}>
                 <div className="flex gap-2 mb-0.5">
                   <span className="font-semibold text-pfg-navy">{c.user || "Unknown"}</span>
-                  <span style={{ color: "var(--pfg-steel)" }}>{c.date ? fmtDate(c.date) : ""}</span>
+                  <span style={{ color: "var(--pfg-steel)" }}>{fmtDate(c.logDate || c.date)}</span>
                 </div>
-                <p>{c.text}</p>
+                <p>{c.entry || c.text}</p>
               </div>
             ))}
           </div>
