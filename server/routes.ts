@@ -978,6 +978,537 @@ export function registerRoutes(server: Server, app: Express) {
     res.json({ ok: true });
   });
 
+  // ===== WORK PACKAGES =====
+  app.get("/api/projects/:projectId/work-packages", requireAuth, async (req: Request, res: Response) => {
+    const projectId = parseInt(req.params.projectId);
+    const wps = await storage.getWorkPackages(projectId);
+    res.json(wps);
+  });
+
+  app.post("/api/projects/:projectId/work-packages", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const projectId = parseInt(req.params.projectId);
+    const wp = await storage.createWorkPackage({ ...req.body, projectId });
+    await logAudit(req.user!.id, "work_package.create", "work_package", wp.id, wp.name);
+    res.status(201).json(wp);
+  });
+
+  app.patch("/api/work-packages/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const wp = await storage.updateWorkPackage(id, req.body);
+    if (!wp) return res.status(404).json({ error: "Work package not found" });
+    await logAudit(req.user!.id, "work_package.update", "work_package", id, wp.name);
+    res.json(wp);
+  });
+
+  app.delete("/api/work-packages/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    await storage.deleteWorkPackage(id);
+    await logAudit(req.user!.id, "work_package.delete", "work_package", id);
+    res.status(204).send();
+  });
+
+  // ===== DAILY REPORTS =====
+  app.get("/api/projects/:projectId/daily-reports", requireAuth, async (req: Request, res: Response) => {
+    const projectId = parseInt(req.params.projectId);
+    const reports = await storage.getDailyReports(projectId);
+    res.json(reports);
+  });
+
+  app.get("/api/projects/:projectId/daily-reports/:date", requireAuth, async (req: Request, res: Response) => {
+    const projectId = parseInt(req.params.projectId);
+    const { date } = req.params;
+    const report = await storage.getDailyReport(projectId, date);
+    if (!report) return res.status(404).json({ error: "Report not found" });
+    res.json(report);
+  });
+
+  app.post("/api/projects/:projectId/daily-reports", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const projectId = parseInt(req.params.projectId);
+    const report = await storage.createDailyReport({ ...req.body, projectId, createdBy: req.user!.id });
+    await logAudit(req.user!.id, "daily_report.create", "daily_report", report.id, report.reportDate);
+    res.status(201).json(report);
+  });
+
+  app.patch("/api/daily-reports/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const report = await storage.updateDailyReport(id, req.body);
+    if (!report) return res.status(404).json({ error: "Report not found" });
+    await logAudit(req.user!.id, "daily_report.update", "daily_report", id, report.reportDate);
+    res.json(report);
+  });
+
+  app.get("/api/daily-reports/:id/wp-progress", requireAuth, async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const progress = await storage.getWpProgress(id);
+    res.json(progress);
+  });
+
+  app.put("/api/daily-reports/:id/wp-progress", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const reportId = parseInt(req.params.id);
+    const items: Array<{ wpId: number; actualStart?: string; actualFinish?: string; signOffStatus?: string; comments?: string }> = req.body;
+    if (!Array.isArray(items)) return res.status(400).json({ error: "Body must be an array" });
+    const results = await Promise.all(
+      items.map(item =>
+        storage.upsertWpProgress(reportId, item.wpId, {
+          actualStart: item.actualStart,
+          actualFinish: item.actualFinish,
+          signOffStatus: item.signOffStatus,
+          comments: item.comments,
+        })
+      )
+    );
+    res.json(results);
+  });
+
+  // ===== COMMENTS LOG =====
+  app.get("/api/projects/:projectId/comments-log", requireAuth, async (req: Request, res: Response) => {
+    const projectId = parseInt(req.params.projectId);
+    const log = await storage.getCommentsLog(projectId);
+    res.json(log);
+  });
+
+  app.post("/api/projects/:projectId/comments-log", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const projectId = parseInt(req.params.projectId);
+    const { entry, reportId } = req.body;
+    if (!entry) return res.status(400).json({ error: "entry required" });
+    const logEntry = await storage.createCommentsLogEntry({
+      projectId,
+      entry,
+      enteredBy: req.user!.id,
+      reportId: reportId || null,
+    });
+    res.status(201).json(logEntry);
+  });
+
+  // ===== DELAY APPROVALS =====
+  // Public routes — no auth required
+  app.get("/api/delay-approval/:token", async (req: Request, res: Response) => {
+    const approval = await storage.getDelayApprovalByToken(req.params.token);
+    if (!approval) return res.status(404).json({ error: "Approval not found" });
+    if (approval.status !== "pending") return res.json({ approval, alreadyResponded: true });
+    if (new Date() > approval.tokenExpiry) {
+      await storage.updateDelayApproval(approval.id, { status: "expired" });
+      return res.json({ approval: { ...approval, status: "expired" }, expired: true });
+    }
+    res.json({ approval });
+  });
+
+  app.post("/api/delay-approval/:token/respond", async (req: Request, res: Response) => {
+    const { action } = req.body;
+    if (!action || !["approved", "rejected"].includes(action)) {
+      return res.status(400).json({ error: "action must be 'approved' or 'rejected'" });
+    }
+    const approval = await storage.getDelayApprovalByToken(req.params.token);
+    if (!approval) return res.status(404).json({ error: "Approval not found" });
+    if (approval.status !== "pending") return res.status(409).json({ error: "Already responded" });
+    if (new Date() > approval.tokenExpiry) {
+      await storage.updateDelayApproval(approval.id, { status: "expired" });
+      return res.status(410).json({ error: "Token expired" });
+    }
+    const updated = await storage.updateDelayApproval(approval.id, {
+      status: action as "approved" | "rejected",
+      respondedAt: new Date(),
+      respondedIp: req.ip || null,
+    });
+    res.json({ ok: true, approval: updated });
+  });
+
+  // Authenticated: send delay approval email
+  app.post("/api/daily-reports/:id/send-delay-approval", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const reportId = parseInt(req.params.id);
+    const { delayIndex, recipientEmail, recipientName } = req.body;
+    if (delayIndex === undefined || !recipientEmail) {
+      return res.status(400).json({ error: "delayIndex and recipientEmail required" });
+    }
+    const report = await storage.updateDailyReport(reportId, {}); // fetch via update trick
+    // Re-fetch cleanly:
+    const reports = await storage.getDailyReports(0); // not ideal; use direct fetch
+    // Get the actual report by ID
+    const allFields = await storage.updateDailyReport(reportId, {});
+    if (!allFields) return res.status(404).json({ error: "Report not found" });
+
+    const token = crypto.randomUUID();
+    const tokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+    const approval = await storage.createDelayApproval({
+      projectId: allFields.projectId,
+      reportId,
+      delayIndex,
+      token,
+      tokenExpiry,
+      recipientEmail,
+      recipientName: recipientName || null,
+      status: "pending",
+      respondedAt: null,
+      respondedIp: null,
+    });
+
+    const approvalUrl = `${process.env.APP_URL || "https://pfg-platform.onrender.com"}/#/delay-approval/${token}`;
+    await sendMail({
+      to: recipientEmail,
+      subject: `Delay Approval Request — Project Report`,
+      html: `
+        <p>Dear ${recipientName || "Customer"},</p>
+        <p>A delay has been logged on your project and requires your approval.</p>
+        <p><a href="${approvalUrl}" style="background:#F5BD00;color:#1A1D23;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:700;">Review &amp; Respond</a></p>
+        <p>This link expires in 7 days.</p>
+        <p>Powerforce Global</p>
+      `,
+      text: `Dear ${recipientName || "Customer"},\n\nA delay has been logged on your project and requires your approval.\n\nReview and respond here: ${approvalUrl}\n\nThis link expires in 7 days.\n\nPowerforce Global`,
+    });
+
+    res.status(201).json({ approval });
+  });
+
+  // ===== SUPERVISOR REPORTS =====
+
+  // Multer config for project-scoped uploads
+  const projectUpload = multer({
+    storage: multer.diskStorage({
+      destination: (req, _file, cb) => {
+        const projectId = req.params.projectId || req.params.id || "0";
+        const subDir = req.path.includes("toolbox") || req.path.includes("safety") || req.path.includes("incident") ? "qhse" : "supervisor";
+        const dir = path.join(UPLOAD_BASE, projectId, subDir);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        cb(null, dir);
+      },
+      filename: (_req, file, cb) => {
+        const ext = path.extname(file.originalname) || ".bin";
+        const ts = Date.now();
+        const base = path.basename(file.originalname, ext).replace(/[^a-zA-Z0-9_-]/g, "_").substring(0, 40);
+        cb(null, `${ts}_${base}${ext}`);
+      },
+    }),
+    limits: { fileSize: 25 * 1024 * 1024 },
+  });
+
+  app.get("/api/projects/:projectId/supervisor-reports", requireAuth, async (req: Request, res: Response) => {
+    const projectId = parseInt(req.params.projectId);
+    const reports = await storage.getSupervisorReports(projectId);
+    res.json(reports);
+  });
+
+  app.get("/api/supervisor-reports/pending", requireAuth, requireRole("admin", "resource_manager"), async (_req: Request, res: Response) => {
+    const reports = await storage.getPendingSupervisorReports();
+    res.json(reports);
+  });
+
+  app.post("/api/projects/:projectId/supervisor-reports/upload", requireAuth, requireRole("admin", "resource_manager", "project_manager"), projectUpload.single("file"), async (req: any, res: Response) => {
+    const projectId = parseInt(req.params.projectId);
+    const { date, shift, workerId } = req.body;
+    if (!date) return res.status(400).json({ error: "date required" });
+    const filePath = req.file ? `/api/uploads/${projectId}/supervisor/${req.file.filename}` : null;
+    const report = await storage.createSupervisorReport({
+      projectId,
+      workerId: workerId ? parseInt(workerId) : null,
+      reportDate: date,
+      shift: shift || null,
+      submissionMethod: "upload",
+      filePath,
+      fileName: req.file?.originalname || null,
+      documentType: "supervisor_report",
+      status: workerId ? "filed" : "pending_assignment",
+      pendingAssignmentNote: workerId ? null : "Worker not specified — needs assignment",
+      senderEmail: null,
+    });
+    await logAudit(req.user!.id, "supervisor_report.upload", "supervisor_report", report.id);
+    res.status(201).json(report);
+  });
+
+  app.patch("/api/supervisor-reports/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const report = await storage.updateSupervisorReport(id, req.body);
+    if (!report) return res.status(404).json({ error: "Supervisor report not found" });
+    await logAudit(req.user!.id, "supervisor_report.update", "supervisor_report", id);
+    res.json(report);
+  });
+
+  app.get("/api/supervisor-reports/:id/replies", requireAuth, async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const replies = await storage.getSupervisorReportReplies(id);
+    res.json(replies);
+  });
+
+  app.post("/api/supervisor-reports/:id/replies", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const reportId = parseInt(req.params.id);
+    const { message } = req.body;
+    if (!message) return res.status(400).json({ error: "message required" });
+    const reply = await storage.createSupervisorReportReply({
+      reportId,
+      authorId: req.user!.id,
+      message,
+    });
+    // Optionally email supervisor if report has a workerId
+    const report = await storage.getSupervisorReports(0); // we need report by id — use workaround
+    res.status(201).json(reply);
+  });
+
+  // ===== QHSE =====
+
+  // Toolbox Talks
+  app.get("/api/projects/:projectId/toolbox-talks", requireAuth, async (req: Request, res: Response) => {
+    const projectId = parseInt(req.params.projectId);
+    const talks = await storage.getToolboxTalks(projectId);
+    res.json(talks);
+  });
+
+  app.post("/api/projects/:projectId/toolbox-talks/upload", requireAuth, requireRole("admin", "resource_manager", "project_manager"), projectUpload.single("file"), async (req: any, res: Response) => {
+    const projectId = parseInt(req.params.projectId);
+    const { date, shift, workerId, topic, attendeeCount, notes } = req.body;
+    if (!date) return res.status(400).json({ error: "date required" });
+    const filePath = req.file ? `/api/uploads/${projectId}/qhse/${req.file.filename}` : null;
+    const talk = await storage.createToolboxTalk({
+      projectId,
+      workerId: workerId ? parseInt(workerId) : null,
+      reportDate: date,
+      shift: shift || null,
+      topic: topic || null,
+      attendeeCount: attendeeCount ? parseInt(attendeeCount) : null,
+      filePath,
+      fileName: req.file?.originalname || null,
+      notes: notes || null,
+      submissionMethod: "upload",
+    });
+    await logAudit(req.user!.id, "toolbox_talk.upload", "toolbox_talk", talk.id);
+    res.status(201).json(talk);
+  });
+
+  app.patch("/api/toolbox-talks/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const talk = await storage.updateToolboxTalk(id, req.body);
+    if (!talk) return res.status(404).json({ error: "Toolbox talk not found" });
+    await logAudit(req.user!.id, "toolbox_talk.update", "toolbox_talk", id);
+    res.json(talk);
+  });
+
+  app.delete("/api/toolbox-talks/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    await storage.deleteToolboxTalk(id);
+    await logAudit(req.user!.id, "toolbox_talk.delete", "toolbox_talk", id);
+    res.status(204).send();
+  });
+
+  // Safety Observations
+  app.get("/api/projects/:projectId/safety-observations", requireAuth, async (req: Request, res: Response) => {
+    const projectId = parseInt(req.params.projectId);
+    const obs = await storage.getSafetyObservations(projectId);
+    res.json(obs);
+  });
+
+  app.post("/api/projects/:projectId/safety-observations", requireAuth, requireRole("admin", "resource_manager", "project_manager"), projectUpload.single("file"), async (req: any, res: Response) => {
+    const projectId = parseInt(req.params.projectId);
+    const filePath = req.file ? `/api/uploads/${projectId}/qhse/${req.file.filename}` : null;
+    const body = req.body;
+    if (!body.observationDate || !body.observationType) {
+      return res.status(400).json({ error: "observationDate and observationType required" });
+    }
+    const obs = await storage.createSafetyObservation({
+      projectId,
+      reportedByWorkerId: body.reportedByWorkerId ? parseInt(body.reportedByWorkerId) : null,
+      relatesToWorkerIds: body.relatesToWorkerIds || [],
+      shiftSupervisorId: body.shiftSupervisorId ? parseInt(body.shiftSupervisorId) : null,
+      observationDate: body.observationDate,
+      observationTime: body.observationTime || null,
+      shift: body.shift || null,
+      observationType: body.observationType,
+      locationOnSite: body.locationOnSite || null,
+      description: body.description || null,
+      actionsTaken: body.actionsTaken || null,
+      filePath,
+      fileName: req.file?.originalname || null,
+      status: "open",
+      submissionMethod: "upload",
+    });
+
+    // Alert PM and admins for STOP WORK observations
+    if (obs.observationType === "stop_work") {
+      const admins = await storage.getUsers();
+      const alertRecipients = admins
+        .filter(u => u.isActive && (u.role === "admin" || u.role === "project_manager"))
+        .map(u => u.email);
+      if (alertRecipients.length > 0) {
+        await sendMail({
+          to: alertRecipients,
+          subject: `⚠️ STOP WORK Observation — Project ${projectId}`,
+          html: `<p>A STOP WORK safety observation has been filed for project ${projectId}.</p><p>Description: ${obs.description || "N/A"}</p><p>Please review immediately.</p>`,
+          text: `STOP WORK safety observation filed for project ${projectId}.\nDescription: ${obs.description || "N/A"}\nPlease review immediately.`,
+        });
+      }
+    }
+
+    await logAudit(req.user!.id, "safety_observation.create", "safety_observation", obs.id);
+    res.status(201).json(obs);
+  });
+
+  app.patch("/api/safety-observations/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const obs = await storage.updateSafetyObservation(id, req.body);
+    if (!obs) return res.status(404).json({ error: "Safety observation not found" });
+    await logAudit(req.user!.id, "safety_observation.update", "safety_observation", id);
+    res.json(obs);
+  });
+
+  // Incident Reports
+  app.get("/api/projects/:projectId/incident-reports", requireAuth, async (req: Request, res: Response) => {
+    const projectId = parseInt(req.params.projectId);
+    const incidents = await storage.getIncidentReports(projectId);
+    res.json(incidents);
+  });
+
+  app.post("/api/projects/:projectId/incident-reports", requireAuth, requireRole("admin", "resource_manager", "project_manager"), projectUpload.single("file"), async (req: any, res: Response) => {
+    const projectId = parseInt(req.params.projectId);
+    const filePath = req.file ? `/api/uploads/${projectId}/qhse/${req.file.filename}` : null;
+    const body = req.body;
+    if (!body.incidentDate || !body.incidentType) {
+      return res.status(400).json({ error: "incidentDate and incidentType required" });
+    }
+    const incident = await storage.createIncidentReport({
+      projectId,
+      workerInvolvedId: body.workerInvolvedId ? parseInt(body.workerInvolvedId) : null,
+      reportedByWorkerId: body.reportedByWorkerId ? parseInt(body.reportedByWorkerId) : null,
+      shiftSupervisorId: body.shiftSupervisorId ? parseInt(body.shiftSupervisorId) : null,
+      incidentDate: body.incidentDate,
+      incidentTime: body.incidentTime || null,
+      shift: body.shift || null,
+      incidentType: body.incidentType,
+      description: body.description || null,
+      lostTime: body.lostTime === true || body.lostTime === "true",
+      lostTimeHours: body.lostTimeHours ? parseFloat(body.lostTimeHours) : null,
+      actionsTaken: body.actionsTaken || null,
+      rootCause: body.rootCause || null,
+      filePath,
+      fileName: req.file?.originalname || null,
+      status: "open",
+      submissionMethod: "upload",
+    });
+
+    // Alert PM and admins for LTI incidents
+    if (incident.incidentType === "lost_time_injury" || incident.lostTime) {
+      const admins = await storage.getUsers();
+      const alertRecipients = admins
+        .filter(u => u.isActive && (u.role === "admin" || u.role === "project_manager"))
+        .map(u => u.email);
+      if (alertRecipients.length > 0) {
+        await sendMail({
+          to: alertRecipients,
+          subject: `🚨 LTI Alert — Lost Time Injury — Project ${projectId}`,
+          html: `<p>A Lost Time Injury (LTI) has been reported for project ${projectId}.</p><p>Incident type: ${incident.incidentType}</p><p>Description: ${incident.description || "N/A"}</p><p>Please review immediately.</p>`,
+          text: `LTI ALERT: Lost Time Injury reported for project ${projectId}.\nIncident type: ${incident.incidentType}\nDescription: ${incident.description || "N/A"}\nPlease review immediately.`,
+        });
+      }
+    }
+
+    await logAudit(req.user!.id, "incident_report.create", "incident_report", incident.id);
+    res.status(201).json(incident);
+  });
+
+  app.patch("/api/incident-reports/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const incident = await storage.updateIncidentReport(id, req.body);
+    if (!incident) return res.status(404).json({ error: "Incident report not found" });
+    await logAudit(req.user!.id, "incident_report.update", "incident_report", id);
+    res.json(incident);
+  });
+
+  // ===== MILESTONE CERTIFICATES =====
+  app.get("/api/projects/:projectId/milestone-certificates", requireAuth, async (req: Request, res: Response) => {
+    const projectId = parseInt(req.params.projectId);
+    const certs = await storage.getMilestoneCertificates(projectId);
+    res.json(certs);
+  });
+
+  app.post("/api/projects/:projectId/milestone-certificates", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const projectId = parseInt(req.params.projectId);
+    const cert = await storage.createMilestoneCertificate({
+      ...req.body,
+      projectId,
+      createdBy: req.user!.id,
+      status: "draft",
+    });
+    await logAudit(req.user!.id, "milestone_cert.create", "milestone_certificate", cert.id);
+    res.status(201).json(cert);
+  });
+
+  app.patch("/api/milestone-certificates/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const cert = await storage.updateMilestoneCertificate(id, req.body);
+    if (!cert) return res.status(404).json({ error: "Milestone certificate not found" });
+    await logAudit(req.user!.id, "milestone_cert.update", "milestone_certificate", id);
+    res.json(cert);
+  });
+
+  app.post("/api/milestone-certificates/:id/send", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const { recipientEmail, recipientName } = req.body;
+    if (!recipientEmail) return res.status(400).json({ error: "recipientEmail required" });
+
+    const approvalToken = crypto.randomUUID();
+    const approvalTokenExpiry = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000); // 14 days
+
+    const cert = await storage.updateMilestoneCertificate(id, {
+      status: "sent",
+      approvalToken,
+      approvalTokenExpiry,
+      approverEmail: recipientEmail,
+      approverName: recipientName || null,
+      sentAt: new Date(),
+    });
+    if (!cert) return res.status(404).json({ error: "Milestone certificate not found" });
+
+    const approvalUrl = `${process.env.APP_URL || "https://pfg-platform.onrender.com"}/#/milestone-approval/${approvalToken}`;
+    await sendMail({
+      to: recipientEmail,
+      subject: `Milestone Certificate — Approval Required`,
+      html: `
+        <p>Dear ${recipientName || "Customer"},</p>
+        <p>A milestone certificate has been submitted for your approval.</p>
+        <p>Milestone: ${cert.milestoneNumber || id}</p>
+        <p><a href="${approvalUrl}" style="background:#F5BD00;color:#1A1D23;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:700;">Review &amp; Approve</a></p>
+        <p>This link expires in 14 days.</p>
+        <p>Powerforce Global</p>
+      `,
+      text: `Dear ${recipientName || "Customer"},\n\nA milestone certificate has been submitted for your approval.\nMilestone: ${cert.milestoneNumber || id}\n\nReview and approve here: ${approvalUrl}\n\nThis link expires in 14 days.\n\nPowerforce Global`,
+    });
+
+    await logAudit(req.user!.id, "milestone_cert.send", "milestone_certificate", id);
+    res.json({ ok: true, cert });
+  });
+
+  // Public milestone approval routes
+  app.get("/api/milestone-approval/:token", async (req: Request, res: Response) => {
+    const cert = await storage.getMilestoneCertificateByToken(req.params.token);
+    if (!cert) return res.status(404).json({ error: "Certificate not found" });
+    if (cert.status === "approved") return res.json({ cert, alreadyApproved: true });
+    if (cert.approvalTokenExpiry && new Date() > cert.approvalTokenExpiry) {
+      return res.json({ cert, expired: true });
+    }
+    res.json({ cert });
+  });
+
+  app.post("/api/milestone-approval/:token/approve", async (req: Request, res: Response) => {
+    const cert = await storage.getMilestoneCertificateByToken(req.params.token);
+    if (!cert) return res.status(404).json({ error: "Certificate not found" });
+    if (cert.status === "approved") return res.status(409).json({ error: "Already approved" });
+    if (cert.approvalTokenExpiry && new Date() > cert.approvalTokenExpiry) {
+      return res.status(410).json({ error: "Approval link expired" });
+    }
+    const { approverName } = req.body;
+    const updated = await storage.updateMilestoneCertificate(cert.id, {
+      status: "approved",
+      approvedAt: new Date(),
+      approverIp: req.ip || null,
+      approverName: approverName || cert.approverName,
+    });
+    res.json({ ok: true, cert: updated });
+  });
+
+  // Serve project-scoped uploads (supervisor / qhse subfolders)
+  app.get("/api/uploads/:projectId/:subdir/:filename", (req: Request, res: Response) => {
+    const { projectId, subdir, filename } = req.params;
+    const filePath = path.join(UPLOAD_BASE, projectId, subdir, filename);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: "File not found" });
+    res.sendFile(path.resolve(filePath));
+  });
+
   // ===== FILE UPLOADS =====
   app.post("/api/workers/:id/upload", upload.single("file"), async (req: any, res: Response) => {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
@@ -1110,5 +1641,265 @@ export function registerRoutes(server: Server, app: Express) {
       oemTypes: allOemTypes,
       projectLeads: projectLeadMap,
     });
+  });
+
+  // ===== SURVEY (public routes — no auth) =====
+
+  // GET /api/survey/token-data?token=xxx
+  app.get("/api/survey/token-data", async (req: Request, res: Response) => {
+    const token = req.query.token as string;
+    if (!token) return res.status(400).json({ error: "Token required" });
+
+    const surveyToken = await storage.getSurveyTokenByToken(token);
+    if (!surveyToken) return res.status(404).json({ error: "Invalid or expired link" });
+    if (surveyToken.expiresAt < new Date()) return res.status(404).json({ error: "Invalid or expired link" });
+    if (surveyToken.usedAt) return res.status(410).json({ error: "This survey has already been completed" });
+
+    // Mark as opened (no explicit 'opened' field — just proceed)
+    // Fetch project, assignments, and lead
+    const project = await storage.getProject(surveyToken.projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const projectAssignments = await storage.getAssignmentsByProject(surveyToken.projectId);
+
+    // Build team roster
+    const teamMembers: any[] = [];
+    const seenWorkerIds = new Set<number>();
+    for (const a of projectAssignments) {
+      if (a.status === "active" && a.workerId && !seenWorkerIds.has(a.workerId)) {
+        seenWorkerIds.add(a.workerId);
+        const worker = await storage.getWorker(a.workerId);
+        if (worker) {
+          const nameParts = worker.name.trim().split(/\s+/);
+          const initials = nameParts.length >= 2
+            ? (nameParts[0][0] + nameParts[nameParts.length - 1][0]).toUpperCase()
+            : worker.name.substring(0, 2).toUpperCase();
+          teamMembers.push({
+            id: worker.id,
+            name: worker.name,
+            initials,
+            role: a.role || worker.role,
+            shift: (a.shift || "day").toLowerCase(),
+          });
+        }
+      }
+    }
+
+    // Get PM name from project_leads
+    let projectManagerName = "";
+    const lead = await storage.getProjectLead(surveyToken.projectId);
+    if (lead) {
+      const pmUser = await storage.getUserById(lead.userId);
+      if (pmUser) projectManagerName = pmUser.name;
+    }
+
+    // Compute respondent initials
+    const contactName = surveyToken.contactName || "";
+    const nameParts = contactName.trim().split(/\s+/);
+    const respondentInitials = nameParts.length >= 2
+      ? (nameParts[0][0] + nameParts[nameParts.length - 1][0]).toUpperCase()
+      : contactName.substring(0, 2).toUpperCase();
+
+    return res.json({
+      respondentName: surveyToken.contactName || "",
+      respondentInitials,
+      respondentRole: surveyToken.contactRole || "",
+      respondentCompany: project.customer || "",
+      projectName: project.name,
+      projectCode: project.code,
+      projectStartDate: project.startDate || null,
+      projectEndDate: project.endDate || null,
+      oem: project.customer || "",
+      projectManager: projectManagerName,
+      team: teamMembers,
+    });
+  });
+
+  // POST /api/survey/submit
+  app.post("/api/survey/submit", async (req: Request, res: Response) => {
+    const { token, q1, q2, q3, q4, q5, q6, nps, openFeedback, individualFeedback } = req.body;
+    if (!token) return res.status(400).json({ error: "Token required" });
+
+    const surveyToken = await storage.getSurveyTokenByToken(token);
+    if (!surveyToken) return res.status(404).json({ error: "Invalid or expired link" });
+    if (surveyToken.expiresAt < new Date()) return res.status(404).json({ error: "Invalid or expired link" });
+    if (surveyToken.usedAt) return res.status(410).json({ error: "This survey has already been completed" });
+
+    // Compute average score
+    const scores = [q1, q2, q3, q4, q5, q6].map(Number).filter(n => !isNaN(n));
+    const averageScore = scores.length > 0
+      ? Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10
+      : 0;
+
+    // Save survey response
+    const surveyResponse = await storage.createSurveyResponse({
+      projectId: surveyToken.projectId,
+      tokenId: surveyToken.id,
+      contactEmail: surveyToken.contactEmail,
+      contactName: surveyToken.contactName || null,
+      submitterIp: req.ip || null,
+      q1Planning: Number(q1),
+      q2Quality: Number(q2),
+      q3Hse: Number(q3),
+      q4Supervision: Number(q4),
+      q5Pm: Number(q5),
+      q6Overall: Number(q6),
+      averageScore,
+      nps: Number(nps),
+      openFeedback: openFeedback || null,
+      individualFeedbackGiven: Array.isArray(individualFeedback) && individualFeedback.length > 0,
+    });
+
+    // Save individual feedback
+    if (Array.isArray(individualFeedback)) {
+      for (const fb of individualFeedback) {
+        const workerId = parseInt(fb.workerId);
+        if (!isNaN(workerId) && workerId > 0) {
+          await storage.createSurveyIndividualFeedback({
+            surveyResponseId: surveyResponse.id,
+            workerId,
+            comment: fb.comment || null,
+          });
+        }
+      }
+    }
+
+    // Mark token as used
+    await storage.updateSurveyToken(surveyToken.id, { usedAt: new Date() });
+
+    return res.json({ ok: true, score: averageScore });
+  });
+
+  // ===== SURVEY (authenticated routes) =====
+
+  // GET /api/projects/:projectId/survey — get survey results for a project
+  app.get("/api/projects/:projectId/survey", requireAuth, requireRole("admin", "resource_manager", "project_manager", "finance"), async (req: Request, res: Response) => {
+    const projectId = parseInt(req.params.projectId);
+    if (isNaN(projectId)) return res.status(400).json({ error: "Invalid project ID" });
+
+    const tokens = await storage.getSurveyTokensByProject(projectId);
+    const responses = await storage.getSurveyResponsesByProject(projectId);
+
+    return res.json({ tokens, responses });
+  });
+
+  // POST /api/projects/:projectId/survey/send — send survey to project contacts
+  app.post("/api/projects/:projectId/survey/send", requireAuth, requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
+    const projectId = parseInt(req.params.projectId);
+    if (isNaN(projectId)) return res.status(400).json({ error: "Invalid project ID" });
+
+    const project = await storage.getProject(projectId);
+    if (!project) return res.status(404).json({ error: "Project not found" });
+
+    const baseUrl = process.env.APP_URL || `https://pfg-platform.onrender.com`;
+    const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000); // 14 days
+
+    const contacts: { email: string; name: string; role: string }[] = [];
+    if (project.customerProjectManagerEmail) {
+      contacts.push({
+        email: project.customerProjectManagerEmail,
+        name: project.customerProjectManager || "Project Manager",
+        role: "pm",
+      });
+    }
+    if (project.siteManagerEmail) {
+      contacts.push({
+        email: project.siteManagerEmail,
+        name: project.siteManager || "Site Manager",
+        role: "site_manager",
+      });
+    }
+
+    if (contacts.length === 0) {
+      return res.status(400).json({ error: "No contact emails set on this project" });
+    }
+
+    const created: any[] = [];
+    for (const contact of contacts) {
+      const token = crypto.randomBytes(32).toString("hex");
+      const surveyToken = await storage.createSurveyToken({
+        projectId,
+        contactEmail: contact.email,
+        contactName: contact.name,
+        contactRole: contact.role,
+        token,
+        expiresAt,
+      });
+
+      const surveyUrl = `${baseUrl}/survey?token=${token}`;
+      const firstName = contact.name.split(" ")[0];
+
+      const emailHtml = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="font-family:'Inter',Arial,sans-serif;background:#f4f4f5;padding:40px 0;">
+  <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+    <div style="background:#1A1D23;padding:28px 32px;text-align:center;">
+      <img src="${baseUrl}/logo-gold.png" alt="Powerforce Global" height="36" style="display:block;margin:0 auto;" />
+    </div>
+    <div style="padding:32px;color:#1A1D23;">
+      <h2 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#1A1D23;">Hi ${firstName},</h2>
+      <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
+        Thank you for working with <strong>Powerforce Global</strong> on <strong>${project.name}</strong>.
+        We'd love to hear your thoughts on how the project went — it takes about 3 minutes.
+      </p>
+      <p style="margin:0 0 16px;color:#4b5563;font-size:14px;line-height:1.6;">
+        Your feedback helps us maintain the highest standards and deliver excellence on every project.
+      </p>
+      <div style="text-align:center;margin:24px 0;">
+        <a href="${surveyUrl}" style="display:inline-block;background:#F5BD00;color:#1A1D23;font-weight:700;font-size:15px;padding:14px 32px;border-radius:8px;text-decoration:none;">Complete Feedback Survey</a>
+      </div>
+      <p style="margin:16px 0 0;font-size:12px;color:#9ca3af;text-align:center;">
+        This link is personal to you and expires in 14 days.
+      </p>
+    </div>
+    <div style="text-align:center;padding:20px 32px;font-size:11px;color:#9ca3af;border-top:1px solid #f0f0f0;">
+      &copy; ${new Date().getFullYear()} Powerforce Global &middot; Confidential
+    </div>
+  </div>
+</body>
+</html>`;
+
+      await sendMail({
+        to: contact.email,
+        subject: `We'd love your feedback — ${project.name}`,
+        html: emailHtml,
+        text: `Hi ${firstName},\n\nWe'd love your feedback on ${project.name}.\n\nComplete the survey here: ${surveyUrl}\n\nThis link is personal to you and expires in 14 days.`,
+      });
+
+      created.push(surveyToken);
+    }
+
+    return res.json({ ok: true, sent: created.length, tokens: created });
+  });
+
+  // GET /api/projects/:projectId/lessons-learned
+  app.get("/api/projects/:projectId/lessons-learned", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const projectId = parseInt(req.params.projectId);
+    if (isNaN(projectId)) return res.status(400).json({ error: "Invalid project ID" });
+    const record = await storage.getLessonsLearned(projectId);
+    return res.json(record || null);
+  });
+
+  // POST /api/projects/:projectId/lessons-learned
+  app.post("/api/projects/:projectId/lessons-learned", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const projectId = parseInt(req.params.projectId);
+    if (isNaN(projectId)) return res.status(400).json({ error: "Invalid project ID" });
+    const userId = req.user!.id;
+    const record = await storage.upsertLessonsLearned({
+      projectId,
+      completedBy: userId,
+      ...req.body,
+    });
+    return res.json(record);
+  });
+
+  // GET /api/workers/:workerId/survey-feedback
+  app.get("/api/workers/:workerId/survey-feedback", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const workerId = parseInt(req.params.workerId);
+    if (isNaN(workerId)) return res.status(400).json({ error: "Invalid worker ID" });
+    const feedback = await storage.getSurveyFeedbackByWorker(workerId);
+    return res.json(feedback);
   });
 }

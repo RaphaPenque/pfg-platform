@@ -5,6 +5,10 @@ import {
   workers, projects, assignments, documents, oemTypes, roleSlots,
   users, sessions, magicLinks, auditLogs, projectLeads, payrollRules,
   workExperience, oemExperience,
+  workPackages, dailyReports, dailyReportWpProgress, commentsLog, delayApprovals,
+  supervisorReports, supervisorReportReplies, toolboxTalks, safetyObservations,
+  incidentReports, milestoneCertificates,
+  surveyTokens, surveyResponses, surveyIndividualFeedback, lessonsLearned,
   type Worker, type InsertWorker,
   type Project, type InsertProject,
   type Assignment, type InsertAssignment,
@@ -16,6 +20,21 @@ import {
   type PayrollRule, type InsertPayrollRule,
   type WorkExperience, type InsertWorkExperience,
   type OemExperience, type InsertOemExperience,
+  type WorkPackage, type InsertWorkPackage,
+  type DailyReport, type InsertDailyReport,
+  type DailyReportWpProgress,
+  type CommentsLog, type InsertCommentsLog,
+  type DelayApproval,
+  type SupervisorReport, type InsertSupervisorReport,
+  type SupervisorReportReply,
+  type ToolboxTalk, type InsertToolboxTalk,
+  type SafetyObservation, type InsertSafetyObservation,
+  type IncidentReport, type InsertIncidentReport,
+  type MilestoneCertificate, type InsertMilestoneCertificate,
+  type SurveyToken, type InsertSurveyToken,
+  type SurveyResponse, type InsertSurveyResponse,
+  type SurveyIndividualFeedback, type InsertSurveyIndividualFeedback,
+  type LessonsLearned, type InsertLessonsLearned,
 } from "@shared/schema";
 
 const pool = new Pool({
@@ -130,6 +149,75 @@ export interface IStorage {
   upsertOemExperience(workerId: number, oem: string, equipmentType: string, yearsExperience?: number): Promise<OemExperience>;
   deleteOemExperience(id: number): Promise<void>;
   replaceOemExperience(workerId: number, entries: InsertOemExperience[]): Promise<void>;
+
+  // Work Packages
+  getWorkPackages(projectId: number): Promise<WorkPackage[]>;
+  createWorkPackage(data: InsertWorkPackage): Promise<WorkPackage>;
+  updateWorkPackage(id: number, data: Partial<InsertWorkPackage>): Promise<WorkPackage | undefined>;
+  deleteWorkPackage(id: number): Promise<void>;
+
+  // Daily Reports
+  getDailyReport(projectId: number, date: string): Promise<DailyReport | undefined>;
+  getDailyReports(projectId: number): Promise<DailyReport[]>;
+  createDailyReport(data: InsertDailyReport): Promise<DailyReport>;
+  updateDailyReport(id: number, data: Partial<InsertDailyReport>): Promise<DailyReport | undefined>;
+  getWpProgress(reportId: number): Promise<DailyReportWpProgress[]>;
+  upsertWpProgress(reportId: number, wpId: number, data: Partial<DailyReportWpProgress>): Promise<DailyReportWpProgress>;
+
+  // Comments Log
+  getCommentsLog(projectId: number): Promise<CommentsLog[]>;
+  createCommentsLogEntry(data: InsertCommentsLog): Promise<CommentsLog>;
+
+  // Delay Approvals
+  createDelayApproval(data: Omit<DelayApproval, 'id' | 'createdAt'>): Promise<DelayApproval>;
+  getDelayApprovalByToken(token: string): Promise<DelayApproval | undefined>;
+  updateDelayApproval(id: number, data: Partial<DelayApproval>): Promise<DelayApproval | undefined>;
+
+  // Supervisor Reports
+  getSupervisorReports(projectId: number): Promise<SupervisorReport[]>;
+  getPendingSupervisorReports(): Promise<SupervisorReport[]>;
+  createSupervisorReport(data: InsertSupervisorReport): Promise<SupervisorReport>;
+  updateSupervisorReport(id: number, data: Partial<InsertSupervisorReport>): Promise<SupervisorReport | undefined>;
+  getSupervisorReportReplies(reportId: number): Promise<SupervisorReportReply[]>;
+  createSupervisorReportReply(data: { reportId: number; authorId: number; message: string }): Promise<SupervisorReportReply>;
+
+  // Toolbox Talks
+  getToolboxTalks(projectId: number): Promise<ToolboxTalk[]>;
+  createToolboxTalk(data: InsertToolboxTalk): Promise<ToolboxTalk>;
+  updateToolboxTalk(id: number, data: Partial<InsertToolboxTalk>): Promise<ToolboxTalk | undefined>;
+  deleteToolboxTalk(id: number): Promise<void>;
+
+  // Safety Observations
+  getSafetyObservations(projectId: number): Promise<SafetyObservation[]>;
+  createSafetyObservation(data: InsertSafetyObservation): Promise<SafetyObservation>;
+  updateSafetyObservation(id: number, data: Partial<InsertSafetyObservation>): Promise<SafetyObservation | undefined>;
+
+  // Incident Reports
+  getIncidentReports(projectId: number): Promise<IncidentReport[]>;
+  createIncidentReport(data: InsertIncidentReport): Promise<IncidentReport>;
+  updateIncidentReport(id: number, data: Partial<InsertIncidentReport>): Promise<IncidentReport | undefined>;
+
+  // Milestone Certificates
+  getMilestoneCertificates(projectId: number): Promise<MilestoneCertificate[]>;
+  createMilestoneCertificate(data: InsertMilestoneCertificate): Promise<MilestoneCertificate>;
+  updateMilestoneCertificate(id: number, data: Partial<InsertMilestoneCertificate>): Promise<MilestoneCertificate | undefined>;
+  getMilestoneCertificateByToken(token: string): Promise<MilestoneCertificate | undefined>;
+
+  // Survey Tokens
+  createSurveyToken(data: InsertSurveyToken): Promise<SurveyToken>;
+  getSurveyTokenByToken(token: string): Promise<SurveyToken | undefined>;
+  updateSurveyToken(id: number, data: Partial<SurveyToken>): Promise<SurveyToken | undefined>;
+  getSurveyTokensByProject(projectId: number): Promise<SurveyToken[]>;
+
+  // Survey Responses
+  createSurveyResponse(data: InsertSurveyResponse): Promise<SurveyResponse>;
+  getSurveyResponsesByProject(projectId: number): Promise<SurveyResponse[]>;
+  createSurveyIndividualFeedback(data: InsertSurveyIndividualFeedback): Promise<SurveyIndividualFeedback>;
+  getSurveyFeedbackByWorker(workerId: number): Promise<SurveyIndividualFeedback[]>;
+
+  // Lessons Learned
+  getLessonsLearned(projectId: number): Promise<LessonsLearned | undefined>;
+  upsertLessonsLearned(data: InsertLessonsLearned): Promise<LessonsLearned>;
 }
 
 export class PostgresStorage implements IStorage {
@@ -528,6 +616,280 @@ export class PostgresStorage implements IStorage {
     if (entries.length > 0) {
       await db.insert(oemExperience).values(entries).execute();
     }
+  }
+
+  // ── Work Packages ────────────────────────────────────────────
+  async getWorkPackages(projectId: number): Promise<WorkPackage[]> {
+    return db.select().from(workPackages)
+      .where(eq(workPackages.projectId, projectId))
+      .orderBy(workPackages.sortOrder);
+  }
+
+  async createWorkPackage(data: InsertWorkPackage): Promise<WorkPackage> {
+    const [row] = await db.insert(workPackages).values(data).returning();
+    return row;
+  }
+
+  async updateWorkPackage(id: number, data: Partial<InsertWorkPackage>): Promise<WorkPackage | undefined> {
+    const [row] = await db.update(workPackages).set(data).where(eq(workPackages.id, id)).returning();
+    return row;
+  }
+
+  async deleteWorkPackage(id: number): Promise<void> {
+    await db.delete(workPackages).where(eq(workPackages.id, id));
+  }
+
+  // ── Daily Reports ─────────────────────────────────────────────
+  async getDailyReport(projectId: number, date: string): Promise<DailyReport | undefined> {
+    const [row] = await db.select().from(dailyReports)
+      .where(and(eq(dailyReports.projectId, projectId), eq(dailyReports.reportDate, date)));
+    return row;
+  }
+
+  async getDailyReports(projectId: number): Promise<DailyReport[]> {
+    return db.select().from(dailyReports)
+      .where(eq(dailyReports.projectId, projectId))
+      .orderBy(desc(dailyReports.reportDate));
+  }
+
+  async createDailyReport(data: InsertDailyReport): Promise<DailyReport> {
+    const [row] = await db.insert(dailyReports).values(data).returning();
+    return row;
+  }
+
+  async updateDailyReport(id: number, data: Partial<InsertDailyReport>): Promise<DailyReport | undefined> {
+    const [row] = await db.update(dailyReports)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(dailyReports.id, id))
+      .returning();
+    return row;
+  }
+
+  async getWpProgress(reportId: number): Promise<DailyReportWpProgress[]> {
+    return db.select().from(dailyReportWpProgress)
+      .where(eq(dailyReportWpProgress.reportId, reportId));
+  }
+
+  async upsertWpProgress(reportId: number, wpId: number, data: Partial<DailyReportWpProgress>): Promise<DailyReportWpProgress> {
+    const [existing] = await db.select().from(dailyReportWpProgress)
+      .where(and(eq(dailyReportWpProgress.reportId, reportId), eq(dailyReportWpProgress.wpId, wpId)));
+    if (existing) {
+      const [updated] = await db.update(dailyReportWpProgress)
+        .set(data)
+        .where(eq(dailyReportWpProgress.id, existing.id))
+        .returning();
+      return updated;
+    }
+    const [created] = await db.insert(dailyReportWpProgress)
+      .values({ reportId, wpId, ...data })
+      .returning();
+    return created;
+  }
+
+  // ── Comments Log ──────────────────────────────────────────────
+  async getCommentsLog(projectId: number): Promise<CommentsLog[]> {
+    return db.select().from(commentsLog)
+      .where(eq(commentsLog.projectId, projectId))
+      .orderBy(desc(commentsLog.enteredAt));
+  }
+
+  async createCommentsLogEntry(data: InsertCommentsLog): Promise<CommentsLog> {
+    const [row] = await db.insert(commentsLog).values(data).returning();
+    return row;
+  }
+
+  // ── Delay Approvals ───────────────────────────────────────────
+  async createDelayApproval(data: Omit<DelayApproval, 'id' | 'createdAt'>): Promise<DelayApproval> {
+    const [row] = await db.insert(delayApprovals).values(data as any).returning();
+    return row;
+  }
+
+  async getDelayApprovalByToken(token: string): Promise<DelayApproval | undefined> {
+    const [row] = await db.select().from(delayApprovals).where(eq(delayApprovals.token, token));
+    return row;
+  }
+
+  async updateDelayApproval(id: number, data: Partial<DelayApproval>): Promise<DelayApproval | undefined> {
+    const [row] = await db.update(delayApprovals).set(data as any).where(eq(delayApprovals.id, id)).returning();
+    return row;
+  }
+
+  // ── Supervisor Reports ────────────────────────────────────────
+  async getSupervisorReports(projectId: number): Promise<SupervisorReport[]> {
+    return db.select().from(supervisorReports)
+      .where(eq(supervisorReports.projectId, projectId))
+      .orderBy(desc(supervisorReports.createdAt));
+  }
+
+  async getPendingSupervisorReports(): Promise<SupervisorReport[]> {
+    return db.select().from(supervisorReports)
+      .where(eq(supervisorReports.status, "pending_assignment"))
+      .orderBy(desc(supervisorReports.createdAt));
+  }
+
+  async createSupervisorReport(data: InsertSupervisorReport): Promise<SupervisorReport> {
+    const [row] = await db.insert(supervisorReports).values(data).returning();
+    return row;
+  }
+
+  async updateSupervisorReport(id: number, data: Partial<InsertSupervisorReport>): Promise<SupervisorReport | undefined> {
+    const [row] = await db.update(supervisorReports).set(data).where(eq(supervisorReports.id, id)).returning();
+    return row;
+  }
+
+  async getSupervisorReportReplies(reportId: number): Promise<SupervisorReportReply[]> {
+    return db.select().from(supervisorReportReplies)
+      .where(eq(supervisorReportReplies.reportId, reportId))
+      .orderBy(supervisorReportReplies.createdAt);
+  }
+
+  async createSupervisorReportReply(data: { reportId: number; authorId: number; message: string }): Promise<SupervisorReportReply> {
+    const [row] = await db.insert(supervisorReportReplies).values(data).returning();
+    return row;
+  }
+
+  // ── Toolbox Talks ─────────────────────────────────────────────
+  async getToolboxTalks(projectId: number): Promise<ToolboxTalk[]> {
+    return db.select().from(toolboxTalks)
+      .where(eq(toolboxTalks.projectId, projectId))
+      .orderBy(desc(toolboxTalks.createdAt));
+  }
+
+  async createToolboxTalk(data: InsertToolboxTalk): Promise<ToolboxTalk> {
+    const [row] = await db.insert(toolboxTalks).values(data).returning();
+    return row;
+  }
+
+  async updateToolboxTalk(id: number, data: Partial<InsertToolboxTalk>): Promise<ToolboxTalk | undefined> {
+    const [row] = await db.update(toolboxTalks).set(data).where(eq(toolboxTalks.id, id)).returning();
+    return row;
+  }
+
+  async deleteToolboxTalk(id: number): Promise<void> {
+    await db.delete(toolboxTalks).where(eq(toolboxTalks.id, id));
+  }
+
+  // ── Safety Observations ───────────────────────────────────────
+  async getSafetyObservations(projectId: number): Promise<SafetyObservation[]> {
+    return db.select().from(safetyObservations)
+      .where(eq(safetyObservations.projectId, projectId))
+      .orderBy(desc(safetyObservations.createdAt));
+  }
+
+  async createSafetyObservation(data: InsertSafetyObservation): Promise<SafetyObservation> {
+    const [row] = await db.insert(safetyObservations).values(data).returning();
+    return row;
+  }
+
+  async updateSafetyObservation(id: number, data: Partial<InsertSafetyObservation>): Promise<SafetyObservation | undefined> {
+    const [row] = await db.update(safetyObservations).set(data).where(eq(safetyObservations.id, id)).returning();
+    return row;
+  }
+
+  // ── Incident Reports ──────────────────────────────────────────
+  async getIncidentReports(projectId: number): Promise<IncidentReport[]> {
+    return db.select().from(incidentReports)
+      .where(eq(incidentReports.projectId, projectId))
+      .orderBy(desc(incidentReports.createdAt));
+  }
+
+  async createIncidentReport(data: InsertIncidentReport): Promise<IncidentReport> {
+    const [row] = await db.insert(incidentReports).values(data).returning();
+    return row;
+  }
+
+  async updateIncidentReport(id: number, data: Partial<InsertIncidentReport>): Promise<IncidentReport | undefined> {
+    const [row] = await db.update(incidentReports).set(data).where(eq(incidentReports.id, id)).returning();
+    return row;
+  }
+
+  // ── Milestone Certificates ────────────────────────────────────
+  async getMilestoneCertificates(projectId: number): Promise<MilestoneCertificate[]> {
+    return db.select().from(milestoneCertificates)
+      .where(eq(milestoneCertificates.projectId, projectId))
+      .orderBy(desc(milestoneCertificates.createdAt));
+  }
+
+  async createMilestoneCertificate(data: InsertMilestoneCertificate): Promise<MilestoneCertificate> {
+    const [row] = await db.insert(milestoneCertificates).values(data).returning();
+    return row;
+  }
+
+  async updateMilestoneCertificate(id: number, data: Partial<InsertMilestoneCertificate>): Promise<MilestoneCertificate | undefined> {
+    const [row] = await db.update(milestoneCertificates).set(data as any).where(eq(milestoneCertificates.id, id)).returning();
+    return row;
+  }
+
+  async getMilestoneCertificateByToken(token: string): Promise<MilestoneCertificate | undefined> {
+    const [row] = await db.select().from(milestoneCertificates)
+      .where(eq(milestoneCertificates.approvalToken, token));
+    return row;
+  }
+
+  // ── Survey Tokens ────────────────────────────────────────────
+  async createSurveyToken(data: InsertSurveyToken): Promise<SurveyToken> {
+    const [row] = await db.insert(surveyTokens).values(data).returning();
+    return row;
+  }
+
+  async getSurveyTokenByToken(token: string): Promise<SurveyToken | undefined> {
+    const [row] = await db.select().from(surveyTokens).where(eq(surveyTokens.token, token));
+    return row;
+  }
+
+  async updateSurveyToken(id: number, data: Partial<SurveyToken>): Promise<SurveyToken | undefined> {
+    const [row] = await db.update(surveyTokens).set(data as any).where(eq(surveyTokens.id, id)).returning();
+    return row;
+  }
+
+  async getSurveyTokensByProject(projectId: number): Promise<SurveyToken[]> {
+    return db.select().from(surveyTokens)
+      .where(eq(surveyTokens.projectId, projectId))
+      .orderBy(desc(surveyTokens.createdAt));
+  }
+
+  // ── Survey Responses ─────────────────────────────────────────
+  async createSurveyResponse(data: InsertSurveyResponse): Promise<SurveyResponse> {
+    const [row] = await db.insert(surveyResponses).values(data).returning();
+    return row;
+  }
+
+  async getSurveyResponsesByProject(projectId: number): Promise<SurveyResponse[]> {
+    return db.select().from(surveyResponses)
+      .where(eq(surveyResponses.projectId, projectId))
+      .orderBy(desc(surveyResponses.submittedAt));
+  }
+
+  async createSurveyIndividualFeedback(data: InsertSurveyIndividualFeedback): Promise<SurveyIndividualFeedback> {
+    const [row] = await db.insert(surveyIndividualFeedback).values(data).returning();
+    return row;
+  }
+
+  async getSurveyFeedbackByWorker(workerId: number): Promise<SurveyIndividualFeedback[]> {
+    return db.select().from(surveyIndividualFeedback)
+      .where(eq(surveyIndividualFeedback.workerId, workerId))
+      .orderBy(desc(surveyIndividualFeedback.submittedAt));
+  }
+
+  // ── Lessons Learned ──────────────────────────────────────────
+  async getLessonsLearned(projectId: number): Promise<LessonsLearned | undefined> {
+    const [row] = await db.select().from(lessonsLearned)
+      .where(eq(lessonsLearned.projectId, projectId));
+    return row;
+  }
+
+  async upsertLessonsLearned(data: InsertLessonsLearned): Promise<LessonsLearned> {
+    // Check if a record exists for this project
+    const existing = await this.getLessonsLearned(data.projectId);
+    if (existing) {
+      const [row] = await db.update(lessonsLearned)
+        .set({ ...data, completedAt: new Date() } as any)
+        .where(eq(lessonsLearned.projectId, data.projectId))
+        .returning();
+      return row;
+    }
+    const [row] = await db.insert(lessonsLearned).values(data).returning();
+    return row;
   }
 }
 

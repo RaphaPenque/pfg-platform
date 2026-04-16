@@ -4,6 +4,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { warmupDb } from "./storage";
+import { checkSurveyReminders } from "./survey-scheduler";
 
 const app = express();
 const httpServer = createServer(app);
@@ -97,6 +98,11 @@ app.use((req, res, next) => {
     const { setupVite } = await import("./vite");
     await setupVite(httpServer, app);
   }
+
+  // Start survey reminder scheduler — runs every 6 hours
+  setInterval(() => {
+    checkSurveyReminders().catch(err => console.error("[survey-scheduler] interval error:", err));
+  }, 6 * 60 * 60 * 1000);
 
   const port = parseInt(process.env.PORT || "5000", 10);
   httpServer.listen(

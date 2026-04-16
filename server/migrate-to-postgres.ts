@@ -153,6 +153,254 @@ export async function runSchemaUpdates() {
     await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS customer_project_manager_email TEXT`);
     await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS site_manager_email TEXT`);
 
+    // ── Work Packages ──
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS work_packages (
+      id SERIAL PRIMARY KEY,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      description TEXT,
+      planned_start TEXT,
+      planned_finish TEXT,
+      contracted_value REAL,
+      sort_order INTEGER DEFAULT 0
+    )`);
+
+    // ── Daily Reports ──
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS daily_reports (
+      id SERIAL PRIMARY KEY,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      report_date TEXT NOT NULL,
+      created_by INTEGER NOT NULL REFERENCES users(id),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      completed_tasks JSONB DEFAULT '[]',
+      delays_log JSONB DEFAULT '[]',
+      personnel_notes JSONB DEFAULT '{}',
+      tooling_items JSONB DEFAULT '[]',
+      wp_variations JSONB DEFAULT '{}',
+      published_to_portal BOOLEAN DEFAULT FALSE,
+      email_notification_sent BOOLEAN DEFAULT FALSE
+    )`);
+
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS daily_report_wp_progress (
+      id SERIAL PRIMARY KEY,
+      report_id INTEGER NOT NULL REFERENCES daily_reports(id) ON DELETE CASCADE,
+      wp_id INTEGER NOT NULL REFERENCES work_packages(id) ON DELETE CASCADE,
+      actual_start TEXT,
+      actual_finish TEXT,
+      sign_off_status TEXT DEFAULT 'pending',
+      comments TEXT
+    )`);
+
+    // ── Comments & Concerns Log ──
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS comments_log (
+      id SERIAL PRIMARY KEY,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      report_id INTEGER REFERENCES daily_reports(id) ON DELETE SET NULL,
+      entered_at TIMESTAMPTZ DEFAULT NOW(),
+      entered_by INTEGER NOT NULL REFERENCES users(id),
+      entry TEXT NOT NULL
+    )`);
+
+    // ── Delay Approvals ──
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS delay_approvals (
+      id SERIAL PRIMARY KEY,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      report_id INTEGER NOT NULL REFERENCES daily_reports(id) ON DELETE CASCADE,
+      delay_index INTEGER NOT NULL,
+      token TEXT NOT NULL UNIQUE,
+      token_expiry TIMESTAMPTZ NOT NULL,
+      recipient_email TEXT NOT NULL,
+      recipient_name TEXT,
+      status TEXT DEFAULT 'pending',
+      responded_at TIMESTAMPTZ,
+      responded_ip TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    // ── Supervisor Reports ──
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS supervisor_reports (
+      id SERIAL PRIMARY KEY,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      worker_id INTEGER REFERENCES workers(id) ON DELETE SET NULL,
+      report_date TEXT NOT NULL,
+      shift TEXT,
+      submission_method TEXT NOT NULL,
+      sender_email TEXT,
+      file_path TEXT,
+      file_name TEXT,
+      document_type TEXT,
+      status TEXT DEFAULT 'filed',
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      pending_assignment_note TEXT
+    )`);
+
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS supervisor_report_replies (
+      id SERIAL PRIMARY KEY,
+      report_id INTEGER NOT NULL REFERENCES supervisor_reports(id) ON DELETE CASCADE,
+      author_id INTEGER NOT NULL REFERENCES users(id),
+      message TEXT NOT NULL,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    // ── QHSE ──
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS toolbox_talks (
+      id SERIAL PRIMARY KEY,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      worker_id INTEGER REFERENCES workers(id) ON DELETE SET NULL,
+      report_date TEXT NOT NULL,
+      shift TEXT,
+      topic TEXT,
+      attendee_count INTEGER,
+      file_path TEXT,
+      file_name TEXT,
+      notes TEXT,
+      submission_method TEXT DEFAULT 'upload',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS safety_observations (
+      id SERIAL PRIMARY KEY,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      reported_by_worker_id INTEGER REFERENCES workers(id) ON DELETE SET NULL,
+      relates_to_worker_ids JSONB DEFAULT '[]',
+      shift_supervisor_id INTEGER REFERENCES workers(id) ON DELETE SET NULL,
+      observation_date TEXT NOT NULL,
+      observation_time TEXT,
+      shift TEXT,
+      observation_type TEXT NOT NULL,
+      location_on_site TEXT,
+      description TEXT,
+      actions_taken TEXT,
+      file_path TEXT,
+      file_name TEXT,
+      status TEXT DEFAULT 'open',
+      submission_method TEXT DEFAULT 'upload',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS incident_reports (
+      id SERIAL PRIMARY KEY,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      worker_involved_id INTEGER REFERENCES workers(id) ON DELETE SET NULL,
+      reported_by_worker_id INTEGER REFERENCES workers(id) ON DELETE SET NULL,
+      shift_supervisor_id INTEGER REFERENCES workers(id) ON DELETE SET NULL,
+      incident_date TEXT NOT NULL,
+      incident_time TEXT,
+      shift TEXT,
+      incident_type TEXT NOT NULL,
+      description TEXT,
+      lost_time BOOLEAN DEFAULT FALSE,
+      lost_time_hours REAL,
+      actions_taken TEXT,
+      root_cause TEXT,
+      file_path TEXT,
+      file_name TEXT,
+      status TEXT DEFAULT 'open',
+      submission_method TEXT DEFAULT 'upload',
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    // ── Milestone Certificates ──
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS milestone_certificates (
+      id SERIAL PRIMARY KEY,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      wp_id INTEGER REFERENCES work_packages(id) ON DELETE SET NULL,
+      milestone_number TEXT,
+      status TEXT DEFAULT 'draft',
+      variations_claimed REAL DEFAULT 0,
+      comments TEXT,
+      mechanical_complete BOOLEAN DEFAULT FALSE,
+      inspection_qa_complete BOOLEAN DEFAULT FALSE,
+      testing_complete BOOLEAN DEFAULT FALSE,
+      documentation_complete BOOLEAN DEFAULT FALSE,
+      snags_closed BOOLEAN DEFAULT FALSE,
+      approval_token TEXT UNIQUE,
+      approval_token_expiry TIMESTAMPTZ,
+      approved_at TIMESTAMPTZ,
+      approver_email TEXT,
+      approver_name TEXT,
+      approver_ip TEXT,
+      draft_pdf_path TEXT,
+      signed_pdf_path TEXT,
+      created_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      sent_at TIMESTAMPTZ
+    )`);
+
+    // ── Survey ──
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS survey_tokens (
+      id SERIAL PRIMARY KEY,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      contact_email TEXT NOT NULL,
+      contact_name TEXT,
+      contact_role TEXT,
+      token TEXT NOT NULL UNIQUE,
+      expires_at TIMESTAMPTZ NOT NULL,
+      used_at TIMESTAMPTZ,
+      reminder_sent_at TIMESTAMPTZ,
+      final_reminder_sent_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS survey_responses (
+      id SERIAL PRIMARY KEY,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      token_id INTEGER REFERENCES survey_tokens(id) ON DELETE SET NULL,
+      contact_email TEXT NOT NULL,
+      contact_name TEXT,
+      submitted_at TIMESTAMPTZ DEFAULT NOW(),
+      submitter_ip TEXT,
+      q1_planning INTEGER,
+      q2_quality INTEGER,
+      q3_hse INTEGER,
+      q4_supervision INTEGER,
+      q5_pm INTEGER,
+      q6_overall INTEGER,
+      average_score REAL,
+      nps INTEGER,
+      open_feedback TEXT,
+      individual_feedback_given BOOLEAN DEFAULT FALSE
+    )`);
+
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS survey_individual_feedback (
+      id SERIAL PRIMARY KEY,
+      survey_response_id INTEGER NOT NULL REFERENCES survey_responses(id) ON DELETE CASCADE,
+      worker_id INTEGER NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
+      comment TEXT,
+      submitted_at TIMESTAMPTZ DEFAULT NOW()
+    )`);
+
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS lessons_learned (
+      id SERIAL PRIMARY KEY,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      completed_by INTEGER NOT NULL REFERENCES users(id),
+      completed_at TIMESTAMPTZ DEFAULT NOW(),
+      overall_assessment TEXT,
+      went_well TEXT,
+      could_improve TEXT,
+      qhse_performance TEXT,
+      qhse_notes TEXT,
+      commercial_performance TEXT,
+      commercial_notes TEXT,
+      customer_relationship TEXT,
+      customer_relationship_notes TEXT,
+      same_team_again TEXT,
+      same_team_notes TEXT,
+      additional_notes TEXT,
+      action_points JSONB DEFAULT '[]'
+    )`);
+
+    // ── Comments log ──
+    await db.execute(sql`CREATE TABLE IF NOT EXISTS comments_log (
+      id SERIAL PRIMARY KEY,
+      project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+      report_id INTEGER REFERENCES daily_reports(id) ON DELETE SET NULL,
+      entered_at TIMESTAMPTZ DEFAULT NOW(),
+      entered_by INTEGER NOT NULL REFERENCES users(id),
+      entry TEXT NOT NULL
+    )`);
+
     console.log("Schema updates applied.");
   } catch (e: any) {
     console.error("Schema update error:", e.message);

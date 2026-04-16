@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
 import { useDashboardData, type DashboardProject, type DashboardRoleSlot, type DashboardAssignment } from "@/hooks/use-dashboard-data";
@@ -13,6 +13,8 @@ import {
 import ProjectRolePlanningTab from "@/components/project/ProjectRolePlanningTab";
 import ProjectTeamTab from "@/components/project/ProjectTeamTab";
 import InlineField from "@/components/project/InlineField";
+import DailyReportHub from "@/components/project/DailyReportHub";
+import CommercialTab from "@/components/project/CommercialTab";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -500,6 +502,516 @@ function OverviewTab({
 
 // ─── Main Page ───────────────────────────────────────────────────
 
+// ─── Customer Satisfaction Tab ──────────────────────────────────
+
+type SurveyToken = {
+  id: number;
+  projectId: number;
+  contactEmail: string;
+  contactName: string | null;
+  contactRole: string | null;
+  token: string;
+  expiresAt: string;
+  usedAt: string | null;
+  reminderSentAt: string | null;
+  finalReminderSentAt: string | null;
+  createdAt: string | null;
+};
+
+type SurveyResponse = {
+  id: number;
+  projectId: number;
+  tokenId: number | null;
+  contactEmail: string;
+  contactName: string | null;
+  submittedAt: string | null;
+  q1Planning: number | null;
+  q2Quality: number | null;
+  q3Hse: number | null;
+  q4Supervision: number | null;
+  q5Pm: number | null;
+  q6Overall: number | null;
+  averageScore: number | null;
+  nps: number | null;
+  openFeedback: string | null;
+  individualFeedbackGiven: boolean | null;
+};
+
+type LessonsLearnedRecord = {
+  id: number;
+  projectId: number;
+  completedBy: number;
+  completedAt: string | null;
+  overallAssessment: string | null;
+  wentWell: string | null;
+  couldImprove: string | null;
+  qhsePerformance: string | null;
+  qhseNotes: string | null;
+  commercialPerformance: string | null;
+  commercialNotes: string | null;
+  customerRelationship: string | null;
+  customerRelationshipNotes: string | null;
+  sameTeamAgain: string | null;
+  sameTeamNotes: string | null;
+  additionalNotes: string | null;
+  actionPoints: any[];
+};
+
+const RATING_LABELS: Record<number, string> = {
+  1: "Very Dissatisfied",
+  2: "Dissatisfied",
+  3: "Neutral",
+  4: "Satisfied",
+  5: "Extremely Satisfied",
+};
+
+const Q_LABELS = [
+  { key: "q1Planning", label: "Planning & Preparation" },
+  { key: "q2Quality", label: "Quality of Work" },
+  { key: "q3Hse", label: "Health & Safety" },
+  { key: "q4Supervision", label: "Supervision" },
+  { key: "q5Pm", label: "Project Manager" },
+  { key: "q6Overall", label: "Overall Performance" },
+];
+
+const ASSESSMENT_OPTIONS = [
+  { value: "excellent", label: "Excellent" },
+  { value: "good", label: "Good" },
+  { value: "satisfactory", label: "Satisfactory" },
+  { value: "below_expectations", label: "Below Expectations" },
+  { value: "poor", label: "Poor" },
+];
+
+function StarRating({ score, max = 5 }: { score: number; max?: number }) {
+  return (
+    <div className="flex items-center gap-0.5">
+      {Array.from({ length: max }).map((_, i) => (
+        <svg
+          key={i}
+          width="20" height="20" viewBox="0 0 24 24" fill="none"
+          stroke={i < Math.round(score) ? "var(--pfg-yellow-dark)" : "hsl(var(--border))"}
+          strokeWidth="2"
+        >
+          <polygon
+            points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"
+            fill={i < Math.round(score) ? "var(--pfg-yellow)" : "none"}
+          />
+        </svg>
+      ))}
+    </div>
+  );
+}
+
+function ScoreBar({ score, max = 5 }: { score: number; max?: number }) {
+  const pct = (score / max) * 100;
+  const color = score >= 4 ? "var(--green)" : score >= 3 ? "var(--amber)" : "var(--red)";
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex-1 rounded-full overflow-hidden" style={{ background: "hsl(var(--muted))", height: 8 }}>
+        <div style={{ width: `${pct}%`, background: color, height: "100%", transition: "width 0.4s ease" }} />
+      </div>
+      <span className="text-[13px] font-semibold w-6 text-right" style={{ color }}>{score}</span>
+    </div>
+  );
+}
+
+function CustomerSatisfactionTab({
+  project,
+  userRole,
+}: {
+  project: DashboardProject;
+  userRole: string;
+}) {
+  const { toast } = useToast();
+  const canManage = userRole === "admin" || userRole === "resource_manager";
+  const canPM = canManage || userRole === "project_manager";
+  const isObserver = userRole === "observer";
+
+  const [activeSubTab, setActiveSubTab] = useState<"survey" | "lessons">("survey");
+  const [surveyData, setSurveyData] = useState<{ tokens: SurveyToken[]; responses: SurveyResponse[] } | null>(null);
+  const [surveyLoading, setSurveyLoading] = useState(false);
+  const [sending, setSending] = useState(false);
+
+  // Lessons Learned state
+  const [ll, setLl] = useState<LessonsLearnedRecord | null>(null);
+  const [llLoading, setLlLoading] = useState(false);
+  const [llEditing, setLlEditing] = useState(false);
+  const [llSaving, setLlSaving] = useState(false);
+  const [llForm, setLlForm] = useState<Partial<LessonsLearnedRecord>>({});
+
+  // Load survey data on mount
+  useEffect(() => {
+    setSurveyLoading(true);
+    apiRequest("GET", `/api/projects/${project.id}/survey`)
+      .then(r => r.json())
+      .then(d => setSurveyData(d))
+      .catch(() => setSurveyData({ tokens: [], responses: [] }))
+      .finally(() => setSurveyLoading(false));
+  }, [project.id]);
+
+  // Load lessons learned on mount
+  useEffect(() => {
+    if (!canPM) return;
+    setLlLoading(true);
+    apiRequest("GET", `/api/projects/${project.id}/lessons-learned`)
+      .then(r => r.json())
+      .then(d => { setLl(d); if (d) setLlForm(d); })
+      .catch(() => {})
+      .finally(() => setLlLoading(false));
+  }, [project.id, canPM]);
+
+  const handleSendSurvey = async () => {
+    if (!window.confirm("Send satisfaction survey to all project contacts?")) return;
+    setSending(true);
+    try {
+      const r = await apiRequest("POST", `/api/projects/${project.id}/survey/send`, {});
+      const d = await r.json();
+      toast({ title: "Survey sent", description: `Sent to ${d.sent} contact${d.sent !== 1 ? "s" : ""}` });
+      // Reload survey data
+      const r2 = await apiRequest("GET", `/api/projects/${project.id}/survey`);
+      setSurveyData(await r2.json());
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message || "Failed to send survey", variant: "destructive" });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleSaveLessons = async () => {
+    setLlSaving(true);
+    try {
+      const r = await apiRequest("POST", `/api/projects/${project.id}/lessons-learned`, llForm);
+      const d = await r.json();
+      setLl(d);
+      setLlForm(d);
+      setLlEditing(false);
+      toast({ title: "Lessons Learned saved" });
+    } catch (e: any) {
+      toast({ title: "Error saving", description: e.message, variant: "destructive" });
+    } finally {
+      setLlSaving(false);
+    }
+  };
+
+  const latestResponse = surveyData?.responses?.[0] ?? null;
+  const sentToken = surveyData?.tokens?.[0] ?? null;
+  const hasSentSurvey = (surveyData?.tokens?.length ?? 0) > 0;
+  const hasResponse = (surveyData?.responses?.length ?? 0) > 0;
+
+  return (
+    <div className="space-y-4">
+      {/* Sub-tab bar */}
+      <div className="flex gap-1 p-1 rounded-lg" style={{ background: "hsl(var(--muted))" }}>
+        <button
+          onClick={() => setActiveSubTab("survey")}
+          className="flex-1 text-[12px] font-semibold py-2 px-3 rounded-md transition-colors"
+          style={{
+            background: activeSubTab === "survey" ? "#fff" : "transparent",
+            color: activeSubTab === "survey" ? "var(--pfg-navy)" : "hsl(var(--muted-foreground))",
+            boxShadow: activeSubTab === "survey" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+          }}
+        >
+          Survey Results
+        </button>
+        {canPM && (
+          <button
+            onClick={() => setActiveSubTab("lessons")}
+            className="flex-1 text-[12px] font-semibold py-2 px-3 rounded-md transition-colors"
+            style={{
+              background: activeSubTab === "lessons" ? "#fff" : "transparent",
+              color: activeSubTab === "lessons" ? "var(--pfg-navy)" : "hsl(var(--muted-foreground))",
+              boxShadow: activeSubTab === "lessons" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+            }}
+          >
+            Lessons Learned
+          </button>
+        )}
+      </div>
+
+      {/* Survey Results sub-tab */}
+      {activeSubTab === "survey" && (
+        <div className="space-y-5">
+          {surveyLoading ? (
+            <div className="flex items-center justify-center py-12 text-[13px]" style={{ color: "var(--pfg-steel)" }}>Loading...</div>
+          ) : !hasSentSurvey ? (
+            // No survey sent yet
+            <div className="text-center py-10">
+              <div className="w-12 h-12 rounded-full flex items-center justify-center mb-4 mx-auto" style={{ background: "hsl(var(--muted))", color: "var(--pfg-steel)" }}>
+                <Star className="w-6 h-6" />
+              </div>
+              <h3 className="text-[15px] font-semibold text-pfg-navy font-display mb-2">No survey sent yet</h3>
+              <p className="text-[13px] mb-6" style={{ color: "var(--pfg-steel)" }}>Send a satisfaction survey to the project contacts to collect feedback.</p>
+              {canManage && (
+                <button
+                  onClick={handleSendSurvey}
+                  disabled={sending}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold text-white transition-colors"
+                  style={{ background: "var(--pfg-navy)" }}
+                >
+                  {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Star className="w-4 h-4" />}
+                  Send Survey
+                </button>
+              )}
+            </div>
+          ) : !hasResponse ? (
+            // Sent but not responded
+            <div className="space-y-4">
+              {canManage && (
+                <button
+                  onClick={handleSendSurvey}
+                  disabled={sending}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[12px] font-semibold border transition-colors"
+                  style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-steel)" }}
+                >
+                  {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Star className="w-3.5 h-3.5" />}
+                  Resend Survey
+                </button>
+              )}
+              <div className="rounded-xl p-5 text-center" style={{ background: "hsl(var(--muted))" }}>
+                <div className="w-10 h-10 rounded-full flex items-center justify-center mx-auto mb-3" style={{ background: "var(--amber-bg)", color: "var(--amber)" }}>
+                  <Activity className="w-5 h-5" />
+                </div>
+                <h3 className="text-[14px] font-semibold text-pfg-navy mb-1">Awaiting Response</h3>
+                {sentToken?.createdAt && (
+                  <p className="text-[12px]" style={{ color: "var(--pfg-steel)" }}>
+                    Sent {new Date(sentToken.createdAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                  </p>
+                )}
+                {sentToken?.reminderSentAt && (
+                  <p className="text-[11px] mt-1" style={{ color: "var(--pfg-steel)" }}>
+                    Reminder sent {new Date(sentToken.reminderSentAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+                  </p>
+                )}
+                {sentToken?.finalReminderSentAt && (
+                  <p className="text-[11px] mt-0.5" style={{ color: "var(--pfg-steel)" }}>
+                    Final reminder sent {new Date(sentToken.finalReminderSentAt).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}
+                  </p>
+                )}
+                <p className="text-[11px] mt-2" style={{ color: "var(--pfg-steel)" }}>
+                  Expires {sentToken?.expiresAt ? new Date(sentToken.expiresAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "—"}
+                </p>
+              </div>
+            </div>
+          ) : (
+            // Survey submitted — show results
+            <div className="space-y-5">
+              {canManage && (
+                <button
+                  onClick={handleSendSurvey}
+                  disabled={sending}
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-[12px] font-semibold border transition-colors"
+                  style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-steel)" }}
+                >
+                  {sending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Star className="w-3.5 h-3.5" />}
+                  Send Another Survey
+                </button>
+              )}
+
+              {/* Score summary card */}
+              <div className="rounded-xl p-5" style={{ background: "hsl(var(--muted))" }}>
+                <div className="flex items-center gap-4">
+                  <div className="text-center">
+                    <div className="text-4xl font-extrabold font-display" style={{ color: "var(--pfg-navy)" }}>
+                      {latestResponse?.averageScore?.toFixed(1) ?? "—"}
+                    </div>
+                    <div className="text-[11px] font-medium mt-0.5" style={{ color: "var(--pfg-steel)" }}>out of 5.0</div>
+                    <div className="mt-2">
+                      <StarRating score={latestResponse?.averageScore ?? 0} />
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-[13px] font-semibold text-pfg-navy mb-1">
+                      {latestResponse?.contactName || latestResponse?.contactEmail || "Anonymous"}
+                    </p>
+                    <p className="text-[12px]" style={{ color: "var(--pfg-steel)" }}>
+                      Submitted {latestResponse?.submittedAt
+                        ? new Date(latestResponse.submittedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })
+                        : "—"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Question breakdown */}
+              <div className="rounded-xl p-5 space-y-3" style={{ background: "#fff", border: "1px solid hsl(var(--border))" }}>
+                <h4 className="text-[13px] font-semibold text-pfg-navy mb-3">Question Breakdown</h4>
+                {Q_LABELS.map(({ key, label }) => {
+                  const score = latestResponse?.[key as keyof SurveyResponse] as number | null;
+                  return (
+                    <div key={key}>
+                      <div className="flex justify-between text-[12px] mb-1">
+                        <span style={{ color: "var(--pfg-steel)" }}>{label}</span>
+                        <span className="font-semibold" style={{ color: "var(--pfg-navy)" }}>
+                          {score != null ? RATING_LABELS[score] || score : "—"}
+                        </span>
+                      </div>
+                      {score != null && <ScoreBar score={score} />}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* NPS — hidden from Observer */}
+              {!isObserver && latestResponse?.nps != null && (
+                <div className="rounded-xl p-5" style={{ background: "#fff", border: "1px solid hsl(var(--border))" }}>
+                  <h4 className="text-[13px] font-semibold text-pfg-navy mb-3">Net Promoter Score</h4>
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-12 h-12 rounded-full flex items-center justify-center text-xl font-extrabold font-display"
+                      style={{
+                        background: latestResponse.nps >= 9 ? "var(--green-bg)" : latestResponse.nps >= 7 ? "var(--amber-bg)" : "var(--red-bg)",
+                        color: latestResponse.nps >= 9 ? "var(--green)" : latestResponse.nps >= 7 ? "var(--amber)" : "var(--red)",
+                      }}
+                    >
+                      {latestResponse.nps}
+                    </div>
+                    <div>
+                      <p className="text-[13px] font-semibold" style={{ color: "var(--pfg-navy)" }}>
+                        {latestResponse.nps >= 9 ? "Promoter" : latestResponse.nps >= 7 ? "Passive" : "Detractor"}
+                      </p>
+                      <p className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Score out of 10</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Open feedback — hidden from Observer */}
+              {!isObserver && latestResponse?.openFeedback && (
+                <div className="rounded-xl p-5" style={{ background: "#fff", border: "1px solid hsl(var(--border))" }}>
+                  <h4 className="text-[13px] font-semibold text-pfg-navy mb-2">Additional Comments</h4>
+                  <p className="text-[13px] leading-relaxed" style={{ color: "var(--pfg-steel)" }}>{latestResponse.openFeedback}</p>
+                </div>
+              )}
+
+              {/* Individual feedback section — hidden from Observer */}
+              {!isObserver && latestResponse?.individualFeedbackGiven && (
+                <div className="rounded-xl p-5" style={{ background: "#fff", border: "1px solid hsl(var(--border))" }}>
+                  <h4 className="text-[13px] font-semibold text-pfg-navy mb-2">Individual Feedback Given</h4>
+                  <p className="text-[12px]" style={{ color: "var(--pfg-steel)" }}>
+                    Individual worker comments were submitted. View them in the worker profile pages.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Lessons Learned sub-tab */}
+      {activeSubTab === "lessons" && canPM && (
+        <div className="space-y-4">
+          {llLoading ? (
+            <div className="flex items-center justify-center py-12 text-[13px]" style={{ color: "var(--pfg-steel)" }}>Loading...</div>
+          ) : ll && !llEditing ? (
+            // Read-only view
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-[14px] font-semibold text-pfg-navy">Lessons Learned</h3>
+                {canPM && (
+                  <button
+                    onClick={() => { setLlForm(ll); setLlEditing(true); }}
+                    className="text-[12px] font-semibold px-3 py-1.5 rounded-lg border transition-colors"
+                    style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-steel)" }}
+                  >
+                    Edit
+                  </button>
+                )}
+              </div>
+              {ll.overallAssessment && (
+                <div className="rounded-xl p-4" style={{ background: "hsl(var(--muted))" }}>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: "var(--pfg-steel)" }}>Overall Assessment</div>
+                  <div className="text-[14px] font-semibold text-pfg-navy">
+                    {ASSESSMENT_OPTIONS.find(o => o.value === ll.overallAssessment)?.label || ll.overallAssessment}
+                  </div>
+                </div>
+              )}
+              {[
+                { field: "wentWell" as const, label: "What went well" },
+                { field: "couldImprove" as const, label: "What could improve" },
+                { field: "qhseNotes" as const, label: "QHSE Notes" },
+                { field: "commercialNotes" as const, label: "Commercial Notes" },
+                { field: "customerRelationshipNotes" as const, label: "Customer Relationship" },
+                { field: "sameTeamNotes" as const, label: "Same team again?" },
+                { field: "additionalNotes" as const, label: "Additional Notes" },
+              ].filter(({ field }) => ll[field]).map(({ field, label }) => (
+                <div key={field} className="rounded-xl p-4" style={{ background: "#fff", border: "1px solid hsl(var(--border))" }}>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: "var(--pfg-steel)" }}>{label}</div>
+                  <div className="text-[13px] leading-relaxed" style={{ color: "var(--pfg-navy)" }}>{ll[field]}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            // Form (new or editing)
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-[14px] font-semibold text-pfg-navy">{ll ? "Edit Lessons Learned" : "New Lessons Learned"}</h3>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-[12px] font-semibold mb-1" style={{ color: "var(--pfg-steel)" }}>Overall Assessment</label>
+                  <select
+                    className="w-full border rounded-lg px-3 py-2 text-[13px]"
+                    style={{ borderColor: "hsl(var(--border))" }}
+                    value={llForm.overallAssessment || ""}
+                    onChange={e => setLlForm(f => ({ ...f, overallAssessment: e.target.value || null }))}
+                  >
+                    <option value="">Select...</option>
+                    {ASSESSMENT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                </div>
+
+                {[
+                  { field: "wentWell" as const, label: "What went well?", placeholder: "Things that worked well on this project..." },
+                  { field: "couldImprove" as const, label: "What could be improved?", placeholder: "Areas for improvement..." },
+                  { field: "qhseNotes" as const, label: "QHSE Performance Notes", placeholder: "Health, safety, and environment observations..." },
+                  { field: "commercialNotes" as const, label: "Commercial Performance Notes", placeholder: "Budget, margins, variations..." },
+                  { field: "customerRelationshipNotes" as const, label: "Customer Relationship Notes", placeholder: "How was the relationship with the customer?" },
+                  { field: "sameTeamNotes" as const, label: "Same Team Again?", placeholder: "Would you use the same team? Any personnel notes?" },
+                  { field: "additionalNotes" as const, label: "Additional Notes", placeholder: "Anything else..." },
+                ].map(({ field, label, placeholder }) => (
+                  <div key={field}>
+                    <label className="block text-[12px] font-semibold mb-1" style={{ color: "var(--pfg-steel)" }}>{label}</label>
+                    <textarea
+                      className="w-full border rounded-lg px-3 py-2 text-[13px] resize-y"
+                      style={{ borderColor: "hsl(var(--border))", minHeight: 80 }}
+                      rows={3}
+                      placeholder={placeholder}
+                      value={(llForm[field] as string | null) || ""}
+                      onChange={e => setLlForm(f => ({ ...f, [field]: e.target.value || null }))}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  onClick={handleSaveLessons}
+                  disabled={llSaving}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold text-white transition-colors"
+                  style={{ background: "var(--pfg-navy)" }}
+                >
+                  {llSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  Save Lessons Learned
+                </button>
+                {ll && (
+                  <button
+                    onClick={() => setLlEditing(false)}
+                    className="px-4 py-2 rounded-lg text-[13px] font-semibold border transition-colors"
+                    style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-steel)" }}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ProjectHubDetail({ params }: { params: { code: string } }) {
   const { data, isLoading, refetch } = useDashboardData();
   const { user } = useAuth();
@@ -637,7 +1149,12 @@ export default function ProjectHubDetail({ params }: { params: { code: string } 
           <PlaceholderTab label="Timesheets" icon={<ClipboardList className="w-6 h-6" />} />
         )}
         {activeTab === "dailyReports" && (
-          <PlaceholderTab label="Daily Reports" icon={<FileText className="w-6 h-6" />} />
+          <DailyReportHub 
+            project={project} 
+            workers={data?.workers || []} 
+            assignments={assignments}
+            user={user}
+          />
         )}
         {activeTab === "logistics" && (
           <PlaceholderTab label="Logistics" icon={<Truck className="w-6 h-6" />} />
@@ -646,13 +1163,13 @@ export default function ProjectHubDetail({ params }: { params: { code: string } 
           <PlaceholderTab label="Documents" icon={<FolderOpen className="w-6 h-6" />} />
         )}
         {activeTab === "commercial" && (
-          <PlaceholderTab label="Commercial" icon={<DollarSign className="w-6 h-6" />} />
+          <CommercialTab project={project} user={user} workers={data?.workers || []} assignments={assignments} />
         )}
         {activeTab === "marketing" && (
           <PlaceholderTab label="Marketing" icon={<Megaphone className="w-6 h-6" />} />
         )}
         {activeTab === "satisfaction" && (
-          <PlaceholderTab label="Customer Satisfaction & Lessons Learned" icon={<Star className="w-6 h-6" />} />
+          <CustomerSatisfactionTab project={project} userRole={user?.role || "observer"} />
         )}
       </div>
     </div>

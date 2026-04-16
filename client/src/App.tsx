@@ -16,6 +16,7 @@ import PayrollRules from "./pages/PayrollRules";
 import UserManagement from "./pages/UserManagement";
 import Login from "./pages/Login";
 import ConfirmAssignment from "./pages/ConfirmAssignment";
+import MilestoneApprovalPage from "./pages/MilestoneApprovalPage";
 import NotFound from "./pages/not-found";
 import { LogOut, Loader2 } from "lucide-react";
 
@@ -213,6 +214,12 @@ function AppContent() {
   if (location.startsWith("/portal/")) {
     const projectCode = location.replace("/portal/", "");
     return <CustomerPortal params={{ projectCode }} />;
+  }
+
+  // Milestone approval — public, no auth required
+  if (location.startsWith("/milestone-approval/")) {
+    const token = location.replace("/milestone-approval/", "");
+    return <MilestoneApprovalPage params={{ token }} />;
   }
 
   // Auth verify redirect

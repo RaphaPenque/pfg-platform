@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Project Feedback — Powerforce Global</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- HEADER -->
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="logo">
+        <!-- LOGO PLACEHOLDER: Replace img src with actual PFG logo file in build task -->
+        <!-- The logo file lives in the platform codebase. Build task should swap this. -->
+        <img id="pfgLogo" src="logo.png" alt="Powerforce Global"
+             onerror="this.style.display='none';document.getElementById('pfgLogoFallback').style.display='flex'"
+             style="height:32px;width:auto;display:block" />
+        <div id="pfgLogoFallback" style="display:none;align-items:center;gap:0.5rem;color:var(--color-primary)">
+          <svg width="32" height="32" viewBox="0 0 32 32" fill="none" aria-label="Powerforce Global">
+            <circle cx="16" cy="16" r="15" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M10 16 L16 9 L22 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+            <path d="M10 16 L16 23 L22 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none" opacity="0.4"/>
+            <circle cx="16" cy="16" r="2.5" fill="currentColor"/>
+          </svg>
+        </div>
+        <span class="logo-text">Powerforce Global</span>
+      </div>
+      <button class="theme-toggle" data-theme-toggle aria-label="Switch to dark mode">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- MAIN -->
+  <main class="main">
+    <div class="survey-wrap">
+
+      <!-- INTRO -->
+      <div class="survey-intro">
+        <div class="project-chip">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
+          <span id="projectChip">GENT — GE Vernova · ST LP Rotor Upgrade</span>
+        </div>
+        <h1 class="survey-title">We'd love your feedback</h1>
+        <p class="survey-subtitle">At Powerforce Global, we expect the best from our teams and ourselves. Your feedback helps us maintain the highest standards and deliver excellence on every project. This takes about 3 minutes.</p>
+        <div class="respondent-pill">
+          <div class="respondent-avatar" id="respondentAvatar">NG</div>
+          <div class="respondent-info">
+            <span class="respondent-name" id="respondentName">Nashater Gill</span>
+            <span class="respondent-role" id="respondentRole">Site Manager · GE Vernova</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- SURVEY FORM -->
+      <form class="survey-form" id="surveyForm" novalidate>
+
+        <!-- SECTION: PERFORMANCE RATINGS -->
+        <div class="form-section">
+          <div class="section-label">Project Performance</div>
+
+          <!-- Q1 -->
+          <div class="question-block" data-q="1">
+            <div class="question-header">
+              <span class="q-num">1</span>
+              <label class="question-text">How satisfied were you with the planning and preparation phase, including communication prior to mobilisation?</label>
+            </div>
+            <div class="rating-scale" role="radiogroup" aria-label="Planning satisfaction rating">
+              <div class="scale-anchors"><span>Very Dissatisfied</span><span>Extremely Satisfied</span></div>
+              <div class="scale-buttons">
+                <label class="scale-btn" title="1 – Very Dissatisfied"><input type="radio" name="q1" value="1" required /><span>1</span></label>
+                <label class="scale-btn" title="2"><input type="radio" name="q1" value="2" /><span>2</span></label>
+                <label class="scale-btn" title="3 – Neutral"><input type="radio" name="q1" value="3" /><span>3</span></label>
+                <label class="scale-btn" title="4"><input type="radio" name="q1" value="4" /><span>4</span></label>
+                <label class="scale-btn" title="5 – Extremely Satisfied"><input type="radio" name="q1" value="5" /><span>5</span></label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Q2 -->
+          <div class="question-block" data-q="2">
+            <div class="question-header">
+              <span class="q-num">2</span>
+              <label class="question-text">How satisfied were you with the quality of work carried out during the project?</label>
+            </div>
+            <div class="rating-scale" role="radiogroup" aria-label="Quality of execution rating">
+              <div class="scale-anchors"><span>Very Dissatisfied</span><span>Extremely Satisfied</span></div>
+              <div class="scale-buttons">
+                <label class="scale-btn"><input type="radio" name="q2" value="1" required /><span>1</span></label>
+                <label class="scale-btn"><input type="radio" name="q2" value="2" /><span>2</span></label>
+                <label class="scale-btn"><input type="radio" name="q2" value="3" /><span>3</span></label>
+                <label class="scale-btn"><input type="radio" name="q2" value="4" /><span>4</span></label>
+                <label class="scale-btn"><input type="radio" name="q2" value="5" /><span>5</span></label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Q3 -->
+          <div class="question-block" data-q="3">
+            <div class="question-header">
+              <span class="q-num">3</span>
+              <label class="question-text">How satisfied were you with the health and safety standards observed throughout the project?</label>
+            </div>
+            <div class="rating-scale" role="radiogroup" aria-label="Health and safety rating">
+              <div class="scale-anchors"><span>Very Dissatisfied</span><span>Extremely Satisfied</span></div>
+              <div class="scale-buttons">
+                <label class="scale-btn"><input type="radio" name="q3" value="1" required /><span>1</span></label>
+                <label class="scale-btn"><input type="radio" name="q3" value="2" /><span>2</span></label>
+                <label class="scale-btn"><input type="radio" name="q3" value="3" /><span>3</span></label>
+                <label class="scale-btn"><input type="radio" name="q3" value="4" /><span>4</span></label>
+                <label class="scale-btn"><input type="radio" name="q3" value="5" /><span>5</span></label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Q4 -->
+          <div class="question-block" data-q="4">
+            <div class="question-header">
+              <span class="q-num">4</span>
+              <label class="question-text">How satisfied were you with the supervision provided on site?</label>
+            </div>
+            <div class="rating-scale" role="radiogroup" aria-label="Supervision rating">
+              <div class="scale-anchors"><span>Very Dissatisfied</span><span>Extremely Satisfied</span></div>
+              <div class="scale-buttons">
+                <label class="scale-btn"><input type="radio" name="q4" value="1" required /><span>1</span></label>
+                <label class="scale-btn"><input type="radio" name="q4" value="2" /><span>2</span></label>
+                <label class="scale-btn"><input type="radio" name="q4" value="3" /><span>3</span></label>
+                <label class="scale-btn"><input type="radio" name="q4" value="4" /><span>4</span></label>
+                <label class="scale-btn"><input type="radio" name="q4" value="5" /><span>5</span></label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Q5 -->
+          <div class="question-block" data-q="5">
+            <div class="question-header">
+              <span class="q-num">5</span>
+              <label class="question-text">How satisfied were you with the performance of the Powerforce Global Project Manager throughout the project?</label>
+            </div>
+            <div class="rating-scale" role="radiogroup" aria-label="Project manager rating">
+              <div class="scale-anchors"><span>Very Dissatisfied</span><span>Extremely Satisfied</span></div>
+              <div class="scale-buttons">
+                <label class="scale-btn"><input type="radio" name="q5" value="1" required /><span>1</span></label>
+                <label class="scale-btn"><input type="radio" name="q5" value="2" /><span>2</span></label>
+                <label class="scale-btn"><input type="radio" name="q5" value="3" /><span>3</span></label>
+                <label class="scale-btn"><input type="radio" name="q5" value="4" /><span>4</span></label>
+                <label class="scale-btn"><input type="radio" name="q5" value="5" /><span>5</span></label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Q6 -->
+          <div class="question-block" data-q="6">
+            <div class="question-header">
+              <span class="q-num">6</span>
+              <label class="question-text">Overall, how satisfied were you with the performance of this project?</label>
+            </div>
+            <div class="rating-scale" role="radiogroup" aria-label="Overall satisfaction rating">
+              <div class="scale-anchors"><span>Very Dissatisfied</span><span>Extremely Satisfied</span></div>
+              <div class="scale-buttons">
+                <label class="scale-btn"><input type="radio" name="q6" value="1" required /><span>1</span></label>
+                <label class="scale-btn"><input type="radio" name="q6" value="2" /><span>2</span></label>
+                <label class="scale-btn"><input type="radio" name="q6" value="3" /><span>3</span></label>
+                <label class="scale-btn"><input type="radio" name="q6" value="4" /><span>4</span></label>
+                <label class="scale-btn"><input type="radio" name="q6" value="5" /><span>5</span></label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- NPS SECTION -->
+        <div class="form-section">
+          <div class="section-label">Recommendation</div>
+          <div class="question-block nps-block" data-q="7">
+            <div class="question-header">
+              <span class="q-num">7</span>
+              <label class="question-text">How likely is it that you would recommend Powerforce Global to a colleague or partner?</label>
+            </div>
+            <div class="nps-scale" role="radiogroup" aria-label="NPS rating 0 to 10">
+              <div class="nps-buttons">
+                <label class="nps-btn" title="0 – Not at all likely"><input type="radio" name="q7" value="0" required /><span>0</span></label>
+                <label class="nps-btn"><input type="radio" name="q7" value="1" /><span>1</span></label>
+                <label class="nps-btn"><input type="radio" name="q7" value="2" /><span>2</span></label>
+                <label class="nps-btn"><input type="radio" name="q7" value="3" /><span>3</span></label>
+                <label class="nps-btn"><input type="radio" name="q7" value="4" /><span>4</span></label>
+                <label class="nps-btn"><input type="radio" name="q7" value="5" /><span>5</span></label>
+                <label class="nps-btn"><input type="radio" name="q7" value="6" /><span>6</span></label>
+                <label class="nps-btn nps-passive"><input type="radio" name="q7" value="7" /><span>7</span></label>
+                <label class="nps-btn nps-passive"><input type="radio" name="q7" value="8" /><span>8</span></label>
+                <label class="nps-btn nps-promoter"><input type="radio" name="q7" value="9" /><span>9</span></label>
+                <label class="nps-btn nps-promoter"><input type="radio" name="q7" value="10" /><span>10</span></label>
+              </div>
+              <div class="nps-anchors">
+                <span>Not at all likely</span>
+                <span>Extremely likely</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- OPEN FEEDBACK -->
+        <div class="form-section">
+          <div class="section-label">Additional Comments</div>
+          <div class="question-block" data-q="8">
+            <div class="question-header">
+              <span class="q-num">8</span>
+              <label class="question-text" for="q8text">Is there anything else you'd like to share with us? <span class="optional-tag">Optional</span></label>
+            </div>
+            <textarea id="q8text" name="q8" class="feedback-textarea" rows="4" placeholder="Your thoughts, observations, or suggestions..."></textarea>
+          </div>
+        </div>
+
+        <!-- INDIVIDUAL FEEDBACK (CONDITIONAL) -->
+        <div class="form-section">
+          <div class="section-label">Individual Feedback <span class="optional-tag">Optional</span></div>
+          <div class="question-block" data-q="9">
+            <div class="question-header">
+              <span class="q-num">9</span>
+              <label class="question-text">Would you like to share feedback on an individual member of the Powerforce team?</label>
+            </div>
+            <div class="toggle-choice">
+              <button type="button" class="choice-btn" id="indivNo" aria-pressed="false">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                No, I'm done
+              </button>
+              <button type="button" class="choice-btn choice-btn--yes" id="indivYes" aria-pressed="false">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                Yes, add team feedback
+              </button>
+            </div>
+
+            <!-- TEAM ROSTER (hidden until Yes) -->
+            <div class="team-roster" id="teamRoster" hidden>
+              <p class="roster-instruction">Select anyone you'd like to leave feedback for. All fields are optional.</p>
+              <div class="team-grid" id="teamGrid">
+                <!-- Populated by JS with demo data -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- SUBMIT -->
+        <div class="submit-section">
+          <button type="submit" class="submit-btn" id="submitBtn">
+            <span>Submit Feedback</span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+          </button>
+          <p class="submit-note">Your responses are confidential and shared only with the Powerforce Global project team.</p>
+        </div>
+
+      </form>
+
+      <!-- SUCCESS STATE -->
+      <div class="success-state" id="successState" hidden>
+        <div class="success-icon">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+        </div>
+        <h2 class="success-title">Thank you for your feedback</h2>
+        <p class="success-body">Your responses have been submitted and shared with the Powerforce Global team. We genuinely appreciate you taking the time — this helps us improve on every project.</p>
+        <div class="success-project">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
+          <span id="successProjectName">GENT — GE Vernova · ST LP Rotor Upgrade</span>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="site-footer">
+    <p>This survey is a service from <strong>Powerforce Global</strong>. Responses are confidential.</p>
+  </footer>
+
+  <script src="survey.js"></script>
+<script data-pplx-inline-edit>
+(function(){
+  if(window===window.top)return;
+  function inlineAll(orig,clone){
+    if(orig.nodeType!==1)return;
+    try{
+      var cs=getComputedStyle(orig);
+      var t='';
+      for(var i=0;i<cs.length;i++){t+=cs[i]+':'+cs.getPropertyValue(cs[i])+';';}
+      clone.style.cssText=t;
+    }catch(e){}
+    var oc=orig.children,cc=clone.children;
+    for(var j=0;j<oc.length&&j<cc.length;j++){inlineAll(oc[j],cc[j]);}
+  }
+  function stripExternal(clone){
+    var imgs=clone.querySelectorAll('img');
+    for(var i=0;i<imgs.length;i++){
+      var s=imgs[i].getAttribute('src');
+      if(s&&!s.startsWith('data:'))imgs[i].removeAttribute('src');
+    }
+    var all=clone.querySelectorAll('*');
+    for(var i=0;i<all.length;i++){
+      var st=all[i].style.cssText;
+      if(st&&st.indexOf('url(')>=0){
+        all[i].style.cssText=st.replace(/url\(["']?(?!data:)[^)"']*["']?\)/gi,'none');
+      }
+    }
+  }
+  window.addEventListener('message',function(e){
+    if(!e.data||e.data.type!=='INLINE_EDIT_CAPTURE_REQUEST')return;
+    var scrollX=window.scrollX||window.pageXOffset||0;
+    var scrollY=window.scrollY||window.pageYOffset||0;
+    var w=window.innerWidth,h=window.innerHeight;
+    try{
+      var clone=document.documentElement.cloneNode(true);
+      var rm=clone.querySelectorAll('script,link[rel="stylesheet"],style');
+      for(var i=0;i<rm.length;i++){rm[i].remove();}
+      inlineAll(document.documentElement,clone);
+      stripExternal(clone);
+      var html=new XMLSerializer().serializeToString(clone);
+      var svg='<svg xmlns="http://www.w3.org/2000/svg" width="'+w+'" height="'+h+'">'
+        +'<foreignObject width="100%" height="100%">'
+        +'<div xmlns="http://www.w3.org/1999/xhtml" style="width:'+w+'px;height:'+h+'px;overflow:hidden">'
+        +'<div style="transform:translate(-'+scrollX+'px,-'+scrollY+'px);transform-origin:top left">'
+        +html+'</div></div></foreignObject></svg>';
+      var svgUrl='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg);
+      var img=new Image();
+      img.onload=function(){
+        var c=document.createElement('canvas');c.width=w;c.height=h;
+        c.getContext('2d').drawImage(img,0,0);
+        window.parent.postMessage({type:'INLINE_EDIT_SCREENSHOT_RESULT',dataUrl:c.toDataURL('image/png'),scrollX:scrollX,scrollY:scrollY},'*');
+      };
+      img.onerror=function(){
+        window.parent.postMessage({type:'INLINE_EDIT_SCREENSHOT_RESULT',dataUrl:null,scrollX:scrollX,scrollY:scrollY},'*');
+      };
+      img.src=svgUrl;
+    }catch(err){
+      window.parent.postMessage({type:'INLINE_EDIT_SCREENSHOT_RESULT',dataUrl:null,scrollX:scrollX,scrollY:scrollY},'*');
+    }
+  });
+})();
+</script></body>
+</html>

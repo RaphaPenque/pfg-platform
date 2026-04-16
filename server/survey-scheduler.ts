@@ -1,0 +1,122 @@
+/**
+ * Survey reminder scheduler
+ * Checks survey tokens periodically and sends reminder/final-reminder emails.
+ * Called from server/index.ts on a 6-hour interval.
+ */
+
+import { storage } from "./storage";
+import { sendMail } from "./email";
+
+const APP_URL = process.env.APP_URL || "https://pfg-platform.onrender.com";
+
+const MS_7_DAYS  = 7  * 24 * 60 * 60 * 1000;
+const MS_13_DAYS = 13 * 24 * 60 * 60 * 1000;
+
+export async function checkSurveyReminders(): Promise<void> {
+  try {
+    const now = new Date();
+
+    // Get all tokens for all projects — we need to iterate
+    // Since we don't have a getAll method, we query all projects and their tokens.
+    // In production this should use a direct DB query; here we work with what's available.
+    const allProjects = await storage.getProjects();
+
+    for (const project of allProjects) {
+      const tokens = await storage.getSurveyTokensByProject(project.id);
+
+      for (const token of tokens) {
+        // Skip if already used
+        if (token.usedAt) continue;
+
+        const createdAt = token.createdAt ? new Date(token.createdAt) : null;
+        const expiresAt = new Date(token.expiresAt);
+        const firstName = (token.contactName || "").split(" ")[0] || "there";
+        const surveyUrl = `${APP_URL}/survey?token=${token.token}`;
+
+        // Expired tokens with no response → mark project survey status as no_response
+        if (expiresAt < now) {
+          // No survey status field on project currently — log and skip
+          console.log(`[survey-scheduler] Token ${token.id} expired with no response for project ${project.name}`);
+          continue;
+        }
+
+        if (!createdAt) continue;
+
+        const ageMs = now.getTime() - createdAt.getTime();
+
+        // 7-day reminder
+        if (ageMs >= MS_7_DAYS && !token.reminderSentAt) {
+          try {
+            const html = buildReminderEmail(firstName, project.name, surveyUrl, "reminder");
+            await sendMail({
+              to: token.contactEmail,
+              subject: `Reminder: We'd love your feedback — ${project.name}`,
+              html,
+              text: `Hi ${firstName},\n\nJust a friendly reminder to share your feedback on ${project.name}.\n\nSurvey link: ${surveyUrl}\n\nThank you,\nPowerforce Global`,
+            });
+            await storage.updateSurveyToken(token.id, { reminderSentAt: now });
+            console.log(`[survey-scheduler] Sent 7-day reminder to ${token.contactEmail} for project ${project.name}`);
+          } catch (err) {
+            console.error(`[survey-scheduler] Failed to send 7-day reminder:`, err);
+          }
+        }
+
+        // 13-day final reminder
+        if (ageMs >= MS_13_DAYS && !token.finalReminderSentAt) {
+          try {
+            const html = buildReminderEmail(firstName, project.name, surveyUrl, "final");
+            await sendMail({
+              to: token.contactEmail,
+              subject: `Final reminder: Your feedback on ${project.name}`,
+              html,
+              text: `Hi ${firstName},\n\nThis is a final reminder to share your feedback on ${project.name}. Your link expires soon.\n\nSurvey link: ${surveyUrl}\n\nThank you,\nPowerforce Global`,
+            });
+            await storage.updateSurveyToken(token.id, { finalReminderSentAt: now });
+            console.log(`[survey-scheduler] Sent 13-day final reminder to ${token.contactEmail} for project ${project.name}`);
+          } catch (err) {
+            console.error(`[survey-scheduler] Failed to send 13-day final reminder:`, err);
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error("[survey-scheduler] checkSurveyReminders error:", err);
+  }
+}
+
+function buildReminderEmail(firstName: string, projectName: string, surveyUrl: string, type: "reminder" | "final"): string {
+  const isFinal = type === "final";
+  const heading = isFinal
+    ? "Last chance to share your feedback"
+    : "A friendly reminder about your feedback";
+  const body = isFinal
+    ? `This is your final reminder to complete the feedback survey for <strong>${projectName}</strong>. Your link expires in approximately 24 hours.`
+    : `We noticed you haven't yet completed the feedback survey for <strong>${projectName}</strong>. It only takes about 3 minutes and your input is very valuable to us.`;
+
+  return `
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="font-family:'Inter',Arial,sans-serif;background:#f4f4f5;padding:40px 0;">
+  <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+    <div style="background:#1A1D23;padding:28px 32px;text-align:center;">
+      <img src="${APP_URL}/logo-gold.png" alt="Powerforce Global" height="36" style="display:block;margin:0 auto;" />
+    </div>
+    <div style="padding:32px;color:#1A1D23;">
+      <h2 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#1A1D23;">Hi ${firstName},</h2>
+      <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">${heading}</p>
+      <p style="margin:0 0 16px;color:#4b5563;font-size:14px;line-height:1.6;">${body}</p>
+      <div style="text-align:center;margin:24px 0;">
+        <a href="${surveyUrl}" style="display:inline-block;background:#F5BD00;color:#1A1D23;font-weight:700;font-size:15px;padding:14px 32px;border-radius:8px;text-decoration:none;">Complete Feedback Survey</a>
+      </div>
+      <p style="margin:16px 0 0;font-size:12px;color:#9ca3af;text-align:center;">
+        Your personal survey link: <span style="word-break:break-all;">${surveyUrl}</span>
+      </p>
+    </div>
+    <div style="text-align:center;padding:20px 32px;font-size:11px;color:#9ca3af;border-top:1px solid #f0f0f0;">
+      &copy; ${new Date().getFullYear()} Powerforce Global &middot; Confidential
+    </div>
+  </div>
+</body>
+</html>`;
+}
