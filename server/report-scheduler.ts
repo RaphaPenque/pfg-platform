@@ -120,6 +120,7 @@ async function sendReportForProject(
   const pmName = pmUser?.name || 'Powerforce Global Project Management';
 
   const toAddresses = [
+    project.sourcingContactEmail,
     project.customerProjectManagerEmail,
     project.siteManagerEmail,
   ].filter((e: any): e is string => Boolean(e));
