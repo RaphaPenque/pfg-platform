@@ -18,8 +18,9 @@
         <!-- LOGO PLACEHOLDER: Replace img src with actual PFG logo file in build task -->
         <!-- The logo file lives in the platform codebase. Build task should swap this. -->
         <img id="pfgLogo" src="logo.png" alt="Powerforce Global"
-             onerror="this.style.display='none';document.getElementById('pfgLogoFallback').style.display='flex'"
-             style="height:32px;width:auto;display:block" />
+             onerror="this.style.display='none';document.getElementById('pfgLogoFallback').style.display='flex';document.getElementById('pfgLogoText').style.display='inline';"
+             onload="document.getElementById('pfgLogoText').style.display='none';"
+             style="height:38px;width:auto;display:block" />
         <div id="pfgLogoFallback" style="display:none;align-items:center;gap:0.5rem;color:var(--color-primary)">
           <svg width="32" height="32" viewBox="0 0 32 32" fill="none" aria-label="Powerforce Global">
             <circle cx="16" cy="16" r="15" stroke="currentColor" stroke-width="1.5"/>
@@ -28,7 +29,7 @@
             <circle cx="16" cy="16" r="2.5" fill="currentColor"/>
           </svg>
         </div>
-        <span class="logo-text">Powerforce Global</span>
+        <span id="pfgLogoText" class="logo-text">Powerforce Global</span>
       </div>
       <button class="theme-toggle" data-theme-toggle aria-label="Switch to dark mode">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
