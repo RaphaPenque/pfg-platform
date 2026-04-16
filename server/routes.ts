@@ -9,6 +9,7 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
+import { generateWeeklyReportPdf } from "./report-generator";
 
 // Extend Express Request with user
 declare global {
@@ -256,7 +257,229 @@ export function registerRoutes(server: Server, app: Express) {
       }
     }
 
-    res.json({ project, roleSlots, assignments, workers });
+    // ── Portal extra data ───────────────────────────────────────────
+    const [allReports, allToolboxTalks, allSafetyObs, allIncidents, allComments] = await Promise.all([
+      storage.getDailyReports(project.id),
+      storage.getToolboxTalks(project.id),
+      storage.getSafetyObservations(project.id),
+      storage.getIncidentReports(project.id),
+      storage.getCommentsLog(project.id),
+    ]);
+
+    // Published reports with their comments
+    const publishedReports = allReports
+      .filter((r) => r.publishedToPortal)
+      .sort((a, b) => (a.reportDate < b.reportDate ? 1 : -1))
+      .map((r) => ({
+        id: r.id,
+        reportDate: r.reportDate,
+        completedTasks: r.completedTasks ?? [],
+        delaysLog: r.delaysLog ?? [],
+        commentsLog: allComments.filter((c) => c.reportId === r.id),
+      }));
+
+    // Safety data
+    const safetyData = {
+      toolboxTalks: { count: allToolboxTalks.length, list: allToolboxTalks },
+      safetyObservations: { count: allSafetyObs.length, list: allSafetyObs },
+      incidentReports: { count: allIncidents.length, list: allIncidents },
+    };
+
+    // KPIs
+    const today = new Date();
+    const startDate = project.startDate ? new Date(project.startDate) : null;
+    const endDate = project.endDate ? new Date(project.endDate) : null;
+    const msPerDay = 1000 * 60 * 60 * 24;
+    const daysRemaining = endDate
+      ? Math.max(0, Math.ceil((endDate.getTime() - today.getTime()) / msPerDay))
+      : null;
+    const totalDays = (startDate && endDate)
+      ? Math.ceil((endDate.getTime() - startDate.getTime()) / msPerDay)
+      : null;
+
+    const totalDelays = allReports.reduce((sum, r) => {
+      const dl = Array.isArray(r.delaysLog) ? r.delaysLog : [];
+      return sum + dl.length;
+    }, 0);
+
+    const kpis = {
+      daysRemaining,
+      totalDays,
+      activeTeam: Object.keys(workers).length,
+      delayCount: totalDelays,
+      safetyObsCount: allSafetyObs.length,
+    };
+
+    res.json({ project, roleSlots, assignments, workers, publishedReports, safetyData, kpis });
+  });
+
+  // GET /api/portal/:code/report/:reportId/pdf — public, no auth
+  app.get("/api/portal/:code/report/:reportId/pdf", async (req: Request, res: Response) => {
+    try {
+      const code = (req.params.code as string).toUpperCase();
+      const reportId = parseInt(req.params.reportId as string, 10);
+
+      if (isNaN(reportId)) return res.status(400).json({ error: "Invalid report ID" });
+
+      const project = await storage.getProjectByCode(code);
+      if (!project) return res.status(404).json({ error: "Project not found" });
+
+      // Fetch all reports for this project, find the one by ID
+      const allReports = await storage.getDailyReports(project.id);
+      const report = allReports.find(r => r.id === reportId);
+      if (!report) return res.status(404).json({ error: "Report not found" });
+      if (!report.publishedToPortal) return res.status(403).json({ error: "Report not published" });
+
+      // Calculate week start/end from reportDate (Mon–Sun)
+      const reportDateObj = new Date(report.reportDate + 'T00:00:00Z');
+      const dayOfWeek = reportDateObj.getUTCDay(); // 0=Sun,1=Mon,...,6=Sat
+      // Week starts Monday, ends Sunday
+      const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      const weekStartObj = new Date(reportDateObj);
+      weekStartObj.setUTCDate(reportDateObj.getUTCDate() - daysToMonday);
+      const weekEndObj = new Date(weekStartObj);
+      weekEndObj.setUTCDate(weekStartObj.getUTCDate() + 6);
+      const toISO = (d: Date) => d.toISOString().split('T')[0];
+      const weekStart = toISO(weekStartObj);
+      const weekEnd = toISO(weekEndObj);
+
+      // PM name
+      let pmName = 'Powerforce Global Project Management';
+      try {
+        const lead = await storage.getProjectLead(project.id);
+        if (lead) {
+          const pmUser = await storage.getUserById(lead.userId);
+          if (pmUser?.name) pmName = pmUser.name;
+        }
+      } catch { /* ignore */ }
+
+      // Team members
+      const [assignments, allWorkers, allToolboxTalks, allSafetyObs, allIncidents, allComments] = await Promise.all([
+        storage.getAssignmentsByProject(project.id),
+        storage.getWorkers(),
+        storage.getToolboxTalks(project.id),
+        storage.getSafetyObservations(project.id),
+        storage.getIncidentReports(project.id),
+        storage.getCommentsLog(project.id),
+      ]);
+
+      const workerMap = Object.fromEntries(allWorkers.map(w => [w.id, w]));
+      const activeAssignments = assignments.filter(a => a.status === 'active' || a.status === 'flagged');
+      const teamMembers = activeAssignments.map(a => {
+        const w = workerMap[a.workerId];
+        return {
+          name: w?.name || `Worker ${a.workerId}`,
+          role: a.role || '',
+          shift: a.shift || '',
+          startDate: a.startDate || '',
+          endDate: a.endDate || '',
+        };
+      });
+
+      // Safety counts for the week
+      const weekStartMs = weekStartObj.getTime();
+      const weekEndMs = weekEndObj.getTime() + 86_400_000;
+      const filterWeek = (items: Array<{ createdAt?: Date | string | null }>) =>
+        items.filter(item => {
+          if (!item.createdAt) return false;
+          const t = new Date(item.createdAt as string).getTime();
+          return t >= weekStartMs && t < weekEndMs;
+        });
+
+      const weekTalks = filterWeek(allToolboxTalks).length;
+      const weekObs = filterWeek(allSafetyObs).length;
+      const weekNearMisses = allIncidents.filter(i => {
+        if (!i.createdAt) return false;
+        const t = new Date(String(i.createdAt)).getTime();
+        return t >= weekStartMs && t < weekEndMs && (i as any).type === 'near_miss';
+      }).length;
+      const weekIncidents = filterWeek(allIncidents).length;
+
+      // Comments for this report
+      const reportComments = allComments
+        .filter(c => c.reportId === report.id)
+        .map(c => ({
+          date: (c.enteredAt || '').toString().split('T')[0],
+          entry: c.entry || '',
+          userName: (c as any).userName || '',
+        }));
+
+      // Days remaining / progress
+      const today = new Date();
+      const msPerDay = 86_400_000;
+      const projStart = project.startDate ? new Date(project.startDate + 'T00:00:00Z') : null;
+      const projEnd = project.endDate ? new Date(project.endDate + 'T00:00:00Z') : null;
+      const daysRemaining = projEnd ? Math.max(0, Math.ceil((projEnd.getTime() - today.getTime()) / msPerDay)) : 0;
+      const totalDays = (projStart && projEnd) ? Math.ceil((projEnd.getTime() - projStart.getTime()) / msPerDay) : 1;
+      const elapsedDays = projStart ? Math.ceil((today.getTime() - projStart.getTime()) / msPerDay) : 0;
+      const progressPct = Math.min(100, Math.max(0, (elapsedDays / totalDays) * 100));
+
+      const completedTasks: Array<{ description: string; percentComplete?: number; notes?: string }> =
+        Array.isArray(report.completedTasks) ? (report.completedTasks as any[]).map(t =>
+          typeof t === 'string' ? { description: t } : t
+        ) : [];
+
+      const delaysLog: Array<{ description: string; duration?: string; agreedWithCustomer?: string }> =
+        Array.isArray(report.delaysLog) ? (report.delaysLog as any[]).map(d =>
+          typeof d === 'string' ? { description: d } : d
+        ) : [];
+
+      // Work packages if L/S project
+      let workPackages: Array<{ name: string; plannedStart?: string; plannedFinish?: string; actualStart?: string; actualFinish?: string }> | undefined;
+      const contractType = (project as any).contractType || 'T&M';
+      if (contractType.toUpperCase().includes('L') && contractType.toUpperCase().includes('S')) {
+        try {
+          const roleSlots = await storage.getRoleSlotsByProject(project.id);
+          workPackages = (roleSlots as any[]).filter(rs => rs.name).map(rs => ({
+            name: rs.name || rs.role || '',
+            plannedStart: rs.plannedStart || '',
+            plannedFinish: rs.plannedFinish || '',
+            actualStart: rs.actualStart || '',
+            actualFinish: rs.actualFinish || '',
+          }));
+        } catch { /* ignore */ }
+      }
+
+      const reportData = {
+        projectName: project.name || '',
+        projectCode: project.code || '',
+        customer: project.customer || '',
+        siteName: project.siteName || project.location || '',
+        startDate: project.startDate || '',
+        endDate: project.endDate || '',
+        contractType,
+        shiftPattern: (project as any).shiftPattern || '',
+        weekStart,
+        weekEnd,
+        pmName,
+        completedTasks,
+        delaysLog,
+        commentsEntries: reportComments,
+        teamMembers,
+        workPackages,
+        safetyData: {
+          toolboxTalks: weekTalks,
+          observations: weekObs,
+          nearMisses: weekNearMisses,
+          incidents: weekIncidents,
+        },
+        daysRemaining,
+        activeTeam: teamMembers.length,
+        progressPct,
+        oemColour: (project as any).oemColour || '#005E60',
+      };
+
+      const pdfBuffer = await generateWeeklyReportPdf(reportData);
+
+      const dateStr = report.reportDate.replace(/-/g, '');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${project.code}-report-${dateStr}.pdf"`);
+      res.setHeader('Content-Length', pdfBuffer.length);
+      res.send(pdfBuffer);
+    } catch (err: any) {
+      console.error('[portal-pdf] Error generating report PDF:', err);
+      res.status(500).json({ error: 'Failed to generate PDF', detail: err?.message });
+    }
   });
 
   // ===== PUBLIC CONFIRMATION ROUTES (no auth) =====

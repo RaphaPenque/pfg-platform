@@ -28,7 +28,7 @@ function getMsalApp(): ConfidentialClientApplication | null {
   return msalApp;
 }
 
-async function getAccessToken(): Promise<string | null> {
+export async function getAccessToken(): Promise<string | null> {
   const app = getMsalApp();
   if (!app) return null;
   try {
@@ -49,6 +49,12 @@ export interface MailOptions {
   text?: string;
   /** Optional sender — must be a valid @powerforce.global mailbox. Defaults to MAIL_FROM env var. */
   from?: string;
+  /** Optional file attachments (base64-encoded). */
+  attachments?: Array<{
+    name: string;
+    contentType: string;
+    contentBytes: string;  // base64
+  }>;
 }
 
 /**
@@ -83,6 +89,14 @@ export async function sendMail(opts: MailOptions): Promise<boolean> {
       toRecipients: recipients.map((addr) => ({
         emailAddress: { address: addr },
       })),
+      ...(opts.attachments && opts.attachments.length > 0 ? {
+        attachments: opts.attachments.map(a => ({
+          "@odata.type": "#microsoft.graph.fileAttachment",
+          name: a.name,
+          contentType: a.contentType,
+          contentBytes: a.contentBytes,
+        })),
+      } : {}),
     },
     saveToSentItems: true,
   };

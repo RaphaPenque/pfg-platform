@@ -385,7 +385,7 @@ export type DelayApproval = typeof delayApprovals.$inferSelect;
 // ===== SUPERVISOR REPORTS =====
 export const supervisorReports = pgTable("supervisor_reports", {
   id: serial("id").primaryKey(),
-  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  projectId: integer("project_id").references(() => projects.id, { onDelete: "cascade" }), // nullable = unrecognised sender / pending assignment
   workerId: integer("worker_id").references(() => workers.id, { onDelete: "set null" }), // null = unrecognised sender
   reportDate: text("report_date").notNull(),
   shift: text("shift"), // "day" | "night" | null
@@ -416,7 +416,7 @@ export type SupervisorReportReply = typeof supervisorReportReplies.$inferSelect;
 // ===== QHSE — TOOLBOX TALKS =====
 export const toolboxTalks = pgTable("toolbox_talks", {
   id: serial("id").primaryKey(),
-  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  projectId: integer("project_id").references(() => projects.id, { onDelete: "cascade" }), // nullable = pending assignment
   workerId: integer("worker_id").references(() => workers.id, { onDelete: "set null" }),
   reportDate: text("report_date").notNull(),
   shift: text("shift"),
@@ -435,7 +435,7 @@ export type InsertToolboxTalk = z.infer<typeof insertToolboxTalkSchema>;
 // ===== QHSE — SAFETY OBSERVATIONS =====
 export const safetyObservations = pgTable("safety_observations", {
   id: serial("id").primaryKey(),
-  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  projectId: integer("project_id").references(() => projects.id, { onDelete: "cascade" }), // nullable = pending assignment
   reportedByWorkerId: integer("reported_by_worker_id").references(() => workers.id, { onDelete: "set null" }),
   relatesToWorkerIds: jsonb("relates_to_worker_ids").default([]),
   shiftSupervisorId: integer("shift_supervisor_id").references(() => workers.id, { onDelete: "set null" }),
@@ -459,7 +459,7 @@ export type InsertSafetyObservation = z.infer<typeof insertSafetyObservationSche
 // ===== QHSE — INCIDENT REPORTS =====
 export const incidentReports = pgTable("incident_reports", {
   id: serial("id").primaryKey(),
-  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  projectId: integer("project_id").references(() => projects.id, { onDelete: "cascade" }), // nullable = pending assignment
   workerInvolvedId: integer("worker_involved_id").references(() => workers.id, { onDelete: "set null" }),
   reportedByWorkerId: integer("reported_by_worker_id").references(() => workers.id, { onDelete: "set null" }),
   shiftSupervisorId: integer("shift_supervisor_id").references(() => workers.id, { onDelete: "set null" }),

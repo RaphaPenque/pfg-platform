@@ -5,6 +5,8 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { warmupDb } from "./storage";
 import { checkSurveyReminders } from "./survey-scheduler";
+import { checkAndSendWeeklyReports } from "./report-scheduler";
+import { pollInboxes } from "./email-poller";
 
 const app = express();
 const httpServer = createServer(app);
@@ -103,6 +105,24 @@ app.use((req, res, next) => {
   setInterval(() => {
     checkSurveyReminders().catch(err => console.error("[survey-scheduler] interval error:", err));
   }, 6 * 60 * 60 * 1000);
+
+  // Weekly report send — check every hour, fires on Monday 8am server time
+  setInterval(async () => {
+    const now = new Date();
+    if (now.getDay() === 1 && now.getUTCHours() === 7) { // 7 UTC = 8 BST
+      checkAndSendWeeklyReports().catch(err => console.error('[report-scheduler]', err));
+    }
+  }, 60 * 60 * 1000);
+
+  // Poll email inboxes every 15 minutes
+  setInterval(() => {
+    pollInboxes().catch(err => console.error('[email-poller] Error:', err));
+  }, 15 * 60 * 1000);
+
+  // Poll once on startup after 60s (let DB warm up first)
+  setTimeout(() => {
+    pollInboxes().catch(err => console.error('[email-poller] Startup poll error:', err));
+  }, 60 * 1000);
 
   const port = parseInt(process.env.PORT || "5000", 10);
   httpServer.listen(
