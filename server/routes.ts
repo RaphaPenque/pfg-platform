@@ -647,7 +647,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(worker);
   });
 
-  app.post("/api/workers", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
+  app.post("/api/workers", requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
     const parsed = insertWorkerSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error });
     const worker = await storage.createWorker(parsed.data);
@@ -655,7 +655,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.status(201).json(worker);
   });
 
-  app.patch("/api/workers/:id", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
+  app.patch("/api/workers/:id", requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     const before = await storage.getWorker(id);
     const worker = await storage.updateWorker(id, req.body);
@@ -674,7 +674,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(worker);
   });
 
-  app.delete("/api/workers/:id", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
+  app.delete("/api/workers/:id", requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     const worker = await storage.getWorker(id);
     if (!worker) return res.status(404).json({ error: "Worker not found" });
@@ -847,7 +847,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(updated);
   });
 
-  app.delete("/api/projects/:id", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
+  app.delete("/api/projects/:id", requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
     const project = await storage.getProject(parseInt(req.params.id));
     if (!project) return res.status(404).json({ error: "Project not found" });
     if (project.status !== "potential" && project.status !== "cancelled") {
@@ -887,7 +887,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(user ? { id: user.id, name: user.name, email: user.email } : null);
   });
 
-  app.put("/api/projects/:id/lead", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
+  app.put("/api/projects/:id/lead", requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
     const { userId } = req.body;
     if (!userId) {
       await storage.removeProjectLead(parseInt(req.params.id));
@@ -929,7 +929,7 @@ export function registerRoutes(server: Server, app: Express) {
 
   // ===== ASSIGNMENT CONFIRMATION =====
 
-  app.post("/api/assignments/:id/manual-confirm", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
+  app.post("/api/assignments/:id/manual-confirm", requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     const allAssignments = await storage.getAssignments();
     const assignment = allAssignments.find(a => a.id === id);
@@ -942,7 +942,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json({ ok: true });
   });
 
-  app.post("/api/assignments/:id/send-confirmation", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
+  app.post("/api/assignments/:id/send-confirmation", requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     const allAssignments = await storage.getAssignments();
     const assignment = allAssignments.find(a => a.id === id);
@@ -988,7 +988,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json({ ok: true, token });
   });
 
-  app.post("/api/projects/:id/send-all-confirmations", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
+  app.post("/api/projects/:id/send-all-confirmations", requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
     const projectId = parseInt(req.params.id);
     const project = await storage.getProject(projectId);
     if (!project) return res.status(404).json({ error: "Project not found" });
@@ -1124,14 +1124,14 @@ export function registerRoutes(server: Server, app: Express) {
     res.status(201).json(doc);
   });
 
-  app.patch("/api/documents/:id", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
+  app.patch("/api/documents/:id", requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     const updated = await storage.updateDocument(id, req.body);
     if (!updated) return res.status(404).json({ error: 'Document not found' });
     res.json(updated);
   });
 
-  app.delete("/api/documents/:id", requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
+  app.delete("/api/documents/:id", requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     const doc = await storage.getDocumentById(id);
     if (doc?.filePath) {
@@ -1448,7 +1448,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(reports);
   });
 
-  app.get("/api/supervisor-reports/pending", requireAuth, requireRole("admin", "resource_manager"), async (_req: Request, res: Response) => {
+  app.get("/api/supervisor-reports/pending", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (_req: Request, res: Response) => {
     const reports = await storage.getPendingSupervisorReports();
     res.json(reports);
   });
@@ -2055,7 +2055,7 @@ export function registerRoutes(server: Server, app: Express) {
   });
 
   // POST /api/projects/:projectId/survey/send — send survey to project contacts
-  app.post("/api/projects/:projectId/survey/send", requireAuth, requireRole("admin", "resource_manager"), async (req: Request, res: Response) => {
+  app.post("/api/projects/:projectId/survey/send", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
     const projectId = parseInt(req.params.projectId);
     if (isNaN(projectId)) return res.status(400).json({ error: "Invalid project ID" });
 
