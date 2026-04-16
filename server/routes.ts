@@ -1665,16 +1665,19 @@ export function registerRoutes(server: Server, app: Express) {
 
     // Build team roster
     const teamMembers: any[] = [];
+    const FILLED = ["active", "confirmed", "pending_confirmation", "flagged"];
     const seenWorkerIds = new Set<number>();
     for (const a of projectAssignments) {
-      if (a.status === "active" && a.workerId && !seenWorkerIds.has(a.workerId)) {
+      if (FILLED.includes(a.status || "") && a.workerId && !seenWorkerIds.has(a.workerId)) {
         seenWorkerIds.add(a.workerId);
         const worker = await storage.getWorker(a.workerId);
         if (worker) {
-          const nameParts = worker.name.trim().split(/\s+/);
+          // Filter out parenthetical suffixes like (SP), (UK/IE), (PO) for initials
+          const cleanName = worker.name.replace(/\s*\([^)]*\)/g, '').trim();
+          const nameParts = cleanName.split(/\s+/).filter(p => p.length > 0);
           const initials = nameParts.length >= 2
             ? (nameParts[0][0] + nameParts[nameParts.length - 1][0]).toUpperCase()
-            : worker.name.substring(0, 2).toUpperCase();
+            : cleanName.substring(0, 2).toUpperCase();
           teamMembers.push({
             id: worker.id,
             name: worker.name,
