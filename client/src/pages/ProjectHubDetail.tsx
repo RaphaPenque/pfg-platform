@@ -588,22 +588,41 @@ const ASSESSMENT_OPTIONS = [
   { value: "poor", label: "Poor" },
 ];
 
-function StarRating({ score, max = 5 }: { score: number; max?: number }) {
+function StarRating({ score, max = 5, size = 20 }: { score: number; max?: number; size?: number }) {
   return (
     <div className="flex items-center gap-0.5">
-      {Array.from({ length: max }).map((_, i) => (
-        <svg
-          key={i}
-          width="20" height="20" viewBox="0 0 24 24" fill="none"
-          stroke={i < Math.round(score) ? "var(--pfg-yellow-dark)" : "hsl(var(--border))"}
-          strokeWidth="2"
-        >
-          <polygon
-            points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"
-            fill={i < Math.round(score) ? "var(--pfg-yellow)" : "none"}
-          />
-        </svg>
-      ))}
+      {Array.from({ length: max }).map((_, i) => {
+        const fill = Math.min(1, Math.max(0, score - i)); // 0=empty, 0.5=half, 1=full
+        const uid = `star-clip-${i}-${Math.round(score * 10)}`;
+        return (
+          <svg key={i} width={size} height={size} viewBox="0 0 24 24" style={{ overflow: 'visible' }}>
+            {fill > 0 && fill < 1 && (
+              <defs>
+                <clipPath id={uid}>
+                  <rect x="0" y="0" width={12 * fill * 2} height="24" />
+                </clipPath>
+              </defs>
+            )}
+            {/* Empty star background */}
+            <polygon
+              points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"
+              fill="none"
+              stroke="hsl(var(--border))"
+              strokeWidth="1.5"
+            />
+            {/* Filled portion */}
+            {fill > 0 && (
+              <polygon
+                points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"
+                fill="var(--pfg-yellow)"
+                stroke="var(--pfg-yellow-dark)"
+                strokeWidth="1.5"
+                clipPath={fill < 1 ? `url(#${uid})` : undefined}
+              />
+            )}
+          </svg>
+        );
+      })}
     </div>
   );
 }

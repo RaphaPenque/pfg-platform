@@ -247,6 +247,7 @@ export function registerRoutes(server: Server, app: Express) {
         customer: project.customer,
         equipmentType: project.equipmentType,
         location: project.location,
+        siteName: project.siteName,
         scopeOfWork: project.scopeOfWork,
       }));
 

@@ -1145,11 +1145,14 @@ function WorkExperienceTab({ worker }: { worker: DashboardWorker }) {
 
   // Assignment-based past entries (read-only — from live platform projects)
   const assignmentEntries = worker.assignments
-    .filter(a => a.startDate && a.startDate <= today)
-    .sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
+    .filter(a => a.startDate && a.startDate <= today);
 
-  // Sort work experience entries most recent first
-  const sortedExp = [...existingWorkExp].sort((a, b) => (b.startDate || '').localeCompare(a.startDate || ''));
+  // Merge EID imported entries + platform assignment entries, sorted most recent first
+  type AnyEntry = { _type: 'we'; data: WorkExperience } | { _type: 'assignment'; data: typeof assignmentEntries[0] };
+  const mergedEntries: AnyEntry[] = [
+    ...existingWorkExp.map(e => ({ _type: 'we' as const, data: e, _date: e.startDate || '' })),
+    ...assignmentEntries.map(a => ({ _type: 'assignment' as const, data: a, _date: a.startDate || '' })),
+  ].sort((x, y) => (y._date).localeCompare(x._date));
 
   return (
     <div className="rounded-lg border overflow-hidden" style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))" }}>
@@ -1162,37 +1165,41 @@ function WorkExperienceTab({ worker }: { worker: DashboardWorker }) {
           </tr>
         </thead>
         <tbody>
-          {sortedExp.length === 0 && assignmentEntries.length === 0 ? (
+          {mergedEntries.length === 0 ? (
             <tr><td colSpan={8} className="px-4 py-8 text-center" style={{ color: "hsl(var(--muted-foreground))" }}>No work experience recorded</td></tr>
           ) : (
-            <>
-              {/* Editable historical EID entries */}
-              {sortedExp.map(exp => (
-                <EditableWeRow key={`we-${exp.id}`} exp={exp} workerId={worker.id} />
-              ))}
-              {/* Read-only platform assignment entries */}
-              {assignmentEntries.map(a => (
-                <tr key={`a-${a.id}`} className="border-t" style={{ borderColor: "hsl(var(--border))", opacity: 0.75 }}>
+            mergedEntries.map(entry => {
+              if (entry._type === 'we') {
+                return <EditableWeRow key={`we-${entry.data.id}`} exp={entry.data} workerId={worker.id} />;
+              }
+              const a = entry.data;
+              // Site name: prefer project site name, fall back to project name
+              const siteName = (a as any).siteName || a.projectName || '';
+              // Scope of work: use project scope, not assignment task string
+              const scopeOfWork = (a as any).scopeOfWork || '';
+              return (
+                <tr key={`a-${a.id}`} className="border-t" style={{ borderColor: "hsl(var(--border))", opacity: 0.85 }}>
                   <td className="px-3 py-2 font-medium">
-                    <span>{a.projectName ?? ''} ({a.projectCode ?? ''})</span>
+                    <span>{siteName}</span>
+                    {a.location ? <span className="text-[10px] ml-1" style={{ color: "var(--pfg-steel)" }}>· {a.location}</span> : null}
                     <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--muted))", color: "var(--pfg-steel)" }}>Platform</span>
                   </td>
                   <td className="px-3 py-2 tabular-nums">{a.startDate || '—'}</td>
                   <td className="px-3 py-2 tabular-nums">{a.endDate || '—'}</td>
-                  <td className="px-3 py-2">{a.role || a.task || '—'}</td>
+                  <td className="px-3 py-2">{a.role || '—'}</td>
                   <td className="px-3 py-2">{(a as any).customer || '—'}</td>
                   <td className="px-3 py-2">{(a as any).equipmentType || '—'}</td>
-                  <td className="px-3 py-2">{a.task || '—'}</td>
+                  <td className="px-3 py-2">{scopeOfWork || '—'}</td>
                   <td className="px-3 py-2" />
                 </tr>
-              ))}
-            </>
+              );
+            })
           )}
         </tbody>
       </table>
-      {sortedExp.length > 0 && (
+      {existingWorkExp.length > 0 && (
         <div className="px-3 py-1.5 border-t text-[10px]" style={{ borderColor: "hsl(var(--border))", color: "hsl(var(--muted-foreground))" }}>
-          Hover any row to edit · {sortedExp.length} imported {assignmentEntries.length > 0 ? `· ${assignmentEntries.length} from platform` : ''}
+          Hover any row to edit · {existingWorkExp.length} imported {assignmentEntries.length > 0 ? `· ${assignmentEntries.length} from platform` : ''}
         </div>
       )}
     </div>
