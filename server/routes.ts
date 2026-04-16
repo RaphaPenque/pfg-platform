@@ -860,12 +860,20 @@ export function registerRoutes(server: Server, app: Express) {
     if (!assignment) return res.status(404).json({ error: "Assignment not found" });
     await logAudit(req.user!.id, "assignment.update", "assignment", id);
 
-    // ── Extension cascade: if individual assignment end date extends past project end date, extend project ──
-    if (req.body.endDate && assignment.projectId) {
-      const project = await storage.getProject(assignment.projectId);
-      if (project && project.endDate && req.body.endDate > project.endDate) {
-        await storage.updateProject(assignment.projectId, { endDate: req.body.endDate });
-        console.log(`[EXTENSION] Project ${project.code} end date extended to ${req.body.endDate} via assignment ${id}`);
+    // ── Recalculate project end date = latest end date across all role slots ──
+    if (req.body.endDate !== undefined && assignment.projectId) {
+      const allSlots = await storage.getRoleSlotsByProject(assignment.projectId);
+      const latestEnd = allSlots
+        .map(s => s.endDate)
+        .filter(Boolean)
+        .sort()
+        .pop();
+      if (latestEnd) {
+        const project = await storage.getProject(assignment.projectId);
+        if (project && project.endDate !== latestEnd) {
+          await storage.updateProject(assignment.projectId, { endDate: latestEnd });
+          console.log(`[EXTENSION] Project ${project.code} end date recalculated to ${latestEnd}`);
+        }
       }
     }
 
@@ -951,12 +959,20 @@ export function registerRoutes(server: Server, app: Express) {
     if (!slot) return res.status(404).json({ error: "Role slot not found" });
     await logAudit(req.user!.id, "role_slot.update", "role_slot", id);
 
-    // ── Extension cascade: if the new end date pushes past the project end date, extend the project ──
-    if (req.body.endDate && slot.projectId) {
-      const project = await storage.getProject(slot.projectId);
-      if (project && project.endDate && req.body.endDate > project.endDate) {
-        await storage.updateProject(slot.projectId, { endDate: req.body.endDate });
-        console.log(`[EXTENSION] Project ${project.code} end date extended to ${req.body.endDate} via role slot ${id}`);
+    // ── Recalculate project end date = latest end date across all role slots ──
+    if (req.body.endDate !== undefined && slot.projectId) {
+      const allSlots = await storage.getRoleSlotsByProject(slot.projectId);
+      const latestEnd = allSlots
+        .map(s => s.endDate)
+        .filter(Boolean)
+        .sort()
+        .pop();
+      if (latestEnd) {
+        const project = await storage.getProject(slot.projectId);
+        if (project && project.endDate !== latestEnd) {
+          await storage.updateProject(slot.projectId, { endDate: latestEnd });
+          console.log(`[EXTENSION] Project ${project.code} end date recalculated to ${latestEnd}`);
+        }
       }
     }
 
