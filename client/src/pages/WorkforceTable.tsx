@@ -895,10 +895,10 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
                             <input className="text-xs px-2 py-1 border rounded w-full" style={inputStyle} value={exp.siteName} onChange={(e) => updateManualExp(exp.id, "siteName", e.target.value)} placeholder="Site name" data-testid={`exp-site-${exp.id}`} />
                           </td>
                           <td className="px-3 py-1.5">
-                            <DatePickerCell value={exp.startDate} onChange={v => updateManualExp(exp.id, "startDate", v)} placeholder="Start" inputCls="text-xs px-1.5 py-1 border rounded w-full" testId={`exp-start-${exp.id}`} />
+                            <DatePickerCell value={exp.startDate} onChange={v => updateManualExp(exp.id, "startDate", v)} placeholder="Start" testId={`exp-start-${exp.id}`} />
                           </td>
                           <td className="px-3 py-1.5">
-                            <DatePickerCell value={exp.endDate} onChange={v => updateManualExp(exp.id, "endDate", v)} placeholder="End" inputCls="text-xs px-1.5 py-1 border rounded w-full" testId={`exp-end-${exp.id}`} />
+                            <DatePickerCell value={exp.endDate} onChange={v => updateManualExp(exp.id, "endDate", v)} placeholder="End" testId={`exp-end-${exp.id}`} />
                           </td>
                           <td className="px-3 py-1.5">
                             <select className="text-xs px-1.5 py-1 border rounded w-full" style={inputStyle} value={exp.role} onChange={(e) => updateManualExp(exp.id, "role", e.target.value)} data-testid={`exp-role-${exp.id}`}>
@@ -1036,13 +1036,11 @@ function DatePickerCell({
   value,
   onChange,
   placeholder = 'Pick date',
-  inputCls = '',
   testId,
 }: {
   value: string;
   onChange: (iso: string) => void;
   placeholder?: string;
-  inputCls?: string;
   testId?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -1065,22 +1063,25 @@ function DatePickerCell({
         <button
           type="button"
           data-testid={testId}
-          className={`flex items-center gap-1 text-left w-full ${inputCls}`}
-          style={{ minWidth: 88 }}
+          className="flex items-center gap-1.5 text-left w-full text-[12px] px-2 py-1 rounded border hover:border-[var(--pfg-navy)] bg-white dark:bg-transparent transition-colors"
+          style={{ borderColor: "hsl(var(--border))", color: value ? "inherit" : "hsl(var(--muted-foreground))" }}
         >
-          <CalendarIcon className="w-3 h-3 flex-shrink-0 opacity-50" />
-          <span className={value ? '' : 'opacity-40'}>
-            {value ? fmtDate(value) : placeholder}
-          </span>
+          <CalendarIcon className="w-3 h-3 flex-shrink-0" style={{ color: "var(--pfg-steel)" }} />
+          <span>{value ? fmtDate(value) : placeholder}</span>
         </button>
       </PopoverTrigger>
-      <PopoverContent className="w-auto p-0" align="start" style={{ zIndex: 9999 }}>
+      <PopoverContent
+        className="w-auto p-0"
+        align="start"
+        sideOffset={4}
+        style={{ zIndex: 99999 }}
+      >
         <Calendar
           mode="single"
           selected={selected}
           onSelect={handleSelect}
           initialFocus
-          defaultMonth={selected}
+          defaultMonth={selected ?? new Date()}
         />
       </PopoverContent>
     </Popover>
@@ -1140,10 +1141,10 @@ function EditableWeRow({ exp, workerId }: { exp: WorkExperience; workerId: numbe
           <input className={inputCls} value={form.siteName} onChange={e => set('siteName', e.target.value)} placeholder="Site name" autoFocus />
         </td>
         <td className="px-2 py-1.5">
-          <DatePickerCell value={form.startDate} onChange={v => set('startDate', v)} placeholder="Start" inputCls={inputCls} testId={`exp-edit-start-${exp.id}`} />
+          <DatePickerCell value={form.startDate} onChange={v => set('startDate', v)} placeholder="Start" testId={`exp-edit-start-${exp.id}`} />
         </td>
         <td className="px-2 py-1.5">
-          <DatePickerCell value={form.endDate} onChange={v => set('endDate', v)} placeholder="End" inputCls={inputCls} testId={`exp-edit-end-${exp.id}`} />
+          <DatePickerCell value={form.endDate} onChange={v => set('endDate', v)} placeholder="End" testId={`exp-edit-end-${exp.id}`} />
         </td>
         <td className="px-2 py-1.5">
           <input className={inputCls} value={form.role} onChange={e => set('role', e.target.value)} placeholder="Role" />
