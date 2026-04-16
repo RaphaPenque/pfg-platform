@@ -4,6 +4,7 @@ import { Link } from "wouter";
 import { useDashboardData, type DashboardProject, type DashboardRoleSlot, type DashboardAssignment } from "@/hooks/use-dashboard-data";
 import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, EQUIPMENT_TYPES, OEM_OPTIONS, calcPeakHeadcount } from "@/lib/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
 import {
   LayoutDashboard, Users, UserCheck, ClipboardList, FileText,
@@ -223,6 +224,20 @@ function OverviewTab({
   const color = getOemColor(project);
   const customer = project.customer || PROJECT_CUSTOMER[project.code] || "";
   const health = computeHealth(project, roleSlots, assignments);
+
+  // Fetch survey results for Quick Stats satisfaction tile
+  const { data: surveyData } = useQuery<{ responses: any[] }>({
+    queryKey: ["/api/projects", project.id, "survey"],
+    queryFn: () => apiRequest("GET", `/api/projects/${project.id}/survey`).then((r: any) => r.json()),
+    staleTime: 5 * 60 * 1000,
+  });
+  const latestSurveyScore: number | null = surveyData?.responses?.length
+    ? surveyData.responses.reduce((best: any, r: any) => (
+        r.submittedAt > (best?.submittedAt ?? '') ? r : best
+      ), null)?.averageScore ?? null
+    : null;
+
+  const isCompleted = project.status === "completed" || project.status === "cancelled";
   const pct = timelinePercent(project.startDate, project.endDate);
   const totalDays = project.startDate && project.endDate ? daysBetween(project.startDate, project.endDate) : 0;
   const curDay = project.startDate ? currentDay(project.startDate) : 0;
@@ -417,23 +432,51 @@ function OverviewTab({
 
       {/* RIGHT COLUMN (40%) */}
       <div className="lg:col-span-2 space-y-5">
-        {/* Overall Health */}
-        <div className="rounded-xl border p-5 text-center" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}>
-          <div
-            className="w-16 h-16 rounded-full mx-auto mb-3 flex items-center justify-center"
-            style={{ background: HEALTH_BG[health.overall] }}
-          >
-            <div className="w-8 h-8 rounded-full" style={{ background: HEALTH_COLORS[health.overall] }} />
+        {/* Overall Health — or Project Complete badge */}
+        {isCompleted ? (
+          <div className="rounded-xl border p-5 text-center" style={{ borderColor: "var(--green)", background: "var(--green-bg, #F0FDF4)" }}>
+            <div className="w-14 h-14 rounded-full mx-auto mb-3 flex items-center justify-center" style={{ background: "var(--green)" }}>
+              <CheckCircle2 className="w-7 h-7 text-white" />
+            </div>
+            <div className="text-[15px] font-bold" style={{ color: "var(--green)" }}>
+              Project {project.status === "cancelled" ? "Cancelled" : "Complete"}
+            </div>
+            {project.endDate && (
+              <p className="text-[12px] mt-1" style={{ color: "var(--pfg-steel)" }}>
+                {project.status === "cancelled" ? "Cancelled" : "Completed"} {new Date(project.endDate).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}
+              </p>
+            )}
           </div>
-          <div className="text-[15px] font-bold text-pfg-navy font-display">
-            Project Health: {health.overallLabel}
+        ) : (
+          <div className="rounded-xl border p-5 text-center" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}>
+            <div
+              className="w-16 h-16 rounded-full mx-auto mb-3 flex items-center justify-center"
+              style={{ background: HEALTH_BG[health.overall] }}
+            >
+              <div className="w-8 h-8 rounded-full" style={{ background: HEALTH_COLORS[health.overall] }} />
+            </div>
+            <div className="text-[15px] font-bold text-pfg-navy font-display">
+              Project Health: {health.overallLabel}
+            </div>
+            {health.actionCount > 0 && (
+              <p className="text-[12px] mt-1" style={{ color: "var(--pfg-steel)" }}>
+                {health.actionCount} action{health.actionCount > 1 ? "s" : ""} needed
+              </p>
+            )}
           </div>
-          {health.actionCount > 0 && (
-            <p className="text-[12px] mt-1" style={{ color: "var(--pfg-steel)" }}>
-              {health.actionCount} action{health.actionCount > 1 ? "s" : ""} needed
-            </p>
-          )}
-        </div>
+        )}
+
+        {/* Customer Satisfaction tile — only shown when survey response exists */}
+        {latestSurveyScore !== null && (
+          <div className="rounded-xl border p-5 text-center" style={{ borderColor: "var(--pfg-gold, #F5BD00)", background: "#FFFBEB" }}>
+            <p className="text-[11px] font-semibold uppercase tracking-wide mb-2" style={{ color: "#92400E" }}>Customer Satisfaction</p>
+            <div className="flex justify-center mb-1">
+              <StarRating score={latestSurveyScore} size={22} />
+            </div>
+            <div className="text-[22px] font-bold" style={{ color: "#92400E" }}>{latestSurveyScore.toFixed(1)}</div>
+            <div className="text-[11px]" style={{ color: "#B45309" }}>out of 5.0</div>
+          </div>
+        )}
 
         {/* Health Module Breakdown */}
         <div className="rounded-xl border p-5" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}>
@@ -479,25 +522,25 @@ function OverviewTab({
           </div>
         )}
 
-        {/* Quick Stats */}
+        {/* Quick Stats — horizontal 4-card strip */}
         <div className="rounded-xl border p-5" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}>
           <h3 className="text-[13px] font-bold uppercase tracking-wide mb-3" style={{ color: "var(--pfg-steel)" }}>Quick Stats</h3>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-4 gap-2">
             <div className="rounded-lg p-3 text-center" style={{ background: "hsl(var(--muted))" }}>
-              <div className="text-xl font-bold text-pfg-navy font-display">{daysLeft ?? "—"}</div>
-              <div className="text-[10px] font-semibold uppercase tracking-wide mt-0.5" style={{ color: "var(--pfg-steel)" }}>Days Remaining</div>
+              <div className="text-[18px] font-bold text-pfg-navy font-display">{daysLeft ?? "—"}</div>
+              <div className="text-[9px] font-semibold uppercase tracking-wide mt-0.5" style={{ color: "var(--pfg-steel)" }}>Days Left</div>
             </div>
             <div className="rounded-lg p-3 text-center" style={{ background: "hsl(var(--muted))" }}>
-              <div className="text-xl font-bold font-display" style={{ color: ftePct >= 60 ? "var(--green)" : ftePct >= 50 ? "var(--amber)" : "var(--red)" }}>{ftePct}%</div>
-              <div className="text-[10px] font-semibold uppercase tracking-wide mt-0.5" style={{ color: "var(--pfg-steel)" }}>FTE Coverage</div>
+              <div className="text-[18px] font-bold font-display" style={{ color: ftePct >= 60 ? "var(--green)" : ftePct >= 50 ? "var(--amber)" : "var(--red)" }}>{ftePct}%</div>
+              <div className="text-[9px] font-semibold uppercase tracking-wide mt-0.5" style={{ color: "var(--pfg-steel)" }}>FTE Cover</div>
             </div>
             <div className="rounded-lg p-3 text-center" style={{ background: "hsl(var(--muted))" }}>
-              <div className="text-xl font-bold text-pfg-navy font-display">{filledCount}</div>
-              <div className="text-[10px] font-semibold uppercase tracking-wide mt-0.5" style={{ color: "var(--pfg-steel)" }}>Active Workers</div>
+              <div className="text-[18px] font-bold text-pfg-navy font-display">{filledCount}</div>
+              <div className="text-[9px] font-semibold uppercase tracking-wide mt-0.5" style={{ color: "var(--pfg-steel)" }}>Workers</div>
             </div>
             <div className="rounded-lg p-3 text-center" style={{ background: "hsl(var(--muted))" }}>
-              <div className="text-xl font-bold text-pfg-navy font-display">—</div>
-              <div className="text-[10px] font-semibold uppercase tracking-wide mt-0.5" style={{ color: "var(--pfg-steel)" }}>On Time</div>
+              <div className="text-[18px] font-bold text-pfg-navy font-display">—</div>
+              <div className="text-[9px] font-semibold uppercase tracking-wide mt-0.5" style={{ color: "var(--pfg-steel)" }}>On Time</div>
             </div>
           </div>
         </div>
