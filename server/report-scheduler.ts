@@ -102,6 +102,193 @@ function buildEmailHtml(
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
+// ── Core send function — shared by weekly and final sends ──
+async function sendReportForProject(
+  project: any,
+  isFinal: boolean = false
+): Promise<void> {
+  const allReports = await storage.getDailyReports(project.id);
+  const published = allReports.filter((r: any) => r.publishedToPortal);
+  if (published.length === 0) {
+    console.log(`[report-scheduler] ${project.code}: no published reports — skipping ${isFinal ? 'final' : 'weekly'}`);
+    return;
+  }
+  const report = published.sort((a: any, b: any) => (a.reportDate > b.reportDate ? -1 : 1))[0];
+
+  const pmUser = await getPmUser(project.id);
+  const fromEmail = pmUser?.email?.endsWith('@powerforce.global') ? pmUser.email : undefined;
+  const pmName = pmUser?.name || 'Powerforce Global Project Management';
+
+  const toAddresses = [
+    project.customerProjectManagerEmail,
+    project.siteManagerEmail,
+  ].filter((e: any): e is string => Boolean(e));
+
+  if (toAddresses.length === 0) {
+    console.log(`[report-scheduler] ${project.code}: no customer contact emails — skipping`);
+    return;
+  }
+
+  const { weekStart, weekEnd } = weekBounds(report.reportDate);
+  const weekEndFormatted = fmtDateDisplay(weekEnd);
+
+  const [assignments, allWorkers, allToolboxTalks, allSafetyObs, allIncidents, allComments] = await Promise.all([
+    storage.getAssignmentsByProject(project.id),
+    storage.getWorkers(),
+    storage.getToolboxTalks(project.id),
+    storage.getSafetyObservations(project.id),
+    storage.getIncidentReports(project.id),
+    storage.getCommentsLog(project.id),
+  ]);
+
+  const workerMap = Object.fromEntries((allWorkers as any[]).map((w: any) => [w.id, w]));
+  const activeAssignments = (assignments as any[]).filter((a: any) =>
+    ['active', 'confirmed', 'pending_confirmation', 'flagged'].includes(a.status || '')
+  );
+  const teamMembers = activeAssignments.map((a: any) => {
+    const w = (workerMap as any)[a.workerId];
+    return {
+      name: (w?.name || `Worker ${a.workerId}`).replace(/\s*\([^)]*\)/g, '').trim(),
+      role: a.role || '',
+      shift: a.shift || '',
+      startDate: a.startDate || '',
+      endDate: a.endDate || '',
+    };
+  });
+
+  const reportTasks = Array.isArray(report.completedTasks) ? report.completedTasks : [];
+  const reportDelays = Array.isArray(report.delaysLog) ? report.delaysLog : [];
+  const reportComments = (allComments as any[]).filter((c: any) => c.reportId === report.id);
+  const now = new Date();
+  const projEnd = project.endDate ? new Date(project.endDate + 'T00:00:00Z') : null;
+  const projStart = project.startDate ? new Date(project.startDate + 'T00:00:00Z') : null;
+  const totalDays = projStart && projEnd ? Math.max(1, Math.round((projEnd.getTime() - projStart.getTime()) / 86400000)) : 1;
+  const elapsedDays = projStart ? Math.round((now.getTime() - projStart.getTime()) / 86400000) : 0;
+  const daysRemaining = projEnd ? Math.max(0, Math.round((projEnd.getTime() - now.getTime()) / 86400000)) : 0;
+
+  const OEM_COLOURS: Record<string, string> = {
+    'GE Vernova': '#005E60', 'Mitsubishi Power': '#E60012', 'Siemens Energy': '#009999',
+    'Arabelle Solutions': '#FE5716', 'Alstom': '#0066CC', 'Ansaldo Energia': '#003399',
+    'Sulzer': '#1D59AF',
+  };
+  const oemColour = OEM_COLOURS[project.customer || ''] || '#1A1D23';
+
+  const reportData = {
+    projectName: project.name || '',
+    projectCode: project.code || '',
+    customer: project.customer || '',
+    siteName: project.siteName || '',
+    startDate: project.startDate || '',
+    endDate: project.endDate || '',
+    contractType: project.contractType || 'T&M',
+    shiftPattern: project.shift || 'Day & Night',
+    weekStart,
+    weekEnd,
+    pmName,
+    completedTasks: reportTasks,
+    delaysLog: reportDelays,
+    commentsEntries: reportComments.map((c: any) => ({
+      date: c.enteredAt ? new Date(c.enteredAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }) : '',
+      entry: c.entry || '',
+      userName: '',
+    })),
+    teamMembers,
+    safetyData: {
+      toolboxTalks: (allToolboxTalks as any[]).length,
+      observations: (allSafetyObs as any[]).length,
+      nearMisses: (allSafetyObs as any[]).filter((o: any) => o.observationType === 'unsafe_condition').length,
+      incidents: (allIncidents as any[]).length,
+    },
+    daysRemaining,
+    activeTeam: teamMembers.length,
+    progressPct: Math.round((elapsedDays / totalDays) * 100),
+    oemColour,
+    isFinalReport: isFinal,
+  };
+
+  const pdfBuffer = await generateWeeklyReportPdf(reportData as any);
+  const base64Pdf = pdfBuffer.toString('base64');
+  const filename = isFinal
+    ? `${project.code}-final-report-${report.reportDate}.pdf`
+    : `${project.code}-report-w-e-${weekEnd}.pdf`;
+
+  const subject = isFinal
+    ? `Final Project Report — ${project.name}`
+    : `Weekly Project Report — ${project.name} — w/e ${weekEndFormatted}`;
+
+  const portalUrl = `${APP_URL}/#/portal/${project.code}`;
+  const emailHtml = isFinal
+    ? buildFinalEmailHtml(project.name, project.code, fmtDateDisplay(project.endDate || ''), pmName, portalUrl)
+    : buildEmailHtml(project.name, project.code, weekEndFormatted, pmName, portalUrl);
+
+  await sendMail({
+    to: toAddresses,
+    from: fromEmail,
+    subject,
+    html: emailHtml,
+    text: `${isFinal ? 'Final project report' : 'Weekly report'} for ${project.name} attached.\n\nPortal: ${portalUrl}`,
+    attachments: [{ name: filename, contentType: 'application/pdf', contentBytes: base64Pdf }],
+  });
+
+  console.log(`[report-scheduler] ${isFinal ? 'FINAL' : 'Weekly'} report sent for ${project.code} to ${toAddresses.join(', ')}`);
+}
+
+// ── Final email template ──
+function buildFinalEmailHtml(
+  projectName: string,
+  projectCode: string,
+  endDateFormatted: string,
+  pmName: string,
+  portalUrl: string,
+): string {
+  return `
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="font-family:'Inter',Arial,sans-serif;background:#f4f4f5;padding:40px 0;">
+  <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+    <div style="background:#1A1D23;padding:28px 32px;text-align:center;">
+      <img src="${APP_URL}/logo-gold.png" alt="Powerforce Global" height="36" style="display:block;margin:0 auto;" />
+    </div>
+    <div style="padding:32px;color:#1A1D23;">
+      <div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;padding:12px 16px;margin-bottom:20px;">
+        <p style="margin:0;font-size:13px;font-weight:700;color:#16A34A;">Project Complete</p>
+      </div>
+      <h2 style="margin:0 0 8px;font-size:20px;font-weight:700;">${projectName}</h2>
+      <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
+        Please find attached the <strong>final project report</strong> for <strong>${projectName}</strong>,
+        covering all work completed through <strong>${endDateFormatted}</strong>.
+      </p>
+      <p style="margin:0 0 16px;color:#4b5563;font-size:14px;line-height:1.6;">
+        It has been a pleasure working with your team. The project portal remains accessible if you need
+        to reference any documentation or SQEP packs.
+      </p>
+      <div style="text-align:center;margin:24px 0;">
+        <a href="${portalUrl}" style="display:inline-block;background:#F5BD00;color:#1A1D23;font-weight:700;font-size:15px;padding:14px 32px;border-radius:8px;text-decoration:none;">View Project Portal</a>
+      </div>
+    </div>
+    <div style="text-align:center;padding:20px 32px;font-size:11px;color:#9ca3af;border-top:1px solid #f0f0f0;">
+      &copy; ${new Date().getFullYear()} Powerforce Global &middot; Confidential
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+// ── Called from survey-scheduler on project end date ──
+export async function sendFinalReportForProject(projectId: number): Promise<void> {
+  try {
+    const project = await storage.getProject(projectId);
+    if (!project) return;
+    await sendReportForProject(project, true);
+    // Auto-complete the project
+    await storage.updateProject(projectId, { status: 'completed' });
+    console.log(`[report-scheduler] Project ${project.code} marked as completed after final report`);
+  } catch (err) {
+    console.error(`[report-scheduler] Final report error for project ${projectId}:`, err);
+  }
+}
+
 export async function checkAndSendWeeklyReports(): Promise<void> {
   const now = new Date();
 
@@ -118,196 +305,16 @@ export async function checkAndSendWeeklyReports(): Promise<void> {
     return;
   }
 
-  const activeProjects = allProjects.filter(p => p.status === 'active');
+  const today = now.toISOString().split('T')[0];
+  // Only send weekly for projects that are still running — exclude finished or future-ending-today
+  const activeProjects = allProjects.filter(p =>
+    p.status === 'active' &&
+    (!p.endDate || p.endDate > today)  // endDate strictly in the future
+  );
 
   for (const project of activeProjects) {
     try {
-      // Find most recently published daily report
-      const allReports = await storage.getDailyReports(project.id);
-      const published = allReports.filter(r => r.publishedToPortal);
-      if (published.length === 0) {
-        console.log(`[report-scheduler] ${project.code}: no published reports — skipping`);
-        continue;
-      }
-      // Most recent by reportDate (already ordered desc from storage, but sort to be safe)
-      const report = published.sort((a, b) => (a.reportDate > b.reportDate ? -1 : 1))[0];
-
-      // PM
-      const pmUser = await getPmUser(project.id);
-      const fromEmail = pmUser?.email?.endsWith('@powerforce.global') ? pmUser.email : undefined;
-      const pmName = pmUser?.name || 'Powerforce Global Project Management';
-
-      // Customer contacts
-      const toAddresses = [
-        project.customerProjectManagerEmail,
-        project.siteManagerEmail,
-      ].filter((e): e is string => Boolean(e));
-
-      if (toAddresses.length === 0) {
-        console.log(`[report-scheduler] ${project.code}: no customer contact emails — skipping`);
-        continue;
-      }
-
-      // Week bounds
-      const { weekStart, weekEnd } = weekBounds(report.reportDate);
-      const weekEndFormatted = fmtDateDisplay(weekEnd);
-
-      // Team members
-      const [assignments, allWorkers] = await Promise.all([
-        storage.getAssignmentsByProject(project.id),
-        storage.getWorkers(),
-      ]);
-      const workerMap = Object.fromEntries(allWorkers.map(w => [w.id, w]));
-      const activeAssignments = assignments.filter(a => a.status === 'active' || a.status === 'flagged');
-      const teamMembers = activeAssignments.map(a => {
-        const w = workerMap[a.workerId];
-        return {
-          name: w?.name || `Worker ${a.workerId}`,
-          role: a.role || '',
-          shift: a.shift || '',
-          startDate: a.startDate || '',
-          endDate: a.endDate || '',
-        };
-      });
-
-      // Safety data
-      const [allToolboxTalks, allSafetyObs, allIncidents, allComments] = await Promise.all([
-        storage.getToolboxTalks(project.id),
-        storage.getSafetyObservations(project.id),
-        storage.getIncidentReports(project.id),
-        storage.getCommentsLog(project.id),
-      ]);
-
-      const weekStartMs = new Date(weekStart + 'T00:00:00Z').getTime();
-      const weekEndMs   = new Date(weekEnd   + 'T00:00:00Z').getTime() + 86_400_000;
-      const filterWeek = (items: Array<{ createdAt?: Date | string | null }>) =>
-        items.filter(item => {
-          if (!item.createdAt) return false;
-          const t = new Date(item.createdAt as string).getTime();
-          return t >= weekStartMs && t < weekEndMs;
-        });
-
-      const weekTalks      = filterWeek(allToolboxTalks).length;
-      const weekObs        = filterWeek(allSafetyObs).length;
-      const weekNearMisses = allIncidents.filter(i => {
-        if (!i.createdAt) return false;
-        const t = new Date(String(i.createdAt)).getTime();
-        return t >= weekStartMs && t < weekEndMs && (i as any).type === 'near_miss';
-      }).length;
-      const weekIncidents  = filterWeek(allIncidents).length;
-
-      // Comments for this report
-      const reportComments = allComments
-        .filter(c => c.reportId === report.id)
-        .map(c => ({
-          date: (c.enteredAt || '').toString().split('T')[0],
-          entry: c.entry || '',
-          userName: (c as any).userName || '',
-        }));
-
-      // Days remaining / progress
-      const today2 = new Date();
-      const msPerDay = 86_400_000;
-      const projStart = project.startDate ? new Date(project.startDate + 'T00:00:00Z') : null;
-      const projEnd   = project.endDate   ? new Date(project.endDate   + 'T00:00:00Z') : null;
-      const daysRemaining = projEnd
-        ? Math.max(0, Math.ceil((projEnd.getTime() - today2.getTime()) / msPerDay))
-        : 0;
-      const totalDays = (projStart && projEnd)
-        ? Math.ceil((projEnd.getTime() - projStart.getTime()) / msPerDay)
-        : 1;
-      const elapsedDays = projStart
-        ? Math.ceil((today2.getTime() - projStart.getTime()) / msPerDay)
-        : 0;
-      const progressPct = Math.min(100, Math.max(0, (elapsedDays / totalDays) * 100));
-
-      const completedTasks: ReportData['completedTasks'] =
-        Array.isArray(report.completedTasks)
-          ? (report.completedTasks as any[]).map(t =>
-              typeof t === 'string' ? { description: t } : t
-            )
-          : [];
-
-      const delaysLog: ReportData['delaysLog'] =
-        Array.isArray(report.delaysLog)
-          ? (report.delaysLog as any[]).map(d =>
-              typeof d === 'string' ? { description: d } : d
-            )
-          : [];
-
-      // Work packages (L/S only)
-      const contractType = (project as any).contractType || 'T&M';
-      let workPackages: ReportData['workPackages'];
-      if (contractType.toUpperCase().includes('L') && contractType.toUpperCase().includes('S')) {
-        try {
-          const roleSlots = await storage.getRoleSlotsByProject(project.id);
-          workPackages = (roleSlots as any[]).filter(rs => rs.name).map(rs => ({
-            name: rs.name || rs.role || '',
-            plannedStart:  rs.plannedStart  || '',
-            plannedFinish: rs.plannedFinish || '',
-            actualStart:   rs.actualStart   || '',
-            actualFinish:  rs.actualFinish  || '',
-          }));
-        } catch { /* ignore */ }
-      }
-
-      const reportData: ReportData = {
-        projectName:  project.name     || '',
-        projectCode:  project.code     || '',
-        customer:     project.customer || '',
-        siteName:     project.siteName || project.location || '',
-        startDate:    project.startDate || '',
-        endDate:      project.endDate   || '',
-        contractType,
-        shiftPattern: (project as any).shiftPattern || '',
-        weekStart,
-        weekEnd,
-        pmName,
-        completedTasks,
-        delaysLog,
-        commentsEntries: reportComments,
-        teamMembers,
-        workPackages,
-        safetyData: {
-          toolboxTalks: weekTalks,
-          observations: weekObs,
-          nearMisses:   weekNearMisses,
-          incidents:    weekIncidents,
-        },
-        daysRemaining,
-        activeTeam:  teamMembers.length,
-        progressPct,
-        oemColour: (project as any).oemColour || '#005E60',
-      };
-
-      // Generate PDF
-      const pdfBuffer = await generateWeeklyReportPdf(reportData);
-      const base64Pdf = pdfBuffer.toString('base64');
-      const dateStr = report.reportDate.replace(/-/g, '');
-      const attachmentName = `${project.code}-report-${dateStr}.pdf`;
-
-      // Build email
-      const portalUrl = `${APP_URL}/#/portal/${project.code}`;
-      const subject = `Weekly Project Report \u2014 ${project.name} \u2014 w/e ${weekEndFormatted}`;
-      const html = buildEmailHtml(project.name, project.code, weekEndFormatted, pmName, portalUrl);
-
-      await sendMail({
-        from: fromEmail,
-        to: toAddresses,
-        subject,
-        html,
-        attachments: [
-          {
-            name: attachmentName,
-            contentType: 'application/pdf',
-            contentBytes: base64Pdf,
-          },
-        ],
-      });
-
-      console.log(
-        `[report-scheduler] Sent weekly report for ${project.code} to ${toAddresses.join(', ')} — week ending ${weekEndFormatted}`,
-      );
+      await sendReportForProject(project, false);
     } catch (err) {
       console.error(`[report-scheduler] Error processing project ${project.code}:`, err);
     }

@@ -7,6 +7,7 @@
 import { storage } from "./storage";
 import { sendMail } from "./email";
 import crypto from "crypto";
+import { sendFinalReportForProject } from "./report-scheduler";
 
 async function getPmEmail(projectId: number): Promise<string | undefined> {
   try {
@@ -91,6 +92,13 @@ async function autoSendSurveysForEndingProjects(today: string): Promise<void> {
         console.error(`[survey-scheduler] Failed to auto-send survey to ${contact.email} for ${project.code}:`, err);
       }
     }
+
+    // Send final report and mark project complete (fire-and-forget after surveys)
+    setTimeout(() => {
+      sendFinalReportForProject(project.id).catch(err =>
+        console.error(`[survey-scheduler] Final report error for ${project.code}:`, err)
+      );
+    }, 5000); // 5s delay — let survey emails go first
   }
 }
 
