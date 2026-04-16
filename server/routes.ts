@@ -1865,12 +1865,20 @@ export function registerRoutes(server: Server, app: Express) {
 </body>
 </html>`;
 
-      await sendMail({
+      // Fire-and-forget — don't block the response on email delivery
+      const mailPayload = {
         to: contact.email,
         subject: `We'd love your feedback — ${project.name}`,
         html: emailHtml,
         text: `Hi ${firstName},\n\nWe'd love your feedback on ${project.name}.\n\nComplete the survey here: ${surveyUrl}\n\nThis link is personal to you and expires in 14 days.`,
-      });
+      };
+      setTimeout(() => {
+        sendMail(mailPayload).then(() => {
+          console.log(`[SURVEY] Email sent to ${contact.email} for project ${project.name}`);
+        }).catch((err: any) => {
+          console.error(`[SURVEY] Email failed to ${contact.email}:`, err?.message || err);
+        });
+      }, 0);
 
       created.push(surveyToken);
     }
