@@ -2064,14 +2064,8 @@ export function registerRoutes(server: Server, app: Express) {
     const baseUrl = process.env.APP_URL || `https://pfg-platform.onrender.com`;
     const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000); // 14 days
 
+    // Survey goes to PM and Site Manager only — not Sourcing Contact
     const contacts: { email: string; name: string; role: string }[] = [];
-    if (project.sourcingContactEmail) {
-      contacts.push({
-        email: project.sourcingContactEmail,
-        name: project.sourcingContact || "Sourcing Contact",
-        role: "sourcing_contact",
-      });
-    }
     if (project.customerProjectManagerEmail) {
       contacts.push({
         email: project.customerProjectManagerEmail,

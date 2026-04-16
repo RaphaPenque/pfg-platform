@@ -39,14 +39,8 @@ async function autoSendSurveysForEndingProjects(today: string): Promise<void> {
     }
 
     // Build contact list from project stakeholder fields
+    // Survey goes to PM and Site Manager only — not Sourcing Contact
     const contacts: { email: string; name: string; role: string }[] = [];
-    if (project.sourcingContactEmail) {
-      contacts.push({
-        email: project.sourcingContactEmail,
-        name: project.sourcingContact || "Sourcing Contact",
-        role: "sourcing_contact",
-      });
-    }
     if (project.customerProjectManagerEmail) {
       contacts.push({
         email: project.customerProjectManagerEmail,
