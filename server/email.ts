@@ -47,6 +47,8 @@ export interface MailOptions {
   subject: string;
   html: string;
   text?: string;
+  /** Optional sender — must be a valid @powerforce.global mailbox. Defaults to MAIL_FROM env var. */
+  from?: string;
 }
 
 /**
@@ -85,9 +87,12 @@ export async function sendMail(opts: MailOptions): Promise<boolean> {
     saveToSentItems: true,
   };
 
+  // Use specified sender or fall back to default MAIL_FROM
+  const sender = (opts.from && opts.from.endsWith('@powerforce.global')) ? opts.from : MAIL_FROM;
+
   try {
     const res = await fetch(
-      `https://graph.microsoft.com/v1.0/users/${MAIL_FROM}/sendMail`,
+      `https://graph.microsoft.com/v1.0/users/${sender}/sendMail`,
       {
         method: "POST",
         headers: {

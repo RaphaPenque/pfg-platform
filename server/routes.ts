@@ -1670,6 +1670,12 @@ export function registerRoutes(server: Server, app: Express) {
       }
     }
 
+    const allUsers = await storage.getUsers();
+    const usersPublic = allUsers.map(u => ({
+      id: u.id, name: u.name, email: u.email,
+      role: u.role, isActive: u.isActive
+    }));
+
     res.json({
       workers: enrichedWorkers,
       projects: allProjects,
@@ -1677,6 +1683,7 @@ export function registerRoutes(server: Server, app: Express) {
       roleSlots: allRoleSlots,
       oemTypes: allOemTypes,
       projectLeads: projectLeadMap,
+      users: usersPublic,
     });
   });
 
@@ -1854,6 +1861,11 @@ export function registerRoutes(server: Server, app: Express) {
       return res.status(400).json({ error: "No contact emails set on this project" });
     }
 
+    // Resolve PM email — send survey from the assigned project manager
+    const projectLead = await storage.getProjectLead(projectId);
+    const pmUser = projectLead ? await storage.getUser(projectLead.userId) : null;
+    const pmEmail = pmUser?.email?.endsWith('@powerforce.global') ? pmUser.email : undefined;
+
     const created: any[] = [];
     for (const contact of contacts) {
       const token = crypto.randomBytes(32).toString("hex");
@@ -1904,6 +1916,7 @@ export function registerRoutes(server: Server, app: Express) {
       // Fire-and-forget — don't block the response on email delivery
       const mailPayload = {
         to: contact.email,
+        from: pmEmail, // send from PM's @powerforce.global address if available
         subject: `We'd love your feedback — ${project.name}`,
         html: emailHtml,
         text: `Hi ${firstName},\n\nWe'd love your feedback on ${project.name}.\n\nComplete the survey here: ${surveyUrl}\n\nThis link is personal to you and expires in 14 days.`,

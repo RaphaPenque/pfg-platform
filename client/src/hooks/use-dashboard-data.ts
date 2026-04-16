@@ -127,7 +127,8 @@ export interface DashboardData {
   assignments: any[];
   roleSlots: DashboardRoleSlot[];
   oemTypes: any[];
-  projectLeads?: Record<number, number>;
+  projectLeads?: Record<number, { id: number; name: string }>;
+  users?: Array<{ id: number; name: string; email: string; role: string; isActive: boolean }>;
 }
 
 export function useDashboardData() {

@@ -8,6 +8,15 @@ import { storage } from "./storage";
 import { sendMail } from "./email";
 import crypto from "crypto";
 
+async function getPmEmail(projectId: number): Promise<string | undefined> {
+  try {
+    const lead = await storage.getProjectLead(projectId);
+    if (!lead) return undefined;
+    const user = await storage.getUser(lead.userId);
+    return user?.email?.endsWith('@powerforce.global') ? user.email : undefined;
+  } catch { return undefined; }
+}
+
 const APP_URL = process.env.APP_URL || "https://pfg-platform.onrender.com";
 
 const MS_7_DAYS  = 7  * 24 * 60 * 60 * 1000;
@@ -67,9 +76,11 @@ async function autoSendSurveysForEndingProjects(today: string): Promise<void> {
         const surveyUrl = `${APP_URL}/survey?token=${token}`;
         const firstName = contact.name.split(" ")[0];
         const html = buildSurveyInviteEmail(firstName, project.name, surveyUrl);
+        const pmEmail = await getPmEmail(project.id);
 
         await sendMail({
           to: contact.email,
+          from: pmEmail,
           subject: `We'd love your feedback \u2014 ${project.name}`,
           html,
           text: `Hi ${firstName},\n\nThank you for working with Powerforce Global on ${project.name}.\nWe'd love your feedback — it takes about 3 minutes.\n\nSurvey link: ${surveyUrl}\n\nThis link is personal to you and expires in 14 days.`,
@@ -115,6 +126,7 @@ export async function checkSurveyReminders(): Promise<void> {
         if (!createdAt) continue;
 
         const ageMs = now.getTime() - createdAt.getTime();
+        const pmEmail = await getPmEmail(project.id);
 
         // 7-day reminder
         if (ageMs >= MS_7_DAYS && !token.reminderSentAt) {
@@ -122,6 +134,7 @@ export async function checkSurveyReminders(): Promise<void> {
             const html = buildReminderEmail(firstName, project.name, surveyUrl, "reminder");
             await sendMail({
               to: token.contactEmail,
+              from: pmEmail,
               subject: `Reminder: We'd love your feedback — ${project.name}`,
               html,
               text: `Hi ${firstName},\n\nJust a friendly reminder to share your feedback on ${project.name}.\n\nSurvey link: ${surveyUrl}\n\nThank you,\nPowerforce Global`,
@@ -139,6 +152,7 @@ export async function checkSurveyReminders(): Promise<void> {
             const html = buildReminderEmail(firstName, project.name, surveyUrl, "final");
             await sendMail({
               to: token.contactEmail,
+              from: pmEmail,
               subject: `Final reminder: Your feedback on ${project.name}`,
               html,
               text: `Hi ${firstName},\n\nThis is a final reminder to share your feedback on ${project.name}. Your link expires soon.\n\nSurvey link: ${surveyUrl}\n\nThank you,\nPowerforce Global`,

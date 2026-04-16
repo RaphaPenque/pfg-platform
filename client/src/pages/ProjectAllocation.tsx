@@ -1588,7 +1588,7 @@ function EditProjectModal({
     queryKey: ["/api/users/resource-managers"],
   });
   const { data: dashData } = useDashboardData();
-  const initialLeadId = dashData?.projectLeads?.[card.project.id] ?? null;
+  const initialLeadId = dashData?.projectLeads?.[card.project.id]?.id ?? null;
   const [editLeadUserId, setEditLeadUserId] = useState<number | null>(initialLeadId);
   useEffect(() => { setEditLeadUserId(initialLeadId); }, [initialLeadId]);
 

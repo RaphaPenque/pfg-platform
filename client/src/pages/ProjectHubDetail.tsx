@@ -407,6 +407,12 @@ function OverviewTab({
             </table>
           </div>
         </div>
+
+        {/* PFG Project Team Card */}
+        <div className="rounded-xl border p-5" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}>
+          <h3 className="text-[13px] font-bold uppercase tracking-wide mb-4" style={{ color: "var(--pfg-steel)" }}>PFG Project Team</h3>
+          <PfgTeamCard project={project} canEdit={canEdit} />
+        </div>
       </div>
 
       {/* RIGHT COLUMN (40%) */}
@@ -1008,6 +1014,69 @@ function CustomerSatisfactionTab({
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── PFG Project Team Card ───────────────────────────────────────────────
+function PfgTeamCard({ project, canEdit }: { project: DashboardProject; canEdit: boolean }) {
+  const [saving, setSaving] = useState(false);
+  const { toast } = useToast();
+  const { data } = useDashboardData();
+
+  const users: any[] = data?.users || [];
+  const projectLeads: Record<number, { id: number; name: string }> = data?.projectLeads || {};
+  const assignedLead = projectLeads[project.id];
+  const assignedUser = assignedLead ? users.find((u: any) => u.id === assignedLead.id) : undefined;
+  const pmUsers = users.filter((u: any) => u.role === 'project_manager' && u.isActive);
+
+  const assignPm = async (userId: string) => {
+    setSaving(true);
+    try {
+      await apiRequest('PUT', `/api/projects/${project.id}/lead`, { userId: parseInt(userId) });
+      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      toast({ title: 'Project Manager assigned' });
+    } catch (e: any) {
+      toast({ title: 'Error', description: e.message, variant: 'destructive' });
+    }
+    setSaving(false);
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wide mb-1" style={{ color: 'var(--pfg-steel)' }}>Project Manager</p>
+          {assignedUser ? (
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold text-white"
+                style={{ background: 'var(--pfg-navy)' }}>
+                {assignedUser.name.split(' ').map((n: string) => n[0]).slice(0,2).join('')}
+              </div>
+              <div>
+                <p className="text-[13px] font-semibold" style={{ color: 'var(--pfg-navy)' }}>{assignedUser.name}</p>
+                <p className="text-[11px]" style={{ color: 'var(--pfg-steel)' }}>{assignedUser.email}</p>
+              </div>
+            </div>
+          ) : (
+            <p className="text-[12px]" style={{ color: 'var(--pfg-steel)' }}>No PM assigned</p>
+          )}
+        </div>
+        {canEdit && (
+          <select
+            className="text-[12px] border rounded-lg px-2 py-1.5"
+            style={{ borderColor: 'hsl(var(--border))', color: 'var(--pfg-navy)' }}
+            value={assignedLead?.id || ''}
+            disabled={saving}
+            onChange={e => assignPm(e.target.value)}
+          >
+            <option value="">{assignedUser ? 'Change PM' : 'Assign PM'}</option>
+            {pmUsers.map((u: any) => (
+              <option key={u.id} value={u.id}>{u.name}</option>
+            ))}
+          </select>
+        )}
+      </div>
     </div>
   );
 }
