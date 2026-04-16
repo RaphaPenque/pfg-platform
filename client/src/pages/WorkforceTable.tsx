@@ -24,7 +24,9 @@ import { useAuth } from "@/context/AuthContext";
 import { useDashboardData, type DashboardWorker, type DashboardAssignment } from "@/hooks/use-dashboard-data";
 import { OEM_BRAND_COLORS, CERT_DEFS, calcUtilisation, PROJECT_ROLES, COST_CENTRES, ENGLISH_LEVELS, ROLE_HIERARCHY, getHighestRole, EQUIPMENT_TYPES, OEM_OPTIONS, cleanName } from "@/lib/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { Search, ChevronDown, ChevronUp, Info, Upload, Download, ArrowUpDown, Pencil, Plus, X, Check, Loader2, User, FileText, Trash2 } from "lucide-react";
+import { Search, ChevronDown, ChevronUp, Info, Upload, Download, ArrowUpDown, Pencil, Plus, X, Check, Loader2, User, FileText, Trash2, CalendarIcon } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar } from "@/components/ui/calendar";
 import { downloadCSV } from "@/lib/csv-export";
 import { downloadSqepPdf } from "@/lib/sqep-pdf";
 import type { WorkExperience } from "@shared/schema";
@@ -859,8 +861,8 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
                       {existingWorkExp.map(exp => (
                         <tr key={`we-${exp.id}`} className="border-t" style={{ borderColor: "hsl(var(--border))", background: "rgba(34,197,94,0.03)" }}>
                           <td className="px-3 py-2 font-medium">{exp.siteName}</td>
-                          <td className="px-3 py-2 tabular-nums">{exp.startDate || "—"}</td>
-                          <td className="px-3 py-2 tabular-nums">{exp.endDate || "—"}</td>
+                          <td className="px-3 py-2 tabular-nums">{fmtDate(exp.startDate)}</td>
+                          <td className="px-3 py-2 tabular-nums">{fmtDate(exp.endDate)}</td>
                           <td className="px-3 py-2">{exp.role || "—"}</td>
                           <td className="px-3 py-2">{exp.oem || "—"}</td>
                           <td className="px-3 py-2">{exp.equipmentType || "—"}</td>
@@ -878,8 +880,8 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
                       {historicalAssignments.map(a => (
                         <tr key={a.id} className="border-t" style={{ borderColor: "hsl(var(--border))" }}>
                           <td className="px-3 py-2 font-medium">{a.projectName} ({a.projectCode})</td>
-                          <td className="px-3 py-2 tabular-nums">{a.startDate || "—"}</td>
-                          <td className="px-3 py-2 tabular-nums">{a.endDate || "—"}</td>
+                          <td className="px-3 py-2 tabular-nums">{fmtDate(a.startDate)}</td>
+                          <td className="px-3 py-2 tabular-nums">{fmtDate(a.endDate)}</td>
                           <td className="px-3 py-2">{a.role || a.task || worker.role}</td>
                           <td className="px-3 py-2">{a.customer || "—"}</td>
                           <td className="px-3 py-2">{a.equipmentType || "—"}</td>
@@ -893,10 +895,10 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
                             <input className="text-xs px-2 py-1 border rounded w-full" style={inputStyle} value={exp.siteName} onChange={(e) => updateManualExp(exp.id, "siteName", e.target.value)} placeholder="Site name" data-testid={`exp-site-${exp.id}`} />
                           </td>
                           <td className="px-3 py-1.5">
-                            <input type="date" className="text-xs px-1.5 py-1 border rounded w-full" style={inputStyle} value={exp.startDate} onChange={(e) => updateManualExp(exp.id, "startDate", e.target.value)} data-testid={`exp-start-${exp.id}`} />
+                            <DatePickerCell value={exp.startDate} onChange={v => updateManualExp(exp.id, "startDate", v)} placeholder="Start" inputCls="text-xs px-1.5 py-1 border rounded w-full" testId={`exp-start-${exp.id}`} />
                           </td>
                           <td className="px-3 py-1.5">
-                            <input type="date" className="text-xs px-1.5 py-1 border rounded w-full" style={inputStyle} value={exp.endDate} onChange={(e) => updateManualExp(exp.id, "endDate", e.target.value)} data-testid={`exp-end-${exp.id}`} />
+                            <DatePickerCell value={exp.endDate} onChange={v => updateManualExp(exp.id, "endDate", v)} placeholder="End" inputCls="text-xs px-1.5 py-1 border rounded w-full" testId={`exp-end-${exp.id}`} />
                           </td>
                           <td className="px-3 py-1.5">
                             <select className="text-xs px-1.5 py-1 border rounded w-full" style={inputStyle} value={exp.role} onChange={(e) => updateManualExp(exp.id, "role", e.target.value)} data-testid={`exp-role-${exp.id}`}>
@@ -1005,6 +1007,86 @@ function EditWizardModal({ worker, onClose }: { worker: DashboardWorker; onClose
 // ───────────────────────────────────────────────────────────────
 // READ-ONLY WORK EXPERIENCE TAB
 // ───────────────────────────────────────────────────────────────
+// ── Date helpers ─────────────────────────────────────────────────────────
+/** Format ISO yyyy-mm-dd → DD/MM/YYYY for display. Returns '—' for empty. */
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  // Already in DD/MM/YYYY from old imported data
+  const m2 = iso.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (m2) return iso;
+  return iso;
+}
+
+/** Parse any date string to a JS Date for the Calendar (returns undefined if empty). */
+function parseToDate(val: string | null | undefined): Date | undefined {
+  if (!val) return undefined;
+  // ISO yyyy-mm-dd
+  const m = val.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+  // DD/MM/YYYY
+  const m2 = val.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (m2) return new Date(parseInt(m2[3]), parseInt(m2[2]) - 1, parseInt(m2[1]));
+  return undefined;
+}
+
+/** Calendar date picker that stores value as yyyy-mm-dd ISO string internally. */
+function DatePickerCell({
+  value,
+  onChange,
+  placeholder = 'Pick date',
+  inputCls = '',
+  testId,
+}: {
+  value: string;
+  onChange: (iso: string) => void;
+  placeholder?: string;
+  inputCls?: string;
+  testId?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = parseToDate(value);
+
+  function handleSelect(date: Date | undefined) {
+    if (!date) { onChange(''); setOpen(false); return; }
+    const iso = [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, '0'),
+      String(date.getDate()).padStart(2, '0'),
+    ].join('-');
+    onChange(iso);
+    setOpen(false);
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          data-testid={testId}
+          className={`flex items-center gap-1 text-left w-full ${inputCls}`}
+          style={{ minWidth: 88 }}
+        >
+          <CalendarIcon className="w-3 h-3 flex-shrink-0 opacity-50" />
+          <span className={value ? '' : 'opacity-40'}>
+            {value ? fmtDate(value) : placeholder}
+          </span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-auto p-0" align="start" style={{ zIndex: 9999 }}>
+        <Calendar
+          mode="single"
+          selected={selected}
+          onSelect={handleSelect}
+          initialFocus
+          defaultMonth={selected}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 // ── Inline-editable work experience row ───────────────────────────────────
 function EditableWeRow({ exp, workerId }: { exp: WorkExperience; workerId: number }) {
   const { toast } = useToast();
@@ -1058,10 +1140,10 @@ function EditableWeRow({ exp, workerId }: { exp: WorkExperience; workerId: numbe
           <input className={inputCls} value={form.siteName} onChange={e => set('siteName', e.target.value)} placeholder="Site name" autoFocus />
         </td>
         <td className="px-2 py-1.5">
-          <input className={inputCls} value={form.startDate} onChange={e => set('startDate', e.target.value)} placeholder="2024" style={{ width: 60 }} />
+          <DatePickerCell value={form.startDate} onChange={v => set('startDate', v)} placeholder="Start" inputCls={inputCls} testId={`exp-edit-start-${exp.id}`} />
         </td>
         <td className="px-2 py-1.5">
-          <input className={inputCls} value={form.endDate} onChange={e => set('endDate', e.target.value)} placeholder="2024" style={{ width: 60 }} />
+          <DatePickerCell value={form.endDate} onChange={v => set('endDate', v)} placeholder="End" inputCls={inputCls} testId={`exp-edit-end-${exp.id}`} />
         </td>
         <td className="px-2 py-1.5">
           <input className={inputCls} value={form.role} onChange={e => set('role', e.target.value)} placeholder="Role" />
@@ -1104,8 +1186,8 @@ function EditableWeRow({ exp, workerId }: { exp: WorkExperience; workerId: numbe
       style={{ borderColor: "hsl(var(--border))" }}
     >
       <td className="px-3 py-2 font-medium">{exp.siteName}</td>
-      <td className="px-3 py-2 tabular-nums">{exp.startDate || '—'}</td>
-      <td className="px-3 py-2 tabular-nums">{exp.endDate || '—'}</td>
+      <td className="px-3 py-2 tabular-nums">{fmtDate(exp.startDate)}</td>
+      <td className="px-3 py-2 tabular-nums">{fmtDate(exp.endDate)}</td>
       <td className="px-3 py-2">{exp.role || '—'}</td>
       <td className="px-3 py-2">{exp.oem || '—'}</td>
       <td className="px-3 py-2">{exp.equipmentType || '—'}</td>
@@ -1184,8 +1266,8 @@ function WorkExperienceTab({ worker }: { worker: DashboardWorker }) {
                     {a.location ? <span className="text-[10px] ml-1" style={{ color: "var(--pfg-steel)" }}>· {a.location}</span> : null}
                     <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded" style={{ background: "hsl(var(--muted))", color: "var(--pfg-steel)" }}>Platform</span>
                   </td>
-                  <td className="px-3 py-2 tabular-nums">{a.startDate || '—'}</td>
-                  <td className="px-3 py-2 tabular-nums">{a.endDate || '—'}</td>
+                  <td className="px-3 py-2 tabular-nums">{fmtDate(a.startDate)}</td>
+                  <td className="px-3 py-2 tabular-nums">{fmtDate(a.endDate)}</td>
                   <td className="px-3 py-2">{a.role || '—'}</td>
                   <td className="px-3 py-2">{(a as any).customer || '—'}</td>
                   <td className="px-3 py-2">{(a as any).equipmentType || '—'}</td>
