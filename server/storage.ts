@@ -207,11 +207,13 @@ export interface IStorage {
   getSafetyObservations(projectId: number): Promise<SafetyObservation[]>;
   createSafetyObservation(data: InsertSafetyObservation): Promise<SafetyObservation>;
   updateSafetyObservation(id: number, data: Partial<InsertSafetyObservation>): Promise<SafetyObservation | undefined>;
+  deleteSafetyObservation(id: number): Promise<void>;
 
   // Incident Reports
   getIncidentReports(projectId: number): Promise<IncidentReport[]>;
   createIncidentReport(data: InsertIncidentReport): Promise<IncidentReport>;
   updateIncidentReport(id: number, data: Partial<InsertIncidentReport>): Promise<IncidentReport | undefined>;
+  deleteIncidentReport(id: number): Promise<void>;
 
   // Milestone Certificates
   getMilestoneCertificates(projectId: number): Promise<MilestoneCertificate[]>;
@@ -878,6 +880,10 @@ export class PostgresStorage implements IStorage {
     return row;
   }
 
+  async deleteSafetyObservation(id: number): Promise<void> {
+    await db.delete(safetyObservations).where(eq(safetyObservations.id, id));
+  }
+
   // ── Incident Reports ──────────────────────────────────────────
   async getIncidentReports(projectId: number): Promise<IncidentReport[]> {
     return db.select().from(incidentReports)
@@ -893,6 +899,10 @@ export class PostgresStorage implements IStorage {
   async updateIncidentReport(id: number, data: Partial<InsertIncidentReport>): Promise<IncidentReport | undefined> {
     const [row] = await db.update(incidentReports).set(data).where(eq(incidentReports.id, id)).returning();
     return row;
+  }
+
+  async deleteIncidentReport(id: number): Promise<void> {
+    await db.delete(incidentReports).where(eq(incidentReports.id, id));
   }
 
   // ── Milestone Certificates ────────────────────────────────────

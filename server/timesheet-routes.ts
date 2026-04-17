@@ -1593,13 +1593,13 @@ export async function sendWeeklySupervisorLinks(triggerDate?: Date): Promise<{ p
         const hasNightShift = nightWorkers.length > 0;
 
         // Find supervisor from workers list (Superintendent > Foreman > first available)
-        function pickSupervisor(workers: any[]): any | null {
+        const pickSupervisor = (workers: any[]): any | null => {
           const super_ = workers.find(w => w.role?.toLowerCase().includes("superintendent"));
           if (super_) return super_;
           const foreman = workers.find(w => w.role?.toLowerCase().includes("foreman"));
           if (foreman) return foreman;
           return workers[0] || null;
-        }
+        };
 
         const daySup = pickSupervisor(dayWorkers);
         const nightSup = hasNightShift ? pickSupervisor(nightWorkers) : null;

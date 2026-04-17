@@ -1796,6 +1796,16 @@ function QHSETab({
   const [editTBForm, setEditTBForm] = useState<{ reportDate: string; shift: string; topic: string; attendeeCount: string; notes: string }>({ reportDate: "", shift: "Day", topic: "", attendeeCount: "", notes: "" });
   const [savingEditTB, setSavingEditTB] = useState(false);
 
+  // Safety observation inline edit state
+  const [editingObs, setEditingObs] = useState<number | null>(null);
+  const [editObsForm, setEditObsForm] = useState<{ observationDate: string; shift: string; observationType: string; locationOnSite: string; description: string; status: string }>({ observationDate: "", shift: "Day", observationType: "positive", locationOnSite: "", description: "", status: "open" });
+  const [savingEditObs, setSavingEditObs] = useState(false);
+
+  // Incident report inline edit state
+  const [editingInc, setEditingInc] = useState<number | null>(null);
+  const [editIncForm, setEditIncForm] = useState<{ incidentDate: string; shift: string; incidentType: string; description: string; status: string; lostTime: boolean }>({ incidentDate: "", shift: "Day", incidentType: "near_miss", description: "", status: "open", lostTime: false });
+  const [savingEditInc, setSavingEditInc] = useState(false);
+
   // Observation modal state
   const [showObsModal, setShowObsModal] = useState(false);
   const [obsForm, setObsForm] = useState({
@@ -1848,6 +1858,68 @@ function QHSETab({
       toast({ title: "Update failed", description: e.message, variant: "destructive" });
     }
     setSavingEditTB(false);
+  };
+
+  const handleSaveEditObs = async (obsId: number) => {
+    setSavingEditObs(true);
+    try {
+      const payload: Record<string, any> = {};
+      if (editObsForm.observationDate) payload.observationDate = editObsForm.observationDate;
+      if (editObsForm.shift) payload.shift = editObsForm.shift;
+      if (editObsForm.observationType) payload.observationType = editObsForm.observationType;
+      if (editObsForm.locationOnSite !== undefined) payload.locationOnSite = editObsForm.locationOnSite;
+      if (editObsForm.description !== undefined) payload.description = editObsForm.description;
+      if (editObsForm.status) payload.status = editObsForm.status;
+      await apiRequest("PATCH", `/api/safety-observations/${obsId}`, payload);
+      setEditingObs(null);
+      refetchObs();
+      toast({ title: "Observation updated" });
+    } catch (e: any) {
+      toast({ title: "Update failed", description: e.message, variant: "destructive" });
+    }
+    setSavingEditObs(false);
+  };
+
+  const handleDeleteObs = async (obsId: number) => {
+    if (!window.confirm("Delete this safety observation? This cannot be undone.")) return;
+    try {
+      await apiRequest("DELETE", `/api/safety-observations/${obsId}`);
+      refetchObs();
+      toast({ title: "Observation deleted" });
+    } catch (e: any) {
+      toast({ title: "Delete failed", description: e.message, variant: "destructive" });
+    }
+  };
+
+  const handleSaveEditInc = async (incId: number) => {
+    setSavingEditInc(true);
+    try {
+      const payload: Record<string, any> = {};
+      if (editIncForm.incidentDate) payload.incidentDate = editIncForm.incidentDate;
+      if (editIncForm.shift) payload.shift = editIncForm.shift;
+      if (editIncForm.incidentType) payload.incidentType = editIncForm.incidentType;
+      if (editIncForm.description !== undefined) payload.description = editIncForm.description;
+      if (editIncForm.status) payload.status = editIncForm.status;
+      payload.lostTime = editIncForm.lostTime;
+      await apiRequest("PATCH", `/api/incident-reports/${incId}`, payload);
+      setEditingInc(null);
+      refetchInc();
+      toast({ title: "Incident updated" });
+    } catch (e: any) {
+      toast({ title: "Update failed", description: e.message, variant: "destructive" });
+    }
+    setSavingEditInc(false);
+  };
+
+  const handleDeleteInc = async (incId: number) => {
+    if (!window.confirm("Delete this incident report? This cannot be undone.")) return;
+    try {
+      await apiRequest("DELETE", `/api/incident-reports/${incId}`);
+      refetchInc();
+      toast({ title: "Incident deleted" });
+    } catch (e: any) {
+      toast({ title: "Delete failed", description: e.message, variant: "destructive" });
+    }
   };
 
   const handleSaveObs = async () => {
@@ -2053,42 +2125,118 @@ function QHSETab({
                   <Th>Date/Time</Th>
                   <Th>Shift</Th>
                   <Th>Type</Th>
-                  <Th>Reported By</Th>
                   <Th>Location</Th>
+                  <Th>Description</Th>
                   <Th>Status</Th>
+                  <Th></Th>
                 </tr>
               </thead>
               <tbody>
                 {observations.map((o: any, i: number) => {
-                  const color = OBS_TYPE_COLORS[o.type] || OBS_TYPE_COLORS.Positive;
-                  const isStop = o.type === "STOP WORK";
+                  const obsType = o.observationType || o.type || "positive";
+                  const color = OBS_TYPE_COLORS[obsType] || OBS_TYPE_COLORS.Positive;
+                  const isStop = obsType === "stop_work" || obsType === "STOP WORK";
                   return (
-                    <tr
-                      key={i}
-                      style={{
-                        borderTop: "1px solid hsl(var(--border))",
-                        background: isStop ? "var(--red-bg)" : undefined,
-                      }}
-                    >
-                      <Td>{o.date ? fmtDate(o.date) : "—"} {o.time || ""}</Td>
-                      <Td>{o.shift}</Td>
-                      <Td>
-                        <span
-                          className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                          style={{ background: color.bg, color: color.text }}
-                        >
-                          {o.type}
-                        </span>
-                      </Td>
-                      <Td>{o.reportedBy}</Td>
-                      <Td>{o.location}</Td>
-                      <Td>
-                        <StatusBadge
-                          label={o.status || "Open"}
-                          color={o.status === "Closed" ? "green" : "amber"}
-                        />
-                      </Td>
-                    </tr>
+                    <React.Fragment key={o.id || i}>
+                      <tr
+                        style={{
+                          borderTop: "1px solid hsl(var(--border))",
+                          background: isStop ? "var(--red-bg)" : undefined,
+                        }}
+                      >
+                        <Td>{o.observationDate ? fmtDate(o.observationDate) : (o.date ? fmtDate(o.date) : "—")} {o.observationTime || o.time || ""}</Td>
+                        <Td>{o.shift || "—"}</Td>
+                        <Td>
+                          <span
+                            className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                            style={{ background: color.bg, color: color.text }}
+                          >
+                            {obsType.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
+                          </span>
+                        </Td>
+                        <Td>{o.locationOnSite || o.location || "—"}</Td>
+                        <Td>{o.description ? o.description.substring(0, 60) + (o.description.length > 60 ? "…" : "") : "—"}</Td>
+                        <Td>
+                          <StatusBadge
+                            label={o.status ? o.status.charAt(0).toUpperCase() + o.status.slice(1) : "Open"}
+                            color={o.status === "closed" || o.status === "Closed" ? "green" : "amber"}
+                          />
+                        </Td>
+                        <Td>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => {
+                                if (editingObs === o.id) { setEditingObs(null); return; }
+                                setEditingObs(o.id);
+                                setEditObsForm({
+                                  observationDate: o.observationDate || o.date || "",
+                                  shift: o.shift || "Day",
+                                  observationType: o.observationType || o.type || "positive",
+                                  locationOnSite: o.locationOnSite || o.location || "",
+                                  description: o.description || "",
+                                  status: o.status || "open",
+                                });
+                              }}
+                              className="p-1 rounded hover:bg-black/5"
+                              title="Edit"
+                            >
+                              <Pencil className="w-3.5 h-3.5" style={{ color: editingObs === o.id ? "var(--pfg-navy)" : "var(--pfg-steel)" }} />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteObs(o.id)}
+                              className="p-1 rounded hover:bg-red-50"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" style={{ color: "#b91c1c" }} />
+                            </button>
+                          </div>
+                        </Td>
+                      </tr>
+                      {editingObs === o.id && (
+                        <tr style={{ borderTop: "1px solid hsl(var(--border))", background: "hsl(var(--muted))" }}>
+                          <td colSpan={7} className="px-4 py-3">
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <span className="text-[11px] font-semibold" style={{ color: "var(--pfg-steel)" }}>Edit Observation</span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Date</span>
+                                <input type="date" value={editObsForm.observationDate} onChange={e => setEditObsForm(f => ({ ...f, observationDate: e.target.value }))} className="text-[11px] px-2 py-1 border rounded" style={{ borderColor: "hsl(var(--border))" }} />
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Shift</span>
+                                <select value={editObsForm.shift} onChange={e => setEditObsForm(f => ({ ...f, shift: e.target.value }))} className="text-[11px] px-2 py-1 border rounded" style={{ borderColor: "hsl(var(--border))" }}>
+                                  <option value="Day">Day</option>
+                                  <option value="Night">Night</option>
+                                </select>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Type</span>
+                                <select value={editObsForm.observationType} onChange={e => setEditObsForm(f => ({ ...f, observationType: e.target.value }))} className="text-[11px] px-2 py-1 border rounded" style={{ borderColor: "hsl(var(--border))" }}>
+                                  <option value="positive">Positive</option>
+                                  <option value="unsafe_condition">Unsafe Condition</option>
+                                  <option value="negative">Negative</option>
+                                  <option value="stop_work">Stop Work</option>
+                                </select>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Location</span>
+                                <input type="text" value={editObsForm.locationOnSite} onChange={e => setEditObsForm(f => ({ ...f, locationOnSite: e.target.value }))} className="text-[11px] px-2 py-1 border rounded w-32" style={{ borderColor: "hsl(var(--border))" }} />
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Status</span>
+                                <select value={editObsForm.status} onChange={e => setEditObsForm(f => ({ ...f, status: e.target.value }))} className="text-[11px] px-2 py-1 border rounded" style={{ borderColor: "hsl(var(--border))" }}>
+                                  <option value="open">Open</option>
+                                  <option value="closed">Closed</option>
+                                </select>
+                              </div>
+                              <button onClick={() => handleSaveEditObs(o.id)} disabled={savingEditObs} className="text-[11px] font-semibold px-3 py-1 rounded disabled:opacity-50" style={{ background: "var(--pfg-navy)", color: "#fff" }}>
+                                {savingEditObs ? <Loader2 className="w-3 h-3 animate-spin" /> : "Save"}
+                              </button>
+                              <button onClick={() => setEditingObs(null)} className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Cancel</button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
@@ -2117,47 +2265,125 @@ function QHSETab({
                 <tr>
                   <Th>Date</Th>
                   <Th>Type</Th>
-                  <Th>Worker Involved</Th>
+                  <Th>Description</Th>
                   <Th>Lost Time</Th>
                   <Th>Status</Th>
+                  <Th></Th>
                 </tr>
               </thead>
               <tbody>
                 {incidents.map((inc: any, i: number) => {
-                  const color = INC_TYPE_COLORS[inc.type] || INC_TYPE_COLORS["Near Miss"];
-                  const isLTI = inc.lostTime || inc.type === "LTI";
+                  const incType = inc.incidentType || inc.type || "near_miss";
+                  const color = INC_TYPE_COLORS[incType] || INC_TYPE_COLORS[incType.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())] || INC_TYPE_COLORS["Near Miss"];
+                  const isLTI = inc.lostTime || incType === "lost_time_injury" || incType === "LTI";
                   return (
-                    <tr
-                      key={i}
-                      style={{
-                        borderTop: "1px solid hsl(var(--border))",
-                        background: isLTI ? "var(--red-bg)" : undefined,
-                      }}
-                    >
-                      <Td>{inc.date ? fmtDate(inc.date) : "—"}</Td>
-                      <Td>
-                        <span
-                          className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                          style={{ background: color.bg, color: color.text }}
-                        >
-                          {inc.type}
-                        </span>
-                      </Td>
-                      <Td>{inc.workerInvolved || "—"}</Td>
-                      <Td>
-                        {isLTI ? (
-                          <StatusBadge label="Yes" color="red" />
-                        ) : (
-                          <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>No</span>
-                        )}
-                      </Td>
-                      <Td>
-                        <StatusBadge
-                          label={inc.status || "Open"}
-                          color={inc.status === "Closed" ? "green" : inc.status === "Under Investigation" ? "amber" : "red"}
-                        />
-                      </Td>
-                    </tr>
+                    <React.Fragment key={inc.id || i}>
+                      <tr
+                        style={{
+                          borderTop: "1px solid hsl(var(--border))",
+                          background: isLTI ? "var(--red-bg)" : undefined,
+                        }}
+                      >
+                        <Td>{inc.incidentDate ? fmtDate(inc.incidentDate) : (inc.date ? fmtDate(inc.date) : "—")}</Td>
+                        <Td>
+                          <span
+                            className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                            style={{ background: color?.bg || "#fee2e2", color: color?.text || "#b91c1c" }}
+                          >
+                            {incType.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
+                          </span>
+                        </Td>
+                        <Td>{inc.description ? inc.description.substring(0, 60) + (inc.description.length > 60 ? "…" : "") : "—"}</Td>
+                        <Td>
+                          {isLTI ? (
+                            <StatusBadge label="Yes" color="red" />
+                          ) : (
+                            <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>No</span>
+                          )}
+                        </Td>
+                        <Td>
+                          <StatusBadge
+                            label={inc.status ? inc.status.charAt(0).toUpperCase() + inc.status.slice(1) : "Open"}
+                            color={inc.status === "closed" || inc.status === "Closed" ? "green" : inc.status === "under_investigation" || inc.status === "Under Investigation" ? "amber" : "red"}
+                          />
+                        </Td>
+                        <Td>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => {
+                                if (editingInc === inc.id) { setEditingInc(null); return; }
+                                setEditingInc(inc.id);
+                                setEditIncForm({
+                                  incidentDate: inc.incidentDate || inc.date || "",
+                                  shift: inc.shift || "Day",
+                                  incidentType: inc.incidentType || inc.type || "near_miss",
+                                  description: inc.description || "",
+                                  status: inc.status || "open",
+                                  lostTime: !!inc.lostTime,
+                                });
+                              }}
+                              className="p-1 rounded hover:bg-black/5"
+                              title="Edit"
+                            >
+                              <Pencil className="w-3.5 h-3.5" style={{ color: editingInc === inc.id ? "var(--pfg-navy)" : "var(--pfg-steel)" }} />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteInc(inc.id)}
+                              className="p-1 rounded hover:bg-red-50"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" style={{ color: "#b91c1c" }} />
+                            </button>
+                          </div>
+                        </Td>
+                      </tr>
+                      {editingInc === inc.id && (
+                        <tr style={{ borderTop: "1px solid hsl(var(--border))", background: "hsl(var(--muted))" }}>
+                          <td colSpan={6} className="px-4 py-3">
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <span className="text-[11px] font-semibold" style={{ color: "var(--pfg-steel)" }}>Edit Incident</span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Date</span>
+                                <input type="date" value={editIncForm.incidentDate} onChange={e => setEditIncForm(f => ({ ...f, incidentDate: e.target.value }))} className="text-[11px] px-2 py-1 border rounded" style={{ borderColor: "hsl(var(--border))" }} />
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Shift</span>
+                                <select value={editIncForm.shift} onChange={e => setEditIncForm(f => ({ ...f, shift: e.target.value }))} className="text-[11px] px-2 py-1 border rounded" style={{ borderColor: "hsl(var(--border))" }}>
+                                  <option value="Day">Day</option>
+                                  <option value="Night">Night</option>
+                                </select>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Type</span>
+                                <select value={editIncForm.incidentType} onChange={e => setEditIncForm(f => ({ ...f, incidentType: e.target.value }))} className="text-[11px] px-2 py-1 border rounded" style={{ borderColor: "hsl(var(--border))" }}>
+                                  <option value="near_miss">Near Miss</option>
+                                  <option value="first_aid">First Aid</option>
+                                  <option value="medical_treatment">Medical Treatment</option>
+                                  <option value="lost_time_injury">Lost Time Injury</option>
+                                  <option value="dangerous_occurrence">Dangerous Occurrence</option>
+                                </select>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Status</span>
+                                <select value={editIncForm.status} onChange={e => setEditIncForm(f => ({ ...f, status: e.target.value }))} className="text-[11px] px-2 py-1 border rounded" style={{ borderColor: "hsl(var(--border))" }}>
+                                  <option value="open">Open</option>
+                                  <option value="under_investigation">Under Investigation</option>
+                                  <option value="closed">Closed</option>
+                                </select>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <input type="checkbox" checked={editIncForm.lostTime} onChange={e => setEditIncForm(f => ({ ...f, lostTime: e.target.checked }))} id="editIncLostTime" />
+                                <label htmlFor="editIncLostTime" className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Lost Time</label>
+                              </div>
+                              <button onClick={() => handleSaveEditInc(inc.id)} disabled={savingEditInc} className="text-[11px] font-semibold px-3 py-1 rounded disabled:opacity-50" style={{ background: "var(--pfg-navy)", color: "#fff" }}>
+                                {savingEditInc ? <Loader2 className="w-3 h-3 animate-spin" /> : "Save"}
+                              </button>
+                              <button onClick={() => setEditingInc(null)} className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Cancel</button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>

@@ -470,15 +470,6 @@ function SupervisorGrid({ week, entries, userRole, onRefresh }: {
     onError: (e: any) => toast({ title: "Update failed", description: e.message, variant: "destructive" }),
   });
 
-  const submitMutation = useMutation({
-    mutationFn: () => apiRequest("POST", `/api/timesheet-weeks/${week.id}/submit`, {}).then(r => r.json()),
-    onSuccess: () => {
-      toast({ title: "Timesheet submitted", description: "PM has been notified." });
-      onRefresh();
-    },
-    onError: (e: any) => toast({ title: "Submit failed", description: e.message, variant: "destructive" }),
-  });
-
   // Build worker map
   const workerMap = new Map<number, { name: string; role: string; entries: TimesheetEntry[] }>();
   for (const e of entries) {
@@ -500,7 +491,7 @@ function SupervisorGrid({ week, entries, userRole, onRefresh }: {
         title={`Weekly Timesheet — w/c ${fmtDate(week.week_commencing)}`}
         action={
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {statusBadge(week.status)}
+            {statusBadge(week.status, week)}
             {week.pm_reject_comment && (
               <span style={{ fontSize: 11, color: "#b91c1c", background: "#fef2f2", padding: "2px 8px", borderRadius: 6 }}>
                 Rejected: {week.pm_reject_comment.substring(0, 50)}
@@ -509,6 +500,8 @@ function SupervisorGrid({ week, entries, userRole, onRefresh }: {
           </div>
         }
       />
+
+      <ShiftStatusTiles week={week} />
 
       <div style={{ overflowX: "auto", borderRadius: 10, border: "1px solid hsl(var(--border))", marginBottom: 16 }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
@@ -696,7 +689,7 @@ function PmApprovalPanel({ week, entries, onRefresh }: {
 
       {/* Actions */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        {week.status === "submitted" && (
+        {(week.status === "submitted" || !!week.day_sup_submitted_at) && week.status !== "pm_approved" && week.status !== "sent_to_customer" && week.status !== "customer_approved" && (
           <>
             <button
               onClick={() => approveMutation.mutate()}

@@ -1733,6 +1733,13 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(obs);
   });
 
+  app.delete("/api/safety-observations/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    await storage.deleteSafetyObservation(id);
+    await logAudit(req.user!.id, "safety_observation.delete", "safety_observation", id);
+    res.status(204).send();
+  });
+
   // Incident Reports
   app.get("/api/projects/:projectId/incident-reports", requireAuth, async (req: Request, res: Response) => {
     const projectId = parseInt(req.params.projectId);
@@ -1793,6 +1800,13 @@ export function registerRoutes(server: Server, app: Express) {
     if (!incident) return res.status(404).json({ error: "Incident report not found" });
     await logAudit(req.user!.id, "incident_report.update", "incident_report", id);
     res.json(incident);
+  });
+
+  app.delete("/api/incident-reports/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    await storage.deleteIncidentReport(id);
+    await logAudit(req.user!.id, "incident_report.delete", "incident_report", id);
+    res.status(204).send();
   });
 
   // ===== MILESTONE CERTIFICATES =====
