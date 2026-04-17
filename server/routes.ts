@@ -590,6 +590,7 @@ export function registerRoutes(server: Server, app: Express) {
     // Skip auth for auth routes, portal, confirmation, and public survey/approval routes
     if (req.path.startsWith("/auth/") || req.path.startsWith("/portal/") || req.path.startsWith("/confirm/")) return next();
     if (req.path.startsWith("/survey/") || req.path.startsWith("/delay-approval/") || req.path.startsWith("/milestone-approval/") || req.path.startsWith("/timesheet-approval/")) return next();
+    if (req.path.startsWith("/internal/") || req.path.startsWith("/timesheet-supervisor/")) return next();
     // Skip auth for uploads serving (static files)
     if (req.path.startsWith("/uploads/")) return next();
     requireAuth(req, res, next);
