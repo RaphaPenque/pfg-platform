@@ -182,8 +182,10 @@ function ShiftStatusTiles({ week, entries }: { week: TimesheetWeek; entries: Tim
           <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1D23" }}>Day Shift</div>
           {week.day_sup_submitted_at ? (
             <div style={{ fontSize: 11, color: "#15803d" }}>Submitted {fmtDateTime(week.day_sup_submitted_at)}</div>
+          ) : week.day_sup_token ? (
+            <div style={{ fontSize: 11, color: "#d97706" }}>Link sent — Pending{week.day_sup_name ? ` (${week.day_sup_name})` : ""}</div>
           ) : (
-            <div style={{ fontSize: 11, color: "#d97706" }}>Pending{week.day_sup_name ? ` — ${week.day_sup_name}` : ""}</div>
+            <div style={{ fontSize: 11, color: "#9ca3af" }}>Awaiting Sunday send</div>
           )}
         </div>
       </div>
@@ -202,9 +204,9 @@ function ShiftStatusTiles({ week, entries }: { week: TimesheetWeek; entries: Tim
             {week.night_sup_submitted_at ? (
               <div style={{ fontSize: 11, color: "#15803d" }}>Submitted {fmtDateTime(week.night_sup_submitted_at)}</div>
             ) : week.night_sup_token ? (
-              <div style={{ fontSize: 11, color: "#d97706" }}>Pending{week.night_sup_name ? ` — ${week.night_sup_name}` : ""}</div>
+              <div style={{ fontSize: 11, color: "#d97706" }}>Link sent — Pending{week.night_sup_name ? ` (${week.night_sup_name})` : ""}</div>
             ) : (
-              <div style={{ fontSize: 11, color: "#9ca3af" }}>Link sends Sunday</div>
+              <div style={{ fontSize: 11, color: "#9ca3af" }}>Awaiting Sunday send</div>
             )}
           </div>
         </div>
