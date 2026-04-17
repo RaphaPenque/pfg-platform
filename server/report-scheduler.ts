@@ -75,8 +75,9 @@ function buildEmailHtml(
         <strong>${weekEndFormatted}</strong>.
       </p>
       <p style="margin:0 0 16px;color:#4b5563;font-size:14px;line-height:1.6;">
-        This report includes completed tasks, delays log, comments &amp; concerns,
+        This report includes the delays log, comments &amp; concerns,
         workforce deployment, and the health &amp; safety summary for the reporting period.
+        Completed tasks are available to browse on the live project portal.
       </p>
       <div style="text-align:center;margin:28px 0;">
         <a href="${portalUrl}"
@@ -113,6 +114,7 @@ async function sendReportForProject(
     console.log(`[report-scheduler] ${project.code}: no published reports — skipping ${isFinal ? 'final' : 'weekly'}`);
     return;
   }
+  // Use the most recent published report to determine the week
   const report = published.sort((a: any, b: any) => (a.reportDate > b.reportDate ? -1 : 1))[0];
 
   const pmUser = await getPmUser(project.id);
@@ -157,9 +159,17 @@ async function sendReportForProject(
     };
   });
 
-  const reportTasks = Array.isArray(report.completedTasks) ? report.completedTasks : [];
-  const reportDelays = Array.isArray(report.delaysLog) ? report.delaysLog : [];
-  const reportComments = (allComments as any[]).filter((c: any) => c.reportId === report.id);
+  // Aggregate full week: all published reports within the week window
+  const weekReports = published.filter((r: any) => r.reportDate >= weekStart && r.reportDate <= weekEnd);
+
+  // Delays: aggregate across all week's reports (no tasks in PDF)
+  const reportDelays = weekReports.flatMap((r: any) => Array.isArray(r.delaysLog) ? r.delaysLog : []);
+
+  // Comments: all comments log entries within the week
+  const reportComments = (allComments as any[]).filter((c: any) => {
+    const d = c.logDate || c.enteredAt?.slice(0, 10) || '';
+    return d >= weekStart && d <= weekEnd;
+  });
   const now = new Date();
   const projEnd = project.endDate ? new Date(project.endDate + 'T00:00:00Z') : null;
   const projStart = project.startDate ? new Date(project.startDate + 'T00:00:00Z') : null;
@@ -186,7 +196,7 @@ async function sendReportForProject(
     weekStart,
     weekEnd,
     pmName,
-    completedTasks: reportTasks,
+    completedTasks: [], // Tasks removed from PDF — shown on portal instead
     delaysLog: reportDelays,
     commentsEntries: reportComments.map((c: any) => ({
       date: c.enteredAt ? new Date(c.enteredAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }) : '',

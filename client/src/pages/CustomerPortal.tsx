@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import type { DashboardWorker, DashboardRoleSlot, DashboardAssignment } from "@/hooks/use-dashboard-data";
@@ -147,6 +147,74 @@ function StatusPill({ status }: { status: string }) {
     >
       {closed ? "Closed" : status === "under_investigation" ? "Investigating" : "Open"}
     </span>
+  );
+}
+
+// ─── Report row with expandable tasks accordion ────────────────────
+function ReportRow({ report, color, projectCode }: { report: any; color: string; projectCode: string }) {
+  const [tasksOpen, setTasksOpen] = React.useState(false);
+  const tasks = Array.isArray(report.completedTasks) ? report.completedTasks : [];
+  const delayCount = Array.isArray(report.delaysLog) ? report.delaysLog.length : 0;
+
+  return (
+    <div className="rounded-xl" style={{ background: "#fff", border: "1px solid #e2e5eb", borderLeft: `3px solid ${color}`, boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-4" style={{ padding: "20px 24px" }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#111318", marginBottom: 6 }}>Week of {report.reportDate}</div>
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ background: "#f0fdf4", color: "#15803d", border: "1px solid #bbf7d0" }}>
+              <svg width="8" height="8" viewBox="0 0 10 10" fill="currentColor"><circle cx="5" cy="5" r="4"/></svg>
+              Published
+            </span>
+            <span style={{ fontSize: 12, color: "#6b7280" }}>{tasks.length} tasks · {delayCount} delays</span>
+          </div>
+        </div>
+        <div className="flex gap-2 flex-wrap items-center">
+          {tasks.length > 0 && (
+            <button
+              onClick={() => setTasksOpen(o => !o)}
+              className="inline-flex items-center gap-1 text-xs font-semibold rounded-lg"
+              style={{ background: "#f4f5f7", color: "#1A1D23", padding: "6px 12px", border: "1px solid #e2e5eb" }}
+            >
+              {tasksOpen ? "Hide Tasks" : `View ${tasks.length} Tasks`}
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" style={{ transform: tasksOpen ? "rotate(180deg)" : "none", transition: "transform 160ms" }}>
+                <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+          )}
+          <a
+            href={`/api/portal/${projectCode}/report/${report.id}/pdf`}
+            target="_blank" rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-xs font-semibold rounded-lg"
+            style={{ background: color, color: "#fff", padding: "6px 12px", textDecoration: "none" }}
+          >
+            <Download className="w-3 h-3" />
+            Download PDF
+          </a>
+        </div>
+      </div>
+
+      {/* Expandable tasks */}
+      {tasksOpen && (
+        <div style={{ borderTop: "1px solid #eaecf0", padding: "16px 24px" }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>Completed Tasks</div>
+          <div className="flex flex-col gap-2">
+            {tasks.map((task: any, i: number) => (
+              <div key={i} className="flex items-start gap-3" style={{ padding: "10px 12px", background: "#f9fafb", borderRadius: 6 }}>
+                <div style={{ minWidth: 36, height: 20, background: color + "18", color, borderRadius: 4, fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  {task.pctComplete ?? 0}%
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 13, color: "#111318", fontWeight: 500 }}>{task.description}</div>
+                  {task.notes && <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>{task.notes}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -832,43 +900,9 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                   </p>
                 </div>
                 <div className="flex flex-col gap-3">
-                  {publishedReports.map((report: any) => {
-                    const taskCount = Array.isArray(report.completedTasks) ? report.completedTasks.length : 0;
-                    const delayCount = Array.isArray(report.delaysLog) ? report.delaysLog.length : 0;
-                    const commentCount = Array.isArray(report.commentsLog) ? report.commentsLog.length : 0;
-                    return (
-                      <div
-                        key={report.id}
-                        className="rounded-xl flex items-center justify-between flex-wrap gap-4"
-                        style={{ background: "#fff", border: "1px solid #e2e5eb", borderLeft: `3px solid ${color}`, boxShadow: "0 1px 3px rgba(0,0,0,0.06)", padding: "20px 24px" }}
-                      >
-                        <div>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: "#111318", marginBottom: 6 }}>
-                            Week of {report.reportDate}
-                          </div>
-                          <div className="flex items-center gap-3 flex-wrap">
-                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full" style={{ background: "#f0fdf4", color: "#15803d", border: "1px solid #bbf7d0" }}>
-                              <svg width="8" height="8" viewBox="0 0 10 10" fill="currentColor" aria-hidden="true"><circle cx="5" cy="5" r="4"/></svg>
-                              Published
-                            </span>
-                            <span style={{ fontSize: 12, color: "#6b7280" }}>{taskCount} tasks · {delayCount} delays · {commentCount} comments</span>
-                          </div>
-                        </div>
-                        <div className="flex gap-2 flex-wrap">
-                          <a
-                            href={`/api/portal/${params.projectCode}/report/${report.id}/pdf`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 text-xs font-semibold rounded-lg transition-all"
-                            style={{ background: color, color: "#fff", padding: "6px 12px", textDecoration: "none" }}
-                          >
-                            <Download className="w-3 h-3" />
-                            Download PDF
-                          </a>
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {publishedReports.map((report: any) => (
+                    <ReportRow key={report.id} report={report} color={color} projectCode={params.projectCode} />
+                  ))}
                 </div>
               </>
             )}
