@@ -537,11 +537,16 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
               {/* Active Team */}
               <div
                 className="rounded-xl p-5"
-                style={{ background: "#fff", border: "1px solid #e2e5eb", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", borderLeft: "3px solid #1A1D23" }}
+                style={{ background: "#fff", border: "1px solid #e2e5eb", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", borderLeft: `3px solid ${color}` }}
               >
-                <div style={{ fontSize: 11, fontWeight: 500, color: "#6b7280", letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 8 }}>Active Team</div>
+                <div style={{ fontSize: 11, fontWeight: 500, color: "#6b7280", letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 8 }}>On Site Now</div>
                 <div style={{ fontSize: "clamp(1.5rem,1.2rem+1vw,2rem)", fontWeight: 700, letterSpacing: "-0.03em", color: "#111318", lineHeight: 1, marginBottom: 8 }}>
-                  {kpis.activeTeam ?? teamMembers.length}
+                  {teamMembers.filter(m => {
+                    const s = m.assignment.startDate ? new Date(m.assignment.startDate) : null;
+                    const e = m.assignment.endDate ? new Date(m.assignment.endDate) : null;
+                    const t = new Date(); t.setHours(0,0,0,0);
+                    return s && e && s <= t && e >= t;
+                  }).length}
                 </div>
                 <div style={{ fontSize: 12, color: "#6b7280" }}>Day &amp; Night shifts</div>
               </div>
@@ -590,7 +595,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
             <section aria-labelledby="gantt-heading" className="mb-8">
               <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
                 <div className="flex items-center gap-3">
-                  <h2 id="gantt-heading" style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-0.01em", color: "#111318" }}>Team Deployment</h2>
+                  <h2 id="gantt-heading" style={{ fontSize: 15, fontWeight: 700, letterSpacing: "0.01em", color: "#1a2744" }}>Team Deployment</h2>
                   <span
                     className="text-xs font-semibold px-2 py-0.5 rounded-full"
                     style={{ background: "#f3f4f6", border: "1px solid #e2e5eb", color: "#6b7280" }}
@@ -663,9 +668,15 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                         const isFilled = row.filled;
                         // Bars come from slot periods — same for filled and unfilled
                         const slotPeriods = (row.slot as any).periods as Array<{ startDate: string; endDate: string }> | undefined;
-                        const barsToRender: Array<{ start: string; end: string }> = slotPeriods && slotPeriods.length > 0
-                          ? slotPeriods.map(p => ({ start: p.startDate, end: p.endDate }))
-                          : [{ start: row.slot.startDate, end: row.slot.endDate }];
+                        // Prefer assignment dates over slot periods — slot periods can be wrong (old data)
+                        // Fall back: if assignment has valid dates, use those; otherwise use slot periods
+                        const assignStart = row.assignment?.startDate;
+                        const assignEnd = row.assignment?.endDate;
+                        const barsToRender: Array<{ start: string; end: string }> = assignStart && assignEnd
+                          ? [{ start: assignStart, end: assignEnd }]
+                          : slotPeriods && slotPeriods.length > 0
+                            ? slotPeriods.map(p => ({ start: p.startDate, end: p.endDate }))
+                            : [{ start: row.slot.startDate, end: row.slot.endDate }];
                         const barStart = barsToRender[0].start;
                         const barEnd = barsToRender[barsToRender.length - 1].end;
 
@@ -676,7 +687,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                               color: shift === "Night" ? "#F5BD00" : "#b0b8c4",
                               padding: "12px 0 6px",
                               borderTop: lastShift !== null ? "1px solid #eaecf0" : undefined,
-                              background: shift === "Night" ? "#1A1D23" : undefined,
+                              background: shift === "Night" ? "#1a2744" : undefined,
                               marginLeft: shift === "Night" ? -24 : undefined,
                               marginRight: shift === "Night" ? -24 : undefined,
                               paddingLeft: shift === "Night" ? 24 : undefined,
@@ -774,101 +785,6 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                 ) : (
                   <div className="text-center py-12 text-sm" style={{ color: "#6b7280" }}>No timeline data available</div>
                 )}
-              </div>
-            </section>
-
-            {/* Project Team table */}
-            <section aria-labelledby="team-heading">
-              <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-                <div className="flex items-center gap-3">
-                  <h2 id="team-heading" style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-0.01em", color: "#111318" }}>Project Team</h2>
-                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full" style={{ background: "#f3f4f6", border: "1px solid #e2e5eb", color: "#6b7280" }}>
-                    {teamMembers.length} members
-                  </span>
-                </div>
-              </div>
-
-              <div className="rounded-xl overflow-hidden" style={{ background: "#fff", border: "1px solid #e2e5eb", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
-                <div className="flex items-center justify-between flex-wrap gap-3 px-6 py-4" style={{ borderBottom: "1px solid #eaecf0" }}>
-                  <span style={{ fontSize: 13, color: "#6b7280" }}>All assigned personnel for {project.code}</span>
-                  <button
-                    onClick={async () => {
-                      if (!portalData || downloading) return;
-                      setDownloading(true);
-                      try { await downloadCustomerPack(portalData.project, portalData.teamMembers, portalData.customer, portalData.projectRoleSlots); }
-                      finally { setDownloading(false); }
-                    }}
-                    disabled={downloading}
-                    className="inline-flex items-center gap-2 rounded-lg text-xs font-bold transition-all hover:opacity-90 disabled:opacity-60"
-                    style={{ background: "#F5BD00", color: "#1A1D23", padding: "8px 16px" }}
-                    data-testid="download-all-btn"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    {downloading ? "Preparing…" : "Download Team SQEP"}
-                  </button>
-                </div>
-
-                <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse" }} aria-label="Project team members">
-                    <thead>
-                      <tr style={{ background: "#F4F5F7" }}>
-                        {["Name", "Role", "Shift", "Period", "SQEP"].map(h => (
-                          <th key={h} style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", padding: "12px 20px", textAlign: "left", borderBottom: "1px solid #e2e5eb", whiteSpace: "nowrap" }}>
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sortedTeam.length === 0 ? (
-                        <tr>
-                          <td colSpan={5} className="text-center py-12" style={{ color: "#6b7280" }}>No team members assigned</td>
-                        </tr>
-                      ) : sortedTeam.map((m) => {
-                        const shift = m.assignment.shift || projectRoleSlots.find(s => s.id === m.assignment.roleSlotId)?.shift || "Day";
-                        return (
-                          <tr key={m.assignment.id} style={{ borderBottom: "1px solid #eaecf0", transition: "background 160ms" }} data-testid={`team-row-${m.assignment.id}`}
-                            onMouseEnter={e => (e.currentTarget.style.background = "#F4F5F7")}
-                            onMouseLeave={e => (e.currentTarget.style.background = "")}>
-                            <td style={{ padding: "14px 20px", verticalAlign: "middle" }}>
-                              <div style={{ fontWeight: 600, fontSize: 13, color: "#111318" }}>{cleanName(m.worker.name)}</div>
-                            </td>
-                            <td style={{ padding: "14px 20px", fontSize: 13, color: "#111318", verticalAlign: "middle" }}>
-                              {m.assignment.task || m.worker.role}
-                            </td>
-                            <td style={{ padding: "14px 20px", verticalAlign: "middle" }}>
-                              {shift === "Night" ? (
-                                <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full whitespace-nowrap" style={{ background: "#eef0f5", color: "#1A1D23" }}>
-                                  🌙 Night
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full whitespace-nowrap" style={{ background: color + "18", color: color }}>
-                                  ☀ Day
-                                </span>
-                              )}
-                            </td>
-                            <td style={{ padding: "14px 20px", fontSize: 12, color: "#6b7280", whiteSpace: "nowrap", verticalAlign: "middle" }}>
-                              {m.assignment.startDate || "—"} → {m.assignment.endDate || "—"}
-                            </td>
-                            <td style={{ padding: "14px 20px", verticalAlign: "middle" }}>
-                              <button
-                                onClick={() => downloadSqepPdf(m.worker as any)}
-                                className="inline-flex items-center gap-1 text-xs font-semibold rounded-md transition-all"
-                                style={{ padding: "5px 10px", background: "transparent", color: color, border: `1.5px solid ${color}22`, cursor: "pointer" }}
-                                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = color + "11"; (e.currentTarget as HTMLButtonElement).style.borderColor = color; }}
-                                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "transparent"; (e.currentTarget as HTMLButtonElement).style.borderColor = color + "22"; }}
-                                data-testid={`sqep-download-${m.worker.id}`}
-                              >
-                                <FileDown className="w-3.5 h-3.5" />
-                                SQEP Pack
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
               </div>
             </section>
           </div>
