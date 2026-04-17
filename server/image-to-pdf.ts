@@ -1,0 +1,58 @@
+import sharp from "sharp";
+import path from "path";
+import { PDFDocument } from "pdf-lib";
+
+/**
+ * Converts an image file (JPEG, PNG, WEBP, HEIC etc) to a PDF file.
+ * The image is embedded in an A4 page with margins, maintaining aspect ratio.
+ * Returns the path to the generated PDF.
+ */
+export async function imageToPdf(imagePath: string): Promise<string> {
+  const pdfPath = imagePath.replace(/\.[^.]+$/, ".pdf");
+
+  // Process image with sharp: auto-rotate from EXIF, convert to JPEG
+  const jpegBuffer = await sharp(imagePath)
+    .rotate() // auto-rotate from EXIF metadata
+    .flatten({ background: { r: 255, g: 255, b: 255 } }) // flatten transparency
+    .jpeg({ quality: 92 })
+    .toBuffer();
+
+  // Get dimensions
+  const meta = await sharp(jpegBuffer).metadata();
+  const imgW = meta.width ?? 800;
+  const imgH = meta.height ?? 1100;
+
+  // Create PDF with A4 page (595 x 842 points)
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([595, 842]);
+
+  // Embed the JPEG
+  const img = await pdfDoc.embedJpg(jpegBuffer);
+
+  // Scale to fit within A4 with 20pt margins
+  const maxW = 555; // 595 - 40
+  const maxH = 802; // 842 - 40
+  const scale = Math.min(maxW / imgW, maxH / imgH);
+  const drawW = imgW * scale;
+  const drawH = imgH * scale;
+  const x = (595 - drawW) / 2;
+  const y = (842 - drawH) / 2;
+
+  page.drawImage(img, { x, y, width: drawW, height: drawH });
+
+  const pdfBytes = await pdfDoc.save();
+  const { writeFileSync } = await import("fs");
+  writeFileSync(pdfPath, pdfBytes);
+
+  return pdfPath;
+}
+
+/** Returns true if the mimetype or filename indicates an image */
+export function isImageFile(mimeType?: string, filename?: string): boolean {
+  if (mimeType && mimeType.startsWith("image/")) return true;
+  if (filename) {
+    const ext = path.extname(filename).toLowerCase();
+    return [".jpg", ".jpeg", ".png", ".webp", ".heic", ".heif", ".tiff", ".bmp"].includes(ext);
+  }
+  return false;
+}

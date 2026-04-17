@@ -10,6 +10,7 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import { generateWeeklyReportPdf } from "./report-generator";
+import { imageToPdf, isImageFile } from "./image-to-pdf";
 
 // Extend Express Request with user
 declare global {
@@ -1532,7 +1533,28 @@ export function registerRoutes(server: Server, app: Express) {
     const projectId = parseInt(req.params.projectId);
     const { date, shift, workerId } = req.body;
     if (!date) return res.status(400).json({ error: "date required" });
-    const filePath = req.file ? `/api/uploads/${projectId}/supervisor/${req.file.filename}` : null;
+
+    let uploadedFilePath = req.file?.path || null;
+    let uploadedFileName = req.file?.originalname || null;
+    let storedFilename = req.file?.filename || null;
+
+    // If an image was uploaded, convert it to PDF automatically
+    if (req.file && isImageFile(req.file.mimetype, req.file.originalname)) {
+      try {
+        const pdfPath = await imageToPdf(uploadedFilePath!);
+        // Remove the original image file
+        if (fs.existsSync(uploadedFilePath!)) fs.unlinkSync(uploadedFilePath!);
+        uploadedFilePath = pdfPath;
+        storedFilename = path.basename(pdfPath);
+        // Rename the original filename to .pdf for display
+        uploadedFileName = (uploadedFileName?.replace(/\.[^.]+$/, "") || "report") + ".pdf";
+      } catch (err: any) {
+        console.error("[supervisor-upload] Image-to-PDF conversion failed:", err.message);
+        // Fall through — store the original image if conversion fails
+      }
+    }
+
+    const filePath = uploadedFilePath ? `/api/uploads/${projectId}/supervisor/${storedFilename}` : null;
     const report = await storage.createSupervisorReport({
       projectId,
       workerId: workerId ? parseInt(workerId) : null,
@@ -1540,7 +1562,7 @@ export function registerRoutes(server: Server, app: Express) {
       shift: shift || null,
       submissionMethod: "upload",
       filePath,
-      fileName: req.file?.originalname || null,
+      fileName: uploadedFileName,
       documentType: "supervisor_report",
       status: workerId ? "filed" : "pending_assignment",
       pendingAssignmentNote: workerId ? null : "Worker not specified — needs assignment",

@@ -1348,8 +1348,8 @@ function SupervisorReportsTab({
     e.preventDefault();
     setDragOver(false);
     const f = e.dataTransfer.files[0];
-    if (f && f.type === "application/pdf") setSelectedFile(f);
-    else toast({ title: "Please drop a PDF file", variant: "destructive" });
+    if (f && (f.type === "application/pdf" || f.type.startsWith("image/"))) setSelectedFile(f);
+    else toast({ title: "Please drop a PDF or image file", variant: "destructive" });
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1447,10 +1447,10 @@ function SupervisorReportsTab({
         >
           <Upload className="w-8 h-8 mx-auto mb-2" style={{ color: "var(--pfg-steel)" }} />
           <p className="text-[13px] font-semibold" style={{ color: "var(--pfg-navy)" }}>
-            Drop PDF here or click to upload
+            Drop file here or click to upload
           </p>
-          <p className="text-[11px] mt-1" style={{ color: "var(--pfg-steel)" }}>PDF files only</p>
-          <input ref={fileInputRef} type="file" accept="application/pdf" className="hidden" onChange={handleFileChange} />
+          <p className="text-[11px] mt-1" style={{ color: "var(--pfg-steel)" }}>PDF or image — images converted to PDF automatically</p>
+          <input ref={fileInputRef} type="file" accept="application/pdf,image/*" className="hidden" onChange={handleFileChange} />
         </div>
 
         {selectedFile && (
