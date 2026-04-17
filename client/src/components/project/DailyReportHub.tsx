@@ -1,7 +1,8 @@
-import { useState, useMemo, useRef, useCallback } from "react";
+import React, { useState, useMemo, useRef, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import { cleanName } from "@/lib/constants";
 import {
   type DashboardProject,
   type DashboardWorker,
@@ -1014,7 +1015,7 @@ function PMReportTab({
                 if (!worker) return null;
                 return (
                   <tr key={a.id}>
-                    <Td><span className="font-medium">{worker.name}</span></Td>
+                    <Td><span className="font-medium">{cleanName(worker.name)}</span></Td>
                     <Td>{a.role || worker.role}</Td>
                     <Td>{a.startDate || "—"}</Td>
                     <Td>{a.endDate || "—"}</Td>
@@ -1769,6 +1770,9 @@ function QHSETab({
   const [showTBModal, setShowTBModal] = useState(false);
   const [tbForm, setTBForm] = useState({ date: todayStr(), shift: "Day", topic: "", attendeeCount: "", notes: "" });
   const [tbFile, setTBFile] = useState<File | null>(null);
+  const [editingTB, setEditingTB] = useState<number | null>(null);
+  const [editTBForm, setEditTBForm] = useState<{ reportDate: string; shift: string; topic: string; attendeeCount: string; notes: string }>({ reportDate: "", shift: "Day", topic: "", attendeeCount: "", notes: "" });
+  const [savingEditTB, setSavingEditTB] = useState(false);
 
   // Observation modal state
   const [showObsModal, setShowObsModal] = useState(false);
@@ -1803,6 +1807,25 @@ function QHSETab({
       toast({ title: "Failed", description: e.message, variant: "destructive" });
     }
     setSaving(false);
+  };
+
+  const handleSaveEditTB = async (tbId: number) => {
+    setSavingEditTB(true);
+    try {
+      const payload: Record<string, any> = {};
+      if (editTBForm.reportDate) payload.reportDate = editTBForm.reportDate;
+      if (editTBForm.shift) payload.shift = editTBForm.shift;
+      if (editTBForm.topic) payload.topic = editTBForm.topic;
+      if (editTBForm.attendeeCount) payload.attendeeCount = parseInt(editTBForm.attendeeCount);
+      if (editTBForm.notes !== undefined) payload.notes = editTBForm.notes;
+      await apiRequest("PATCH", `/api/toolbox-talks/${tbId}`, payload);
+      setEditingTB(null);
+      refetchTB();
+      toast({ title: "Toolbox talk updated" });
+    } catch (e: any) {
+      toast({ title: "Update failed", description: e.message, variant: "destructive" });
+    }
+    setSavingEditTB(false);
   };
 
   const handleSaveObs = async () => {
@@ -1905,25 +1928,75 @@ function QHSETab({
                   <Th>Attendees</Th>
                   <Th>File</Th>
                   <Th>Notes</Th>
+                  <Th></Th>
                 </tr>
               </thead>
               <tbody>
                 {toolboxTalks.map((t: any, i: number) => (
-                  <tr key={i} style={{ borderTop: "1px solid hsl(var(--border))" }}>
-                    <Td>{t.date ? fmtDate(t.date) : "—"}</Td>
-                    <Td>{t.shift}</Td>
-                    <Td>{t.supervisor || "—"}</Td>
-                    <Td>{t.topic}</Td>
-                    <Td>{t.attendeeCount}</Td>
-                    <Td>
-                      {t.filePath ? (
-                        <a href={t.filePath} target="_blank" rel="noreferrer" className="text-[11px] font-semibold" style={{ color: "var(--pfg-navy)" }}>
-                          View
-                        </a>
-                      ) : "—"}
-                    </Td>
-                    <Td>{t.notes || "—"}</Td>
-                  </tr>
+                  <React.Fragment key={t.id || i}>
+                    <tr style={{ borderTop: "1px solid hsl(var(--border))" }}>
+                      <Td>{t.reportDate ? fmtDate(t.reportDate) : "—"}</Td>
+                      <Td>{t.shift || "—"}</Td>
+                      <Td>{t.supervisor || "—"}</Td>
+                      <Td>{t.topic || "—"}</Td>
+                      <Td>{t.attendeeCount ?? "—"}</Td>
+                      <Td>
+                        {t.filePath ? (
+                          <a href={t.filePath} target="_blank" rel="noreferrer" className="text-[11px] font-semibold" style={{ color: "var(--pfg-navy)" }}>View</a>
+                        ) : "—"}
+                      </Td>
+                      <Td>{t.notes || "—"}</Td>
+                      <Td>
+                        <button
+                          onClick={() => {
+                            if (editingTB === t.id) { setEditingTB(null); return; }
+                            setEditingTB(t.id);
+                            setEditTBForm({ reportDate: t.reportDate || "", shift: t.shift || "Day", topic: t.topic || "", attendeeCount: String(t.attendeeCount || ""), notes: t.notes || "" });
+                          }}
+                          className="p-1 rounded hover:bg-black/5"
+                          title="Edit"
+                        >
+                          <Pencil className="w-3.5 h-3.5" style={{ color: editingTB === t.id ? "var(--pfg-navy)" : "var(--pfg-steel)" }} />
+                        </button>
+                      </Td>
+                    </tr>
+                    {editingTB === t.id && (
+                      <tr style={{ borderTop: "1px solid hsl(var(--border))", background: "hsl(var(--muted))" }}>
+                        <td colSpan={8} className="px-4 py-3">
+                          <div className="flex items-center gap-3 flex-wrap">
+                            <span className="text-[11px] font-semibold" style={{ color: "var(--pfg-steel)" }}>Edit TBT</span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Date</span>
+                              <input type="date" value={editTBForm.reportDate} onChange={e => setEditTBForm(f => ({ ...f, reportDate: e.target.value }))} className="text-[11px] px-2 py-1 border rounded" style={{ borderColor: "hsl(var(--border))" }} />
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Shift</span>
+                              <select value={editTBForm.shift} onChange={e => setEditTBForm(f => ({ ...f, shift: e.target.value }))} className="text-[11px] px-2 py-1 border rounded" style={{ borderColor: "hsl(var(--border))" }}>
+                                <option value="Day">Day</option>
+                                <option value="Night">Night</option>
+                              </select>
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Topic</span>
+                              <input type="text" value={editTBForm.topic} onChange={e => setEditTBForm(f => ({ ...f, topic: e.target.value }))} className="text-[11px] px-2 py-1 border rounded w-40" style={{ borderColor: "hsl(var(--border))" }} />
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Attendees</span>
+                              <input type="number" value={editTBForm.attendeeCount} onChange={e => setEditTBForm(f => ({ ...f, attendeeCount: e.target.value }))} className="text-[11px] px-2 py-1 border rounded w-16" style={{ borderColor: "hsl(var(--border))" }} />
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Notes</span>
+                              <input type="text" value={editTBForm.notes} onChange={e => setEditTBForm(f => ({ ...f, notes: e.target.value }))} className="text-[11px] px-2 py-1 border rounded w-40" style={{ borderColor: "hsl(var(--border))" }} />
+                            </div>
+                            <button onClick={() => handleSaveEditTB(t.id)} disabled={savingEditTB} className="text-[11px] font-semibold px-3 py-1 rounded disabled:opacity-50" style={{ background: "var(--pfg-navy)", color: "#fff" }}>
+                              {savingEditTB ? <Loader2 className="w-3 h-3 animate-spin" /> : "Save"}
+                            </button>
+                            <button onClick={() => setEditingTB(null)} className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Cancel</button>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
               </tbody>
             </TableWrap>
