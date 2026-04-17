@@ -1610,9 +1610,22 @@ export async function sendWeeklySupervisorLinks(triggerDate?: Date): Promise<{ p
         const daySup = pickSupervisor(dayWorkers);
         const nightSup = hasNightShift ? pickSupervisor(nightWorkers) : null;
 
+        // Check if already sent this week — skip entirely if tokens already exist
+        const existingRes = await db.execute(sql`
+          SELECT day_sup_token, night_sup_token FROM timesheet_weeks WHERE id = ${twId}
+        `);
+        const existing = existingRes.rows[0] as any;
+        if (existing?.day_sup_token && (!hasNightShift || existing?.night_sup_token)) {
+          console.log(`[supervisor-links] Already sent for ${project.code} w/c ${weekComm} — skipping`);
+          processed++;
+          continue;
+        }
+
+        // Collect missing emails to send ONE consolidated warning per project
+        const missingEmails: string[] = [];
+
         // 6. Process day supervisor
-        if (daySup) {
-          // Always generate token so tile shows correct state
+        if (daySup && !existing?.day_sup_token) {
           const rawToken = crypto.randomBytes(32).toString("hex");
           const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
           await db.execute(sql`
@@ -1623,16 +1636,8 @@ export async function sendWeeklySupervisorLinks(triggerDate?: Date): Promise<{ p
           `);
           const reviewUrl = `${APP_URL}/#/timesheet-supervisor/${rawToken}`;
           if (!daySup.email) {
-            // Warn PM — no email on worker record
-            if (pmEmail) {
-              await sendMail({
-                to: pmEmail,
-                subject: `Timesheet not sent — missing email for ${daySup.name} (${project.name})`,
-                html: `<p>The weekly timesheet for <strong>${project.name}</strong> (w/c ${weekComm}) could not be sent to <strong>${daySup.name}</strong> (${daySup.role}, Day Shift) — no email address is on their worker record.</p><p>Please update their email in the system and resend.</p><p>Review link (share manually if needed): <a href="${reviewUrl}">${reviewUrl}</a></p>`,
-                text: `Timesheet not sent to ${daySup.name} for ${project.name} w/c ${weekComm} — no email on record.`,
-              });
-            }
-            console.log(`[supervisor-links] No email for day sup ${daySup.name} on ${project.code} — token set, PM warned`);
+            missingEmails.push(`• <strong>${daySup.name}</strong> (${daySup.role}, Day Shift) — <a href="${reviewUrl}">review link</a>`);
+            console.log(`[supervisor-links] No email for day sup ${daySup.name} on ${project.code}`);
           } else {
             await sendMail({
               to: daySup.email,
@@ -1641,12 +1646,12 @@ export async function sendWeeklySupervisorLinks(triggerDate?: Date): Promise<{ p
               html: buildSupervisorTimesheetEmail(daySup.name, project.name, project.code, weekComm, "day", reviewUrl),
               text: `Hi ${daySup.name},\n\nPlease review the Day Shift timesheet for ${project.name} w/c ${weekComm}:\n\n${reviewUrl}\n\nPowerforce Global`,
             });
-            console.log(`[supervisor-links] Sent day link to ${daySup.email} for project ${project.code}`);
+            console.log(`[supervisor-links] Sent day link to ${daySup.email} for ${project.code}`);
           }
         }
 
         // 7. Process night supervisor
-        if (nightSup) {
+        if (nightSup && !existing?.night_sup_token) {
           const rawNightToken = crypto.randomBytes(32).toString("hex");
           const hashedNightToken = crypto.createHash("sha256").update(rawNightToken).digest("hex");
           await db.execute(sql`
@@ -1657,15 +1662,8 @@ export async function sendWeeklySupervisorLinks(triggerDate?: Date): Promise<{ p
           `);
           const nightReviewUrl = `${APP_URL}/#/timesheet-supervisor/${rawNightToken}`;
           if (!nightSup.email) {
-            if (pmEmail) {
-              await sendMail({
-                to: pmEmail,
-                subject: `Timesheet not sent — missing email for ${nightSup.name} (${project.name})`,
-                html: `<p>The weekly timesheet for <strong>${project.name}</strong> (w/c ${weekComm}) could not be sent to <strong>${nightSup.name}</strong> (${nightSup.role}, Night Shift) — no email address is on their worker record.</p><p>Please update their email in the system and resend.</p><p>Review link (share manually if needed): <a href="${nightReviewUrl}">${nightReviewUrl}</a></p>`,
-                text: `Timesheet not sent to ${nightSup.name} for ${project.name} w/c ${weekComm} — no email on record.`,
-              });
-            }
-            console.log(`[supervisor-links] No email for night sup ${nightSup.name} on ${project.code} — token set, PM warned`);
+            missingEmails.push(`• <strong>${nightSup.name}</strong> (${nightSup.role}, Night Shift) — <a href="${nightReviewUrl}">review link</a>`);
+            console.log(`[supervisor-links] No email for night sup ${nightSup.name} on ${project.code}`);
           } else {
             await sendMail({
               to: nightSup.email,
@@ -1674,8 +1672,18 @@ export async function sendWeeklySupervisorLinks(triggerDate?: Date): Promise<{ p
               html: buildSupervisorTimesheetEmail(nightSup.name, project.name, project.code, weekComm, "night", nightReviewUrl),
               text: `Hi ${nightSup.name},\n\nPlease review the Night Shift timesheet for ${project.name} w/c ${weekComm}:\n\n${nightReviewUrl}\n\nPowerforce Global`,
             });
-            console.log(`[supervisor-links] Sent night link to ${nightSup.email} for project ${project.code}`);
+            console.log(`[supervisor-links] Sent night link to ${nightSup.email} for ${project.code}`);
           }
+        }
+
+        // Send ONE consolidated warning to PM if any supervisors had missing emails
+        if (missingEmails.length > 0 && pmEmail) {
+          await sendMail({
+            to: pmEmail,
+            subject: `Timesheet not sent — missing emails (${project.name} w/c ${weekComm})`,
+            html: `<p>The following supervisors on <strong>${project.name}</strong> (w/c ${weekComm}) could not be sent their timesheet link because no email address is on their worker record:</p><ul style="line-height:2">${missingEmails.join('')}</ul><p>Please update their emails in the platform. You can share the links above manually in the meantime.</p>`,
+            text: `Missing emails for ${project.name} w/c ${weekComm}. Please update worker records.`,
+          });
         }
 
         processed++;
