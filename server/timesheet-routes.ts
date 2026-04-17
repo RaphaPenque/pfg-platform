@@ -1541,6 +1541,10 @@ export async function sendWeeklySupervisorLinks(triggerDate?: Date): Promise<{ p
     weekCommencing = weekComm;
     console.log(`[supervisor-links] Sending for week commencing ${weekComm}, ${projects.length} active projects`);
 
+    // Accumulate missing-email warnings keyed by PM email
+    // { pmEmail: { pmEmail, lines: string[] } }
+    const pmWarnings = new Map<string, { pmEmail: string; lines: string[] }>();
+
     for (const project of projects) {
       try {
         // 2. Ensure timesheet_weeks row exists
@@ -1621,9 +1625,6 @@ export async function sendWeeklySupervisorLinks(triggerDate?: Date): Promise<{ p
           continue;
         }
 
-        // Collect missing emails to send ONE consolidated warning per project
-        const missingEmails: string[] = [];
-
         // 6. Process day supervisor
         if (daySup && !existing?.day_sup_token) {
           const rawToken = crypto.randomBytes(32).toString("hex");
@@ -1636,7 +1637,10 @@ export async function sendWeeklySupervisorLinks(triggerDate?: Date): Promise<{ p
           `);
           const reviewUrl = `${APP_URL}/#/timesheet-supervisor/${rawToken}`;
           if (!daySup.email) {
-            missingEmails.push(`• <strong>${daySup.name}</strong> (${daySup.role}, Day Shift) — <a href="${reviewUrl}">review link</a>`);
+            if (pmEmail) {
+              if (!pmWarnings.has(pmEmail)) pmWarnings.set(pmEmail, { pmEmail, lines: [] });
+              pmWarnings.get(pmEmail)!.lines.push(`<li><strong>${project.name}</strong> — ${daySup.name} (${daySup.role}, Day Shift): <a href="${reviewUrl}">review link</a></li>`);
+            }
             console.log(`[supervisor-links] No email for day sup ${daySup.name} on ${project.code}`);
           } else {
             await sendMail({
@@ -1662,7 +1666,10 @@ export async function sendWeeklySupervisorLinks(triggerDate?: Date): Promise<{ p
           `);
           const nightReviewUrl = `${APP_URL}/#/timesheet-supervisor/${rawNightToken}`;
           if (!nightSup.email) {
-            missingEmails.push(`• <strong>${nightSup.name}</strong> (${nightSup.role}, Night Shift) — <a href="${nightReviewUrl}">review link</a>`);
+            if (pmEmail) {
+              if (!pmWarnings.has(pmEmail)) pmWarnings.set(pmEmail, { pmEmail, lines: [] });
+              pmWarnings.get(pmEmail)!.lines.push(`<li><strong>${project.name}</strong> — ${nightSup.name} (${nightSup.role}, Night Shift): <a href="${nightReviewUrl}">review link</a></li>`);
+            }
             console.log(`[supervisor-links] No email for night sup ${nightSup.name} on ${project.code}`);
           } else {
             await sendMail({
@@ -1676,20 +1683,23 @@ export async function sendWeeklySupervisorLinks(triggerDate?: Date): Promise<{ p
           }
         }
 
-        // Send ONE consolidated warning to PM if any supervisors had missing emails
-        if (missingEmails.length > 0 && pmEmail) {
-          await sendMail({
-            to: pmEmail,
-            subject: `Timesheet not sent — missing emails (${project.name} w/c ${weekComm})`,
-            html: `<p>The following supervisors on <strong>${project.name}</strong> (w/c ${weekComm}) could not be sent their timesheet link because no email address is on their worker record:</p><ul style="line-height:2">${missingEmails.join('')}</ul><p>Please update their emails in the platform. You can share the links above manually in the meantime.</p>`,
-            text: `Missing emails for ${project.name} w/c ${weekComm}. Please update worker records.`,
-          });
-        }
+
 
         processed++;
       } catch (projErr: any) {
         console.error(`[supervisor-links] Error processing project ${project.id}:`, projErr.message);
       }
+    }
+
+    // Send ONE email per PM covering all their projects with missing supervisor emails
+    for (const [, warning] of pmWarnings) {
+      await sendMail({
+        to: warning.pmEmail,
+        subject: `Timesheet links not sent — missing worker emails (w/c ${weekComm})`,
+        html: `<p>The following supervisors could not be sent their timesheet review link for week commencing <strong>${weekComm}</strong> because no email address is on their worker record:</p><ul style="line-height:2">${warning.lines.join('')}</ul><p>Please update their email addresses in the platform. The review links above can be shared manually in the meantime.</p>`,
+        text: `Some supervisor timesheet links could not be sent w/c ${weekComm} due to missing emails. Please update worker records.`,
+      });
+      console.log(`[supervisor-links] Sent consolidated warning to ${warning.pmEmail} (${warning.lines.length} missing)`);
     }
 
     console.log(`[supervisor-links] Done. Processed ${processed}/${projects.length} projects for w/c ${weekComm}.`);
