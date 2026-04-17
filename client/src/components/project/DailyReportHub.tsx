@@ -264,7 +264,7 @@ function PMReportTab({
   const [sendEmail, setSendEmail] = useState(false);
 
   const isToday = selectedDate === todayStr();
-  const isReadOnly = !isToday;
+  const isReadOnly = false; // Allow adding rows on any date (back-dating supported)
   const isObserver = user?.role === "observer";
 
   // Load report for this date
@@ -1342,7 +1342,7 @@ function SupervisorReportsTab({
     },
   });
 
-  const pendingReports = reports.filter((r: any) => !r.assignedWorkerId);
+  const pendingReports = reports.filter((r: any) => !r.workerId);
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -1418,7 +1418,7 @@ function SupervisorReportsTab({
                     className="ml-auto text-[11px] px-2 py-0.5 rounded border"
                     style={{ borderColor: "hsl(var(--border))" }}
                     onChange={async (e) => {
-                      await apiRequest("PATCH", `/api/supervisor-reports/${r.id}`, { assignedWorkerId: Number(e.target.value) });
+                      await apiRequest("PATCH", `/api/supervisor-reports/${r.id}`, { workerId: Number(e.target.value) });
                       refetch();
                     }}
                   >
@@ -1537,7 +1537,7 @@ function SupervisorReportsTab({
               </thead>
               <tbody>
                 {reports.map((r: any) => {
-                  const w = workers.find((wk) => wk.id === r.assignedWorkerId);
+                  const w = workers.find((wk) => wk.id === r.workerId);
                   const isExpanded = expandedRow === r.id;
                   return (
                     <>
@@ -1777,7 +1777,7 @@ function QHSETab({
   // Observation modal state
   const [showObsModal, setShowObsModal] = useState(false);
   const [obsForm, setObsForm] = useState({
-    date: todayStr(), time: "08:00", shift: "Day", type: "Positive",
+    date: todayStr(), time: "08:00", shift: "Day", type: "positive",
     reportedBy: "", location: "", description: "", status: "Open",
   });
   const [obsFile, setObsFile] = useState<File | null>(null);
@@ -1785,7 +1785,7 @@ function QHSETab({
   // Incident modal state
   const [showIncModal, setShowIncModal] = useState(false);
   const [incForm, setIncForm] = useState({
-    date: todayStr(), type: "Near Miss", workerInvolved: "",
+    date: todayStr(), type: "near_miss", workerInvolved: "",
     lostTime: false, description: "", status: "Open", rootCause: "",
   });
   const [incFile, setIncFile] = useState<File | null>(null);
@@ -2193,10 +2193,10 @@ function QHSETab({
             </ModalField>
             <ModalField label="Type">
               <select value={obsForm.type} onChange={(e) => setObsForm({ ...obsForm, type: e.target.value })} className="modal-input">
-                <option>Positive</option>
-                <option>Unsafe</option>
-                <option>Negative</option>
-                <option>STOP WORK</option>
+                <option value="positive">Positive</option>
+                <option value="unsafe_condition">Unsafe Condition</option>
+                <option value="negative">Negative</option>
+                <option value="stop_work">STOP WORK</option>
               </select>
             </ModalField>
             <ModalField label="Reported By">
@@ -2242,11 +2242,11 @@ function QHSETab({
             </ModalField>
             <ModalField label="Type">
               <select value={incForm.type} onChange={(e) => setIncForm({ ...incForm, type: e.target.value })} className="modal-input">
-                <option>Near Miss</option>
-                <option>First Aid</option>
-                <option>Medical Treatment</option>
-                <option>LTI</option>
-                <option>STOP WORK</option>
+                <option value="near_miss">Near Miss</option>
+                <option value="first_aid">First Aid</option>
+                <option value="medical_treatment">Medical Treatment</option>
+                <option value="lost_time_injury">Lost Time Injury (LTI)</option>
+                <option value="dangerous_occurrence">Dangerous Occurrence</option>
               </select>
             </ModalField>
             <ModalField label="Worker Involved">
