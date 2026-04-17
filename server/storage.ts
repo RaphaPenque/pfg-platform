@@ -747,26 +747,23 @@ export class PostgresStorage implements IStorage {
   async getAssignmentPeriods(assignmentId: number): Promise<AssignmentPeriod[]> {
     return db.select().from(assignmentPeriods)
       .where(eq(assignmentPeriods.assignmentId, assignmentId))
-      .orderBy(assignmentPeriods.startDate)
-      .all();
+      .orderBy(assignmentPeriods.startDate);
   }
 
   async getAssignmentPeriodsByWorker(workerId: number): Promise<AssignmentPeriod[]> {
     return db.select().from(assignmentPeriods)
       .where(eq(assignmentPeriods.workerId, workerId))
-      .orderBy(assignmentPeriods.startDate)
-      .all();
+      .orderBy(assignmentPeriods.startDate);
   }
 
   async getAssignmentPeriodsByProject(projectId: number): Promise<AssignmentPeriod[]> {
     return db.select().from(assignmentPeriods)
       .where(eq(assignmentPeriods.projectId, projectId))
-      .orderBy(assignmentPeriods.startDate)
-      .all();
+      .orderBy(assignmentPeriods.startDate);
   }
 
   async getAllAssignmentPeriods(): Promise<AssignmentPeriod[]> {
-    return db.select().from(assignmentPeriods).orderBy(assignmentPeriods.startDate).all();
+    return db.select().from(assignmentPeriods).orderBy(assignmentPeriods.startDate);
   }
 
   async createAssignmentPeriod(data: InsertAssignmentPeriod): Promise<AssignmentPeriod> {
@@ -784,7 +781,7 @@ export class PostgresStorage implements IStorage {
   async deleteAssignmentPeriod(id: number): Promise<void> {
     const [row] = await db.select().from(assignmentPeriods).where(eq(assignmentPeriods.id, id)).limit(1);
     if (row) {
-      await db.delete(assignmentPeriods).where(eq(assignmentPeriods.id, id)).run();
+      await db.delete(assignmentPeriods).where(eq(assignmentPeriods.id, id));
       await this.recomputeAssignmentDates(row.assignmentId);
     }
   }
@@ -797,8 +794,7 @@ export class PostgresStorage implements IStorage {
     const latest = periods.reduce((max, p) => p.endDate > max ? p.endDate : max, periods[0].endDate);
     await db.update(assignments)
       .set({ startDate: earliest, endDate: latest })
-      .where(eq(assignments.id, assignmentId))
-      .run();
+      .where(eq(assignments.id, assignmentId));
   }
 
   async updateSupervisorReport(id: number, data: Partial<InsertSupervisorReport>): Promise<SupervisorReport | undefined> {
