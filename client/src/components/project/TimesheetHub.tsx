@@ -157,8 +157,10 @@ function fmtDateTime(iso: string | null): string {
   } catch { return iso; }
 }
 
-function ShiftStatusTiles({ week }: { week: TimesheetWeek }) {
-  const hasNightSup = !!week.night_sup_token;
+function ShiftStatusTiles({ week, entries }: { week: TimesheetWeek; entries: TimesheetEntry[] }) {
+  // Determine if night shift exists from actual entry data, not just the token
+  const hasNightWorkers = entries.some(e => e.shift === 'night');
+  const hasNightSup = hasNightWorkers; // show night tile whenever night workers exist
 
   const TileIcon = ({ submitted }: { submitted: boolean }) => (
     submitted
@@ -199,8 +201,10 @@ function ShiftStatusTiles({ week }: { week: TimesheetWeek }) {
             <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1D23" }}>Night Shift</div>
             {week.night_sup_submitted_at ? (
               <div style={{ fontSize: 11, color: "#15803d" }}>Submitted {fmtDateTime(week.night_sup_submitted_at)}</div>
-            ) : (
+            ) : week.night_sup_token ? (
               <div style={{ fontSize: 11, color: "#d97706" }}>Pending{week.night_sup_name ? ` — ${week.night_sup_name}` : ""}</div>
+            ) : (
+              <div style={{ fontSize: 11, color: "#9ca3af" }}>Link sends Sunday</div>
             )}
           </div>
         </div>
@@ -514,7 +518,7 @@ function SupervisorGrid({ week, entries, userRole, onRefresh }: {
         }
       />
 
-      <ShiftStatusTiles week={week} />
+      <ShiftStatusTiles week={week} entries={entries} />
 
       <div style={{ overflowX: "auto", borderRadius: 10, border: "1px solid hsl(var(--border))", marginBottom: 16 }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
