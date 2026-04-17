@@ -4,6 +4,7 @@ import { useDashboardData, type DashboardProject, type DashboardRoleSlot, type D
 import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, calcPeakHeadcount, OEM_OPTIONS, EQUIPMENT_TYPES } from "@/lib/constants";
 import { ChevronDown, ChevronUp, AlertTriangle, Users, Clock, Activity, Plus, X } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/context/AuthContext";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
@@ -286,12 +287,14 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const queryClient = useQueryClient();
   const [, navigate] = useLocation();
   const { toast } = useToast();
+  const { user } = useAuth();
   const [saving, setSaving] = useState(false);
+  const isRM = user?.role === "resource_manager";
 
   const [form, setForm] = useState({
     code: "",
     name: "",
-    status: "active" as "active" | "potential",
+    status: (isRM ? "capacity_planning" : "active") as "active" | "potential" | "capacity_planning",
     customer: "",
     location: "",
     siteName: "",
@@ -307,8 +310,12 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.code.trim() || !form.name.trim()) {
-      toast({ title: "Project code and name are required", variant: "destructive" });
+    if (!form.code.trim()) {
+      toast({ title: "Project code is required", variant: "destructive" });
+      return;
+    }
+    if (form.status !== "capacity_planning" && !form.name.trim()) {
+      toast({ title: "Project name is required", variant: "destructive" });
       return;
     }
     setSaving(true);
@@ -358,35 +365,43 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
         <form onSubmit={handleSubmit} className="overflow-y-auto flex-1 px-6 py-5 space-y-5">
 
-          {/* Status toggle */}
+          {/* Status toggle — RMs can only create capacity planning projects */}
           <div>
             <p className={labelCls} style={{ color: "var(--pfg-steel)" }}>Project Type</p>
-            <div className="flex gap-2">
-              {(["active", "potential"] as const).map(s => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => set("status", s)}
-                  className="flex-1 py-2 rounded-lg text-[12px] font-semibold border transition"
-                  style={form.status === s ? {
-                    background: s === "active" ? "var(--pfg-navy)" : "var(--amber-bg)",
-                    color: s === "active" ? "#fff" : "var(--amber)",
-                    borderColor: s === "active" ? "var(--pfg-navy)" : "var(--amber)",
-                  } : { background: "transparent", color: "var(--pfg-steel)", borderColor: "hsl(var(--border))" }}
-                >
-                  {s === "active" ? "✓ Confirmed Project" : "⟳ Capacity Planning"}
-                </button>
-              ))}
-            </div>
-            <p className="text-[11px] mt-1.5" style={{ color: "var(--pfg-steel)" }}>
-              {form.status === "active"
-                ? "A live, confirmed project that will appear in the Active section."
-                : "A forecast/pipeline project for capacity planning. Appears in the Planning section."}
-            </p>
+            {isRM ? (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg text-[12px] font-semibold" style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #FDE68A" }}>
+                📋 Capacity Planning project — only OEM, equipment, dates and role planning required
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                {(["active", "capacity_planning"] as const).map(s => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => set("status", s)}
+                    className="flex-1 py-2 rounded-lg text-[12px] font-semibold border transition"
+                    style={form.status === s ? {
+                      background: s === "active" ? "var(--pfg-navy)" : "#92400E",
+                      color: "#fff",
+                      borderColor: s === "active" ? "var(--pfg-navy)" : "#92400E",
+                    } : { background: "transparent", color: "var(--pfg-steel)", borderColor: "hsl(var(--border))" }}
+                  >
+                    {s === "active" ? "✓ Confirmed Project" : "📋 Capacity Planning"}
+                  </button>
+                ))}
+              </div>
+            )}
+            {!isRM && (
+              <p className="text-[11px] mt-1.5" style={{ color: "var(--pfg-steel)" }}>
+                {form.status === "active"
+                  ? "A live, confirmed project. All tabs available."
+                  : "Capacity forecast only. OEM, equipment, dates and roles required. Converts to a real project when confirmed by a PM."}
+              </p>
+            )}
           </div>
 
           {/* Code + Name */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className={`grid gap-4 ${(isRM || form.status === "capacity_planning") ? "grid-cols-1" : "grid-cols-2"}`}>
             <div>
               <label className={labelCls} style={{ color: "var(--pfg-steel)" }}>Project Code *</label>
               <input
@@ -398,17 +413,18 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 style={{ borderColor: "hsl(var(--border))" }}
               />
             </div>
-            <div>
-              <label className={labelCls} style={{ color: "var(--pfg-steel)" }}>Project Name *</label>
-              <input
-                className={inputCls}
-                placeholder="e.g. Tynagh GT Major Inspection"
-                value={form.name}
-                onChange={e => set("name", e.target.value)}
-                required
-                style={{ borderColor: "hsl(var(--border))" }}
-              />
-            </div>
+            {!isRM && form.status !== "capacity_planning" && (
+              <div>
+                <label className={labelCls} style={{ color: "var(--pfg-steel)" }}>Project Name *</label>
+                <input
+                  className={inputCls}
+                  placeholder="e.g. Tynagh GT Major Inspection"
+                  value={form.name}
+                  onChange={e => set("name", e.target.value)}
+                  style={{ borderColor: "hsl(var(--border))" }}
+                />
+              </div>
+            )}
           </div>
 
           {/* Customer + Location */}
@@ -561,6 +577,7 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
 export default function ProjectHub() {
   const { data, isLoading } = useDashboardData();
+  const { user } = useAuth();
   const [showCompleted, setShowCompleted] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
 
@@ -623,15 +640,17 @@ export default function ProjectHub() {
             {active.length} active · {planning.length} planning · {completed.length} completed
           </p>
         </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold text-white transition hover:opacity-90"
-          style={{ background: "var(--pfg-navy)" }}
-          data-testid="button-create-project"
-        >
-          <Plus className="w-4 h-4" />
-          New Project
-        </button>
+        {["admin","project_manager","resource_manager"].includes(user?.role || "") && (
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold text-white transition hover:opacity-90"
+            style={{ background: "var(--pfg-navy)" }}
+            data-testid="button-create-project"
+          >
+            <Plus className="w-4 h-4" />
+            {user?.role === "resource_manager" ? "Capacity Plan" : "New Project"}
+          </button>
+        )}
       </div>
 
       {/* ACTIVE section */}

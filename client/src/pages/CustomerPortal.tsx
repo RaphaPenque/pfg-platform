@@ -222,8 +222,128 @@ function ReportRow({ report, color, projectCode }: { report: any; color: string;
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════
 
+
+// ─── Timesheets Tab ──────────────────────────────────────────────────────────
+function TimesheetsTab({ projectCode, color }: { projectCode: string; color: string }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: [`/api/portal/${projectCode}/timesheets`],
+    queryFn: async () => {
+      const res = await fetch(`/api/portal/${projectCode}/timesheets`);
+      if (!res.ok) throw new Error("Failed to load timesheets");
+      return res.json() as Promise<{ project: { name: string; code: string }; weeks: Array<{
+        id: number; weekCommencing: string; approvalName: string; approvalEmail: string;
+        approvedAt: string; approvalHash: string; hasPdf: boolean;
+      }> }>;
+    },
+  });
+
+  function fmtDate(iso: string) {
+    try { return new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }); }
+    catch { return iso; }
+  }
+
+  const weeks = data?.weeks || [];
+
+  return (
+    <div style={{ animation: "fadeIn 180ms ease-out" }}>
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
+        <div>
+          <h2 style={{ fontSize: 16, fontWeight: 700, color: "#1a2744", letterSpacing: "-0.01em" }}>Signed Timesheets</h2>
+          <p style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
+            {weeks.length} approved week{weeks.length !== 1 ? "s" : ""} — customer signed
+          </p>
+        </div>
+        {weeks.length > 0 && (
+          <a
+            href={`/api/portal/${projectCode}/timesheets/download-all`}
+            download
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 8,
+              background: "#1a2744", color: "white",
+              padding: "9px 18px", borderRadius: 8,
+              fontSize: 12, fontWeight: 700, textDecoration: "none",
+              transition: "opacity 0.15s",
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download All Timesheets
+          </a>
+        )}
+      </div>
+
+      {isLoading ? (
+        <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 8, padding: "48px 24px", textAlign: "center" }}>
+          <div style={{ width: 28, height: 28, border: `3px solid ${color}`, borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 12px" }} />
+          <p style={{ fontSize: 13, color: "#6b7280" }}>Loading timesheets…</p>
+          <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+        </div>
+      ) : error ? (
+        <div style={{ background: "#FEF2F2", border: "1px solid #FCA5A5", borderRadius: 8, padding: 20, color: "#B91C1C", fontSize: 13 }}>
+          Failed to load timesheets.
+        </div>
+      ) : weeks.length === 0 ? (
+        <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 8, padding: "60px 24px", textAlign: "center" }}>
+          <div style={{ fontSize: 36, marginBottom: 12, opacity: 0.3 }}>📋</div>
+          <p style={{ fontSize: 14, fontWeight: 600, color: "#1a2744", marginBottom: 4 }}>No signed timesheets yet</p>
+          <p style={{ fontSize: 13, color: "#6b7280" }}>Timesheets will appear here once they have been approved by you.</p>
+        </div>
+      ) : (
+        <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 8, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+          {/* Table header */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 160px 180px 160px 120px", padding: "10px 20px", background: "#F8F9FA", borderBottom: "1px solid #E5E7EB" }}>
+            {["Week Commencing", "Approved By", "Email", "Timestamp", ""].map((h, i) => (
+              <div key={i} style={{ fontSize: 10, fontWeight: 700, color: "#6B7C93", textTransform: "uppercase", letterSpacing: "0.08em", textAlign: i === 4 ? "right" : "left" }}>{h}</div>
+            ))}
+          </div>
+          {/* Rows */}
+          {weeks.map((w, i) => (
+            <div
+              key={w.id}
+              style={{
+                display: "grid", gridTemplateColumns: "1fr 160px 180px 160px 120px",
+                padding: "14px 20px", borderBottom: i < weeks.length - 1 ? "1px solid #F3F4F6" : "none",
+                alignItems: "center",
+              }}
+            >
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13, color: "#1a2744" }}>w/c {fmtDate(w.weekCommencing)}</div>
+                <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 2, fontFamily: "monospace" }}>{w.approvalHash}</div>
+              </div>
+              <div style={{ fontSize: 12, color: "#374151", fontWeight: 500 }}>{w.approvalName || "—"}</div>
+              <div style={{ fontSize: 11, color: "#6b7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.approvalEmail || "—"}</div>
+              <div style={{ fontSize: 11, color: "#6b7280" }}>
+                {w.approvedAt ? new Date(w.approvedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+              </div>
+              <div style={{ textAlign: "right" }}>
+                {w.hasPdf ? (
+                  <a
+                    href={`/api/portal/${projectCode}/timesheets/${w.id}/pdf`}
+                    download
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 6,
+                      background: color + "18", color: color,
+                      border: `1.5px solid ${color}44`,
+                      padding: "6px 12px", borderRadius: 6,
+                      fontSize: 11, fontWeight: 700, textDecoration: "none",
+                    }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    PDF
+                  </a>
+                ) : (
+                  <span style={{ fontSize: 11, color: "#9CA3AF" }}>No PDF</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function CustomerPortal({ params }: { params: { projectCode: string } }) {
-  const [activeTab, setActiveTab] = useState<"overview" | "reports" | "hs">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "reports" | "hs" | "timesheets">("overview");
   const [downloading, setDownloading] = useState(false);
 
   const { data, isLoading } = useQuery({
@@ -477,8 +597,8 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
 
           {/* TAB BAR */}
           <nav className="flex" role="tablist" aria-label="Portal sections" style={{ marginTop: 16 }}>
-            {(["overview", "reports", "hs"] as const).map((tab) => {
-              const labels: Record<typeof tab, string> = { overview: "Overview", reports: "Project Reports", hs: "Health & Safety" };
+            {(["overview", "reports", "hs", "timesheets"] as const).map((tab) => {
+              const labels: Record<typeof tab, string> = { overview: "Overview", reports: "Project Reports", hs: "Health & Safety", timesheets: "Timesheets" };
               const isActive = activeTab === tab;
               return (
                 <button
@@ -1030,6 +1150,10 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
 
             </div>
           </div>
+        )}
+
+        {activeTab === "timesheets" && (
+          <TimesheetsTab projectCode={project.code} color={color} />
         )}
       </main>
 

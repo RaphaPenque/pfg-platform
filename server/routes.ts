@@ -492,6 +492,106 @@ export function registerRoutes(server: Server, app: Express) {
     }
   });
 
+  // ── GET /api/portal/:code/timesheets — list all customer-approved timesheet weeks ──
+  app.get("/api/portal/:code/timesheets", async (req: Request, res: Response) => {
+    try {
+      const code = req.params.code.toUpperCase();
+      const allProjects = await storage.getProjects();
+      const project = allProjects.find(p => p.code === code);
+      if (!project) return res.status(404).json({ error: "Project not found" });
+
+      const weeks = await db.execute(sql`
+        SELECT id, week_commencing, status, approval_name, approval_email, customer_approved_at,
+               approval_hash, timesheet_pdf_path
+        FROM timesheet_weeks
+        WHERE project_id = ${project.id}
+          AND status = 'customer_approved'
+        ORDER BY week_commencing DESC
+      `);
+
+      const result = (weeks.rows as any[]).map(w => ({
+        id: w.id,
+        weekCommencing: w.week_commencing?.toString().substring(0, 10),
+        status: w.status,
+        approvalName: w.approval_name,
+        approvalEmail: w.approval_email,
+        approvedAt: w.customer_approved_at,
+        approvalHash: w.approval_hash?.substring(0, 12),
+        hasPdf: !!w.timesheet_pdf_path,
+      }));
+
+      res.json({ project: { name: project.name, code: project.code }, weeks: result });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── GET /api/portal/:code/timesheets/:weekId/pdf — download a signed timesheet PDF ──
+  app.get("/api/portal/:code/timesheets/:weekId/pdf", async (req: Request, res: Response) => {
+    try {
+      const code = req.params.code.toUpperCase();
+      const weekId = parseInt(req.params.weekId);
+      const allProjects = await storage.getProjects();
+      const project = allProjects.find(p => p.code === code);
+      if (!project) return res.status(404).json({ error: "Project not found" });
+
+      const twRows = await db.execute(sql`
+        SELECT id, project_id, status, timesheet_pdf_path, week_commencing
+        FROM timesheet_weeks WHERE id = ${weekId} AND project_id = ${project.id}
+      `);
+      const tw = twRows.rows[0] as any;
+      if (!tw) return res.status(404).json({ error: "Week not found" });
+      if (tw.status !== 'customer_approved') return res.status(403).json({ error: "Not yet approved by customer" });
+      if (!tw.timesheet_pdf_path || !fs.existsSync(tw.timesheet_pdf_path)) {
+        return res.status(404).json({ error: "PDF not yet generated" });
+      }
+
+      const weekStr = tw.week_commencing?.toString().substring(0, 10) || weekId;
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${code}-timesheet-wc-${weekStr}.pdf"`);
+      res.sendFile(tw.timesheet_pdf_path);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── GET /api/portal/:code/timesheets/download-all — zip all approved PDFs ──
+  app.get("/api/portal/:code/timesheets/download-all", async (req: Request, res: Response) => {
+    try {
+      const code = req.params.code.toUpperCase();
+      const allProjects = await storage.getProjects();
+      const project = allProjects.find(p => p.code === code);
+      if (!project) return res.status(404).json({ error: "Project not found" });
+
+      const weeks = await db.execute(sql`
+        SELECT id, week_commencing, timesheet_pdf_path
+        FROM timesheet_weeks
+        WHERE project_id = ${project.id} AND status = 'customer_approved'
+          AND timesheet_pdf_path IS NOT NULL
+        ORDER BY week_commencing ASC
+      `);
+
+      const validWeeks = (weeks.rows as any[]).filter(w => w.timesheet_pdf_path && fs.existsSync(w.timesheet_pdf_path));
+      if (validWeeks.length === 0) return res.status(404).json({ error: "No signed timesheet PDFs available" });
+
+      const archiver = require('archiver');
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="${code}-all-timesheets.zip"`);
+
+      const archive = archiver('zip', { zlib: { level: 6 } });
+      archive.pipe(res);
+
+      for (const w of validWeeks) {
+        const weekStr = w.week_commencing?.toString().substring(0, 10) || w.id;
+        archive.file(w.timesheet_pdf_path, { name: `${code}-timesheet-wc-${weekStr}.pdf` });
+      }
+
+      await archive.finalize();
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ===== PUBLIC CONFIRMATION ROUTES (no auth) =====
 
   app.get("/api/confirm/:token", async (req: Request, res: Response) => {

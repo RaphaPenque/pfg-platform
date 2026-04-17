@@ -1,10 +1,10 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import { useToast } from "@/hooks/use-toast";
 import { Link } from "wouter";
 import { useDashboardData, type DashboardProject, type DashboardRoleSlot, type DashboardAssignment } from "@/hooks/use-dashboard-data";
 import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, EQUIPMENT_TYPES, OEM_OPTIONS, calcPeakHeadcount } from "@/lib/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
 import {
   LayoutDashboard, Users, UserCheck, ClipboardList, FileText,
@@ -215,12 +215,14 @@ function OverviewTab({
   assignments,
   workers,
   canEdit,
+  onUpdate,
 }: {
   project: DashboardProject;
   roleSlots: DashboardRoleSlot[];
   assignments: DashboardAssignment[];
   workers: { id: number; status: string }[];
   canEdit: boolean;
+  onUpdate?: () => void;
 }) {
   const color = getOemColor(project);
   const customer = project.customer || PROJECT_CUSTOMER[project.code] || "";
@@ -239,6 +241,8 @@ function OverviewTab({
     : null;
 
   const isCompleted = project.status === "completed" || project.status === "cancelled";
+  const isCapacityPlanningProject = project.status === "capacity_planning";
+  const isCapacityPlanning = isCapacityPlanningProject;
   const pct = timelinePercent(project.startDate, project.endDate);
   const totalDays = project.startDate && project.endDate ? daysBetween(project.startDate, project.endDate) : 0;
   const curDay = project.startDate ? currentDay(project.startDate) : 0;
@@ -433,6 +437,22 @@ function OverviewTab({
 
       {/* RIGHT COLUMN (40%) */}
       <div className="lg:col-span-2 space-y-5">
+        {/* Capacity Planning banner */}
+        {isCapacityPlanningProject && (
+          <div className="rounded-xl border p-5" style={{ borderColor: "#FDE68A", background: "#FFFBEB" }}>
+            <div className="flex items-start gap-3">
+              <div className="text-2xl">📋</div>
+              <div className="flex-1">
+                <div className="text-[14px] font-bold" style={{ color: "#92400E" }}>Capacity Planning Project</div>
+                <p className="text-[12px] mt-1" style={{ color: "#B45309" }}>This project is in capacity planning mode. Only OEM, equipment type, dates and role planning are active. Convert to a confirmed project to unlock all features.</p>
+                {canEdit && (
+                  <ConvertToProjectButton project={project} onConverted={() => onUpdate?.()} />
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Overall Health — or Project Complete badge */}
         {isCompleted ? (
           <div className="rounded-xl border p-5 text-center" style={{ borderColor: "var(--green)", background: "var(--green-bg, #F0FDF4)" }}>
@@ -1081,6 +1101,65 @@ function CustomerSatisfactionTab({
   );
 }
 
+// ─── Convert Capacity Planning → Real Project ──────────────────
+function ConvertToProjectButton({ project, onConverted }: { project: DashboardProject; onConverted: () => void }) {
+  const [open, setOpen] = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
+  const [form, setForm] = React.useState({ name: project.name || "", siteName: project.siteName || "", contractType: project.contractType || "", scopeOfWork: project.scopeOfWork || "" });
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const inputCls = "w-full rounded-lg border text-[13px] px-3 py-2 outline-none focus:ring-2 focus:ring-pfg-navy/20";
+  const labelCls = "block text-[11px] font-semibold uppercase tracking-wide mb-1";
+
+  async function handleConvert() {
+    if (!form.name.trim()) { toast({ title: "Project name is required", variant: "destructive" }); return; }
+    setSaving(true);
+    try {
+      await apiRequest("PATCH", `/api/projects/${project.id}`, { status: "active", name: form.name, siteName: form.siteName || null, contractType: form.contractType || null, scopeOfWork: form.scopeOfWork || null });
+      await qc.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      toast({ title: `${project.code} converted to a confirmed project` });
+      setOpen(false);
+      onConverted();
+    } catch (e: any) { toast({ title: "Conversion failed", description: e.message, variant: "destructive" }); }
+    finally { setSaving(false); }
+  }
+
+  const CONTRACT_TYPES = ["T&M","Lump Sum","Rate Card","Framework"];
+
+  return (
+    <>
+      <button onClick={() => setOpen(true)} className="mt-3 flex items-center gap-2 px-3 py-1.5 rounded-lg text-[12px] font-semibold" style={{ background: "var(--pfg-navy)", color: "#fff" }}>
+        Convert to Confirmed Project
+      </button>
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.45)" }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6">
+            <h3 className="text-[16px] font-bold text-pfg-navy mb-1">Convert to Confirmed Project</h3>
+            <p className="text-[12px] mb-4" style={{ color: "var(--pfg-steel)" }}>Fill in the required details to activate {project.code} as a live project. All tabs will become available immediately.</p>
+            <div className="space-y-3">
+              <div><label className={labelCls} style={{ color: "var(--pfg-steel)" }}>Project Name *</label>
+                <input className={inputCls} value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))} placeholder="e.g. GE ST Great Yarmouth UK" style={{ borderColor: "hsl(var(--border))" }} /></div>
+              <div><label className={labelCls} style={{ color: "var(--pfg-steel)" }}>Site Name</label>
+                <input className={inputCls} value={form.siteName} onChange={e => setForm(f => ({...f, siteName: e.target.value}))} placeholder="e.g. Great Yarmouth Power Station" style={{ borderColor: "hsl(var(--border))" }} /></div>
+              <div><label className={labelCls} style={{ color: "var(--pfg-steel)" }}>Contract Type</label>
+                <select className={inputCls} value={form.contractType} onChange={e => setForm(f => ({...f, contractType: e.target.value}))} style={{ borderColor: "hsl(var(--border))" }}>
+                  <option value="">— Select —</option>
+                  {CONTRACT_TYPES.map(o => <option key={o} value={o}>{o}</option>)}
+                </select></div>
+              <div><label className={labelCls} style={{ color: "var(--pfg-steel)" }}>Scope of Work</label>
+                <input className={inputCls} value={form.scopeOfWork} onChange={e => setForm(f => ({...f, scopeOfWork: e.target.value}))} placeholder="e.g. GT Major Inspection" style={{ borderColor: "hsl(var(--border))" }} /></div>
+            </div>
+            <div className="flex gap-3 mt-5">
+              <button onClick={handleConvert} disabled={saving} className="flex-1 py-2 rounded-lg text-[13px] font-semibold text-white disabled:opacity-50" style={{ background: "var(--pfg-navy)" }}>{saving ? "Converting…" : "Confirm & Activate"}</button>
+              <button onClick={() => setOpen(false)} className="py-2 px-4 rounded-lg text-[13px] font-semibold border" style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-steel)" }}>Cancel</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ─── PFG Project Team Card ───────────────────────────────────────────────
 function PfgTeamCard({ project, canEdit }: { project: DashboardProject; canEdit: boolean }) {
   const [saving, setSaving] = useState(false);
@@ -1149,8 +1228,17 @@ export default function ProjectHubDetail({ params }: { params: { code: string } 
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState("overview");
   const [cancelling, setCancelling] = useState(false);
-  const canEdit = user?.role === "admin" || user?.role === "resource_manager" || user?.role === "project_manager";
-
+  const role = user?.role || "observer";
+  // Admins and PMs can do everything
+  const isAdminOrPM = role === "admin" || role === "project_manager";
+  // Resource managers can only use the Team tab (allocate staff), and can create/delete capacity planning projects
+  const isRM = role === "resource_manager";
+  // canEdit: full edit rights on project fields — admin/PM only
+  const canEdit = isAdminOrPM;
+  // canTeam: can allocate staff in Team tab — admin, PM, RM
+  const canTeam = isAdminOrPM || isRM;
+  // isViewer: finance, observer — read only everywhere
+  const isViewer = !isAdminOrPM && !isRM;
   const project = useMemo(
     () => data?.projects.find(p => p.code === params.code) || null,
     [data, params.code]
@@ -1159,6 +1247,8 @@ export default function ProjectHubDetail({ params }: { params: { code: string } 
   const roleSlots = data?.roleSlots || [];
   const assignments: DashboardAssignment[] = data?.assignments || [];
   const { toast } = useToast();
+  // Derived project status flags — used for tab filtering and UI gating
+  const isCapacityPlanningProject = project?.status === "capacity_planning";
 
   const handleCancelProject = useCallback(async () => {
     if (!project) return;
@@ -1250,9 +1340,11 @@ export default function ProjectHubDetail({ params }: { params: { code: string } 
       {/* Tab bar */}
       <div className="flex border-b overflow-x-auto no-print" style={{ borderColor: "hsl(var(--border))" }}>
         {TAB_DEFS.filter(tab => {
-          if (tab.key === "timesheets") {
-            return ["admin","resource_manager","project_manager","finance"].includes(user?.role || "");
-          }
+          // RMs: only Overview, Role Planning, Team
+          if (isRM) return ["overview", "rolePlanning", "team"].includes(tab.key);
+          // Capacity planning projects: only Overview, Role Planning, Team
+          if (isCapacityPlanningProject) return ["overview", "rolePlanning", "team"].includes(tab.key);
+          // All other roles: all tabs visible (editing gated separately by canEdit)
           return true;
         }).map((tab) => (
           <button
@@ -1274,13 +1366,13 @@ export default function ProjectHubDetail({ params }: { params: { code: string } 
       {/* Tab content */}
       <div className="pt-5">
         {activeTab === "overview" && (
-          <OverviewTab project={project} roleSlots={roleSlots} assignments={assignments} workers={data?.workers || []} canEdit={canEdit} />
+          <OverviewTab project={project} roleSlots={roleSlots} assignments={assignments} workers={data?.workers || []} canEdit={canEdit} onUpdate={() => refetch()} />
         )}
         {activeTab === "rolePlanning" && (
           <ProjectRolePlanningTab project={project} onUpdate={() => refetch()} />
         )}
         {activeTab === "team" && (
-          <ProjectTeamTab project={project} onUpdate={() => refetch()} />
+          <ProjectTeamTab project={project} onUpdate={() => refetch()} canEdit={canTeam} />
         )}
         {activeTab === "timesheets" && (
           <TimesheetHub project={project} userRole={user?.role || "observer"} />

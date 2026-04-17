@@ -172,9 +172,11 @@ function workerIsAvailable(
 export default function ProjectTeamTab({
   project,
   onUpdate,
+  canEdit = true,
 }: {
   project: DashboardProject;
   onUpdate: () => void;
+  canEdit?: boolean;
 }) {
   const { data } = useDashboardData();
   const allWorkers = data?.workers ?? [];
