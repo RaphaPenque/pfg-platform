@@ -249,3 +249,25 @@ function buildReminderEmail(firstName: string, projectName: string, surveyUrl: s
 </body>
 </html>`;
 }
+
+// ── On startup: auto-complete any projects past their end date still marked 'active' ──
+export async function autoCompleteOverdueProjects(): Promise<void> {
+  const today = new Date().toISOString().split('T')[0];
+  try {
+    const allProjects = await storage.getProjects();
+    const overdue = allProjects.filter(
+      p => p.status === 'active' && p.endDate && p.endDate < today
+    );
+    if (overdue.length === 0) {
+      console.log('[startup] No overdue projects to complete.');
+      return;
+    }
+    for (const project of overdue) {
+      console.log(`[startup] Auto-completing overdue project ${project.code} (ended ${project.endDate})`);
+      await storage.updateProject(project.id, { status: 'completed' });
+    }
+    console.log(`[startup] Auto-completed ${overdue.length} overdue project(s).`);
+  } catch (err: any) {
+    console.error('[startup] autoCompleteOverdueProjects error:', err.message);
+  }
+}

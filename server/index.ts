@@ -101,6 +101,16 @@ app.use((req, res, next) => {
     await setupVite(httpServer, app);
   }
 
+  // On startup: auto-complete any projects whose end date has passed but are still 'active'
+  setTimeout(async () => {
+    try {
+      const { autoCompleteOverdueProjects } = await import("./survey-scheduler");
+      await autoCompleteOverdueProjects();
+    } catch (e: any) {
+      console.error('[startup] autoCompleteOverdueProjects error:', e.message);
+    }
+  }, 5000);
+
   // Start survey reminder scheduler — runs every 6 hours
   setInterval(() => {
     checkSurveyReminders().catch(err => console.error("[survey-scheduler] interval error:", err));
