@@ -31,6 +31,10 @@ echo "Building server..."
   --external:vite \
   --external:@vitejs/plugin-react \
   --external:tsx \
-  --external:typescript
+  --external:typescript \
+  --external:playwright \
+  --external:playwright-core \
+  --external:chromium-bidi \
+  --external:@playwright/test
 
 echo "Build complete."
