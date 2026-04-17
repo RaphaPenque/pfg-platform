@@ -198,8 +198,9 @@ export function registerRoutes(server: Server, app: Express) {
     const workerMap = Object.fromEntries(allWorkers.map(w => [w.id, w]));
 
     // Build enriched worker objects for assigned workers (with OEM experience parsed)
+    const PORTAL_STATUSES = ["active", "confirmed", "pending_confirmation", "flagged"];
     const assignedWorkerIds = Array.from(new Set(
-      projectAssignments.filter(a => a.status === "active" || a.status === "flagged").map(a => a.workerId)
+      projectAssignments.filter(a => PORTAL_STATUSES.includes(a.status || "")).map(a => a.workerId)
     ));
     const workers: Record<number, any> = {};
     for (const wid of assignedWorkerIds) {
@@ -228,7 +229,7 @@ export function registerRoutes(server: Server, app: Express) {
     }
 
     const assignments = projectAssignments
-      .filter(a => a.status === "active" || a.status === "flagged")
+      .filter(a => PORTAL_STATUSES.includes(a.status || ""))
       .map(a => ({
         id: a.id,
         workerId: a.workerId,
