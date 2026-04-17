@@ -1325,7 +1325,12 @@ export function registerRoutes(server: Server, app: Express) {
   app.get("/api/projects/:projectId/comments-log", requireAuth, async (req: Request, res: Response) => {
     const projectId = parseInt(req.params.projectId);
     const log = await storage.getCommentsLog(projectId);
-    res.json(log);
+    const allUsers = await storage.getUsers();
+    const enriched = log.map(entry => {
+      const u = allUsers.find(u => u.id === entry.enteredBy);
+      return { ...entry, user: u ? u.name : "Unknown" };
+    });
+    res.json(enriched);
   });
 
   app.post("/api/projects/:projectId/comments-log", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {

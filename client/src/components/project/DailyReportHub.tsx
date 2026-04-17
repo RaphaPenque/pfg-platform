@@ -332,6 +332,7 @@ function PMReportTab({
   const [addingComment, setAddingComment] = useState(false);
   const [commentDate, setCommentDate] = useState<Date>(new Date());
   const [commentDateOpen, setCommentDateOpen] = useState(false);
+  const [dateNavOpen, setDateNavOpen] = useState(false);
 
   // Sync local state when report data loads
   useMemo(() => {
@@ -486,17 +487,39 @@ function PMReportTab({
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
-        <div className="text-[13px] font-semibold text-pfg-navy min-w-[160px] text-center">
-          {fmtDate(selectedDate)}
-          {isToday && (
-            <span
-              className="ml-2 text-[10px] font-semibold px-2 py-0.5 rounded-full"
-              style={{ background: "var(--pfg-navy)", color: "#fff" }}
+        <Popover open={dateNavOpen} onOpenChange={setDateNavOpen}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className="flex items-center gap-1.5 text-[13px] font-semibold text-pfg-navy min-w-[160px] justify-center px-2 py-1 rounded-lg hover:bg-black/5 transition-colors"
             >
-              Today
-            </span>
-          )}
-        </div>
+              <CalendarIcon className="w-3.5 h-3.5 opacity-50" />
+              {fmtDate(selectedDate)}
+              {isToday && (
+                <span
+                  className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                  style={{ background: "var(--pfg-navy)", color: "#fff" }}
+                >
+                  Today
+                </span>
+              )}
+            </button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="center" style={{ zIndex: 99999 }}>
+            <Calendar
+              mode="single"
+              selected={new Date(selectedDate + 'T12:00:00')}
+              onSelect={(d) => {
+                if (!d) return;
+                const iso = [d.getFullYear(), String(d.getMonth()+1).padStart(2,'0'), String(d.getDate()).padStart(2,'0')].join('-');
+                setSelectedDate(iso);
+                setDateNavOpen(false);
+              }}
+              disabled={(d) => d > new Date()}
+              initialFocus
+            />
+          </PopoverContent>
+        </Popover>
         <button
           onClick={() => setSelectedDate(addDays(selectedDate, 1))}
           disabled={isToday}
@@ -1693,7 +1716,17 @@ function QHSETab({
   const handleSaveObs = async () => {
     setSaving(true);
     try {
-      await apiRequest("POST", `/api/projects/${project.id}/safety-observations`, obsForm);
+      const payload = {
+        observationDate: obsForm.date,
+        observationType: obsForm.type,
+        observationTime: obsForm.time,
+        shift: obsForm.shift,
+        reportedByWorkerId: obsForm.reportedBy || null,
+        locationOnSite: obsForm.location,
+        description: obsForm.description,
+        status: obsForm.status.toLowerCase(),
+      };
+      await apiRequest("POST", `/api/projects/${project.id}/safety-observations`, payload);
       setShowObsModal(false);
       refetchObs();
       toast({ title: "Observation logged" });
@@ -1706,7 +1739,16 @@ function QHSETab({
   const handleSaveInc = async () => {
     setSaving(true);
     try {
-      await apiRequest("POST", `/api/projects/${project.id}/incident-reports`, incForm);
+      const payload = {
+        incidentDate: incForm.date,
+        incidentType: incForm.type,
+        workerInvolvedId: incForm.workerInvolved || null,
+        lostTime: incForm.lostTime,
+        description: incForm.description,
+        rootCause: incForm.rootCause,
+        status: incForm.status.toLowerCase(),
+      };
+      await apiRequest("POST", `/api/projects/${project.id}/incident-reports`, payload);
       setShowIncModal(false);
       refetchInc();
       toast({ title: "Incident logged" });
