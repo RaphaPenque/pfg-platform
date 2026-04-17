@@ -1841,15 +1841,19 @@ function QHSETab({
       if (obsForm.description) fd.append("description", obsForm.description);
       fd.append("status", obsForm.status.toLowerCase());
       if (obsFile) fd.append("file", obsFile);
-      await fetch(`/api/projects/${project.id}/safety-observations`, {
+      const obsResp = await fetch(`/api/projects/${project.id}/safety-observations`, {
         method: "POST", credentials: "include", body: fd,
       });
+      if (!obsResp.ok) {
+        const err = await obsResp.json().catch(() => ({ error: obsResp.statusText }));
+        throw new Error(err.error || "Server error");
+      }
       setShowObsModal(false);
       setObsFile(null);
       refetchObs();
       toast({ title: "Observation logged" });
     } catch (e: any) {
-      toast({ title: "Failed", description: e.message, variant: "destructive" });
+      toast({ title: "Failed to save observation", description: e.message, variant: "destructive" });
     }
     setSaving(false);
   };
@@ -1866,15 +1870,19 @@ function QHSETab({
       if (incForm.rootCause) fd.append("rootCause", incForm.rootCause);
       fd.append("status", incForm.status.toLowerCase());
       if (incFile) fd.append("file", incFile);
-      await fetch(`/api/projects/${project.id}/incident-reports`, {
+      const incResp = await fetch(`/api/projects/${project.id}/incident-reports`, {
         method: "POST", credentials: "include", body: fd,
       });
+      if (!incResp.ok) {
+        const err = await incResp.json().catch(() => ({ error: incResp.statusText }));
+        throw new Error(err.error || "Server error");
+      }
       setShowIncModal(false);
       setIncFile(null);
       refetchInc();
       toast({ title: "Incident logged" });
     } catch (e: any) {
-      toast({ title: "Failed", description: e.message, variant: "destructive" });
+      toast({ title: "Failed to save incident", description: e.message, variant: "destructive" });
     }
     setSaving(false);
   };
