@@ -400,7 +400,7 @@ function PMReportTab({
         if (reportData?.id) {
           await apiRequest("PATCH", `/api/daily-reports/${reportData.id}`, payload);
         } else {
-          await apiRequest("POST", `/api/daily-reports`, payload);
+          await apiRequest("POST", `/api/projects/${project.id}/daily-reports`, payload);
         }
         qc.invalidateQueries({ queryKey: [reportKey] });
         toast({
