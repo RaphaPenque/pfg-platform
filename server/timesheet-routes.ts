@@ -4,9 +4,8 @@
  */
 
 import { type Express, type Request, type Response } from "express";
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
 import { sql } from "drizzle-orm";
+import { db } from "./storage";
 import crypto from "crypto";
 import fs from "fs";
 import path from "path";
@@ -15,19 +14,7 @@ import { sendMail } from "./email";
 const APP_URL = process.env.APP_URL || "https://pfg-platform.onrender.com";
 const UPLOAD_ROOT = process.env.UPLOAD_ROOT || "/data/uploads";
 
-// ─── DB helper ──────────────────────────────────────────────────────────────
-
-function getDb() {
-  const DATABASE_URL = process.env.DATABASE_URL!;
-  const pool = new Pool({
-    connectionString: DATABASE_URL,
-    ssl: DATABASE_URL?.includes("render.com") || DATABASE_URL?.includes("postgres.render")
-      ? { rejectUnauthorized: false }
-      : false,
-    max: 3,
-  });
-  return { db: drizzle(pool), pool };
-}
+// ─── DB: uses shared pool from storage.ts ──────────────────────────────────
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -79,7 +66,6 @@ function buildApprovalHash(entries: any[]): { hash: string; preimage: any[] } {
 
 /** Get PM email for a project */
 async function getPmEmailForProject(projectId: number): Promise<string | null> {
-  const { db, pool } = getDb();
   try {
     const res = await db.execute(sql`
       SELECT u.email FROM project_leads pl
@@ -88,15 +74,14 @@ async function getPmEmailForProject(projectId: number): Promise<string | null> {
       LIMIT 1
     `);
     return (res.rows[0] as any)?.email ?? null;
-  } finally {
-    await pool.end();
+  } catch {
+    return null;
   }
 }
 
 // ─── Auto-build engine ───────────────────────────────────────────────────────
 
 export async function buildTimesheetEntries(projectId: number) {
-  const { db, pool } = getDb();
   try {
     // Get config
     const cfgRes = await db.execute(sql`
@@ -233,8 +218,8 @@ export async function buildTimesheetEntries(projectId: number) {
 
       cur.setUTCDate(cur.getUTCDate() + 7);
     }
-  } finally {
-    await pool.end();
+  } catch (e) {
+    console.error("[buildTimesheetEntries]", e);
   }
 }
 
@@ -249,13 +234,12 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
     async (req: Request, res: Response) => {
       const projectId = parseInt(String(req.params.id));
       if (isNaN(projectId)) return res.status(400).json({ error: "Invalid project ID" });
-      const { db, pool } = getDb();
-      try {
+        try {
         const r = await db.execute(sql`
           SELECT * FROM timesheet_config WHERE project_id = ${projectId}
         `);
         return res.json(r.rows[0] || null);
-      } finally { await pool.end(); }
+      } catch (e: any) { res.status(500).json({ error: String((e as any).message || e) }); }
     }
   );
 
@@ -273,8 +257,7 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
         customer_signoff_required,
       } = req.body;
 
-      const { db, pool } = getDb();
-      try {
+        try {
         await db.execute(sql`
           INSERT INTO timesheet_config
             (project_id, day_shift_start, day_shift_end, night_shift_start, night_shift_end,
@@ -309,7 +292,7 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
         });
 
         return res.json(cfg);
-      } finally { await pool.end(); }
+      } catch (e: any) { res.status(500).json({ error: String((e as any).message || e) }); }
     }
   );
 
@@ -320,15 +303,14 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
     async (req: Request, res: Response) => {
       const projectId = parseInt(String(req.params.id));
       if (isNaN(projectId)) return res.status(400).json({ error: "Invalid project ID" });
-      const { db, pool } = getDb();
-      try {
+        try {
         const r = await db.execute(sql`
           SELECT * FROM timesheet_weeks
           WHERE project_id = ${projectId}
           ORDER BY week_commencing DESC
         `);
         return res.json(r.rows);
-      } finally { await pool.end(); }
+      } catch (e: any) { res.status(500).json({ error: String((e as any).message || e) }); }
     }
   );
 
@@ -339,8 +321,7 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
     async (req: Request, res: Response) => {
       const weekId = parseInt(String(req.params.id));
       if (isNaN(weekId)) return res.status(400).json({ error: "Invalid week ID" });
-      const { db, pool } = getDb();
-      try {
+        try {
         const r = await db.execute(sql`
           SELECT e.*, w.name as worker_name, w.role as worker_role, w.cost_centre
           FROM timesheet_entries e
@@ -349,7 +330,7 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
           ORDER BY w.name, e.entry_date
         `);
         return res.json(r.rows);
-      } finally { await pool.end(); }
+      } catch (e: any) { res.status(500).json({ error: String((e as any).message || e) }); }
     }
   );
 
@@ -363,8 +344,7 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
       if (isNaN(entryId)) return res.status(400).json({ error: "Invalid entry ID" });
 
       // Check the week is not locked
-      const { db, pool } = getDb();
-      try {
+        try {
         const entRes = await db.execute(sql`
           SELECT e.*, tw.status FROM timesheet_entries e
           JOIN timesheet_weeks tw ON tw.id = e.timesheet_week_id
@@ -395,7 +375,7 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
           RETURNING *
         `);
         return res.json(r.rows[0]);
-      } finally { await pool.end(); }
+      } catch (e: any) { res.status(500).json({ error: String((e as any).message || e) }); }
     }
   );
 
@@ -407,8 +387,7 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
     async (req: Request, res: Response) => {
       const weekId = parseInt(String(req.params.id));
       if (isNaN(weekId)) return res.status(400).json({ error: "Invalid week ID" });
-      const { db, pool } = getDb();
-      try {
+        try {
         const twRes = await db.execute(sql`SELECT * FROM timesheet_weeks WHERE id = ${weekId}`);
         const tw = twRes.rows[0] as any;
         if (!tw) return res.status(404).json({ error: "Week not found" });
@@ -439,7 +418,7 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
 
         const updated = await db.execute(sql`SELECT * FROM timesheet_weeks WHERE id = ${weekId}`);
         return res.json(updated.rows[0]);
-      } finally { await pool.end(); }
+      } catch (e: any) { res.status(500).json({ error: String((e as any).message || e) }); }
     }
   );
 
@@ -451,8 +430,7 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
     async (req: Request, res: Response) => {
       const weekId = parseInt(String(req.params.id));
       if (isNaN(weekId)) return res.status(400).json({ error: "Invalid week ID" });
-      const { db, pool } = getDb();
-      try {
+        try {
         const twRes = await db.execute(sql`SELECT * FROM timesheet_weeks WHERE id = ${weekId}`);
         const tw = twRes.rows[0] as any;
         if (!tw) return res.status(404).json({ error: "Week not found" });
@@ -480,7 +458,7 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
 
         const updated = await db.execute(sql`SELECT * FROM timesheet_weeks WHERE id = ${weekId}`);
         return res.json(updated.rows[0]);
-      } finally { await pool.end(); }
+      } catch (e: any) { res.status(500).json({ error: String((e as any).message || e) }); }
     }
   );
 
@@ -495,8 +473,7 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
       const { comment } = req.body;
       if (!comment?.trim()) return res.status(400).json({ error: "Rejection comment required" });
 
-      const { db, pool } = getDb();
-      try {
+        try {
         const twRes = await db.execute(sql`SELECT * FROM timesheet_weeks WHERE id = ${weekId}`);
         const tw = twRes.rows[0] as any;
         if (!tw) return res.status(404).json({ error: "Week not found" });
@@ -527,7 +504,7 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
 
         const updated = await db.execute(sql`SELECT * FROM timesheet_weeks WHERE id = ${weekId}`);
         return res.json(updated.rows[0]);
-      } finally { await pool.end(); }
+      } catch (e: any) { res.status(500).json({ error: String((e as any).message || e) }); }
     }
   );
 
@@ -539,8 +516,7 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
     async (req: Request, res: Response) => {
       const weekId = parseInt(String(req.params.id));
       if (isNaN(weekId)) return res.status(400).json({ error: "Invalid week ID" });
-      const { db, pool } = getDb();
-      try {
+        try {
         const twRes = await db.execute(sql`SELECT * FROM timesheet_weeks WHERE id = ${weekId}`);
         const tw = twRes.rows[0] as any;
         if (!tw) return res.status(404).json({ error: "Week not found" });
@@ -600,7 +576,7 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
 
         const updated = await db.execute(sql`SELECT * FROM timesheet_weeks WHERE id = ${weekId}`);
         return res.json({ ...updated.rows[0], rawToken });
-      } finally { await pool.end(); }
+      } catch (e: any) { res.status(500).json({ error: String((e as any).message || e) }); }
     }
   );
 
@@ -609,7 +585,6 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
   app.get("/api/timesheet-approval/:token", async (req: Request, res: Response) => {
     const rawToken = String(req.params.token);
     const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
-    const { db, pool } = getDb();
     try {
       const twRes = await db.execute(sql`
         SELECT tw.*, p.name as project_name, p.code as project_code, p.customer
@@ -636,7 +611,10 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
         week: tw,
         entries: entriesRes.rows,
       });
-    } finally { await pool.end(); }
+    } catch (e: any) {
+      console.error("[Timesheet approval GET]", e);
+      res.status(500).json({ error: String(e.message || e) });
+    }
   });
 
   // ── POST /api/timesheet-approval/:token/approve ─────────────────────────
@@ -651,7 +629,6 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
       return res.status(400).json({ error: "Name and email are required" });
     }
 
-    const { db, pool } = getDb();
     try {
       const twRes = await db.execute(sql`
         SELECT * FROM timesheet_weeks WHERE customer_token = ${hashedToken}
@@ -725,7 +702,10 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
       }
 
       return res.json({ ok: true });
-    } finally { await pool.end(); }
+    } catch (e: any) {
+      console.error("[Timesheet approval POST]", e);
+      res.status(500).json({ error: String(e.message || e) });
+    }
   });
 
   // ── POST /api/timesheet-approval/:token/challenge ───────────────────────
@@ -735,7 +715,6 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
     const { message } = req.body;
     if (!message?.trim()) return res.status(400).json({ error: "Challenge message required" });
 
-    const { db, pool } = getDb();
     try {
       const twRes = await db.execute(sql`
         SELECT * FROM timesheet_weeks WHERE customer_token = ${hashedToken}
@@ -766,7 +745,10 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
       }
 
       return res.json({ ok: true });
-    } finally { await pool.end(); }
+    } catch (e: any) {
+      console.error("[Timesheet challenge POST]", e);
+      res.status(500).json({ error: String(e.message || e) });
+    }
   });
 
   // ── POST /api/timesheet-weeks/:id/recall ────────────────────────────────
@@ -776,8 +758,7 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
     async (req: Request, res: Response) => {
       const weekId = parseInt(String(req.params.id));
       if (isNaN(weekId)) return res.status(400).json({ error: "Invalid week ID" });
-      const { db, pool } = getDb();
-      try {
+        try {
         const twRes = await db.execute(sql`SELECT * FROM timesheet_weeks WHERE id = ${weekId}`);
         const tw = twRes.rows[0] as any;
         if (!tw) return res.status(404).json({ error: "Week not found" });
@@ -835,7 +816,7 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
 
         const updated = await db.execute(sql`SELECT * FROM timesheet_weeks WHERE id = ${weekId}`);
         return res.json({ ...updated.rows[0], archivedRecord: oldRecord });
-      } finally { await pool.end(); }
+      } catch (e: any) { res.status(500).json({ error: String((e as any).message || e) }); }
     }
   );
 
@@ -845,14 +826,13 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
     async (req: Request, res: Response) => {
       const weekId = parseInt(String(req.params.id));
       if (isNaN(weekId)) return res.status(400).json({ error: "Invalid week ID" });
-      const { db, pool } = getDb();
-      try {
+        try {
         const twRes = await db.execute(sql`SELECT * FROM timesheet_weeks WHERE id = ${weekId}`);
         const tw = twRes.rows[0] as any;
         if (!tw || !tw.timesheet_pdf_path) return res.status(404).json({ error: "PDF not generated yet" });
         if (!fs.existsSync(tw.timesheet_pdf_path)) return res.status(404).json({ error: "PDF file not found on disk" });
         return res.download(tw.timesheet_pdf_path);
-      } finally { await pool.end(); }
+      } catch (e: any) { res.status(500).json({ error: String((e as any).message || e) }); }
     }
   );
 
@@ -863,14 +843,13 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
     async (req: Request, res: Response) => {
       const weekId = parseInt(String(req.params.id));
       if (isNaN(weekId)) return res.status(400).json({ error: "Invalid week ID" });
-      const { db, pool } = getDb();
-      try {
+        try {
         const twRes = await db.execute(sql`SELECT * FROM timesheet_weeks WHERE id = ${weekId}`);
         const tw = twRes.rows[0] as any;
         if (!tw || !tw.billing_pdf_path) return res.status(404).json({ error: "Billing PDF not generated yet" });
         if (!fs.existsSync(tw.billing_pdf_path)) return res.status(404).json({ error: "Billing PDF file not found on disk" });
         return res.download(tw.billing_pdf_path);
-      } finally { await pool.end(); }
+      } catch (e: any) { res.status(500).json({ error: String((e as any).message || e) }); }
     }
   );
 
@@ -895,7 +874,6 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
 // ─── Output generation (Steps 6 & 7) ────────────────────────────────────────
 
 export async function generateTimesheetOutputs(weekId: number) {
-  const { db, pool } = getDb();
   try {
     const twRes = await db.execute(sql`
       SELECT tw.*, p.name as project_name, p.code as project_code, p.customer
@@ -936,8 +914,6 @@ export async function generateTimesheetOutputs(weekId: number) {
     console.log(`[timesheet] Outputs generated for week ${weekId}: ${tsPath}, ${billPath}`);
   } catch (e: any) {
     console.error("[timesheet] generateOutputs error:", e.message);
-  } finally {
-    await pool.end();
   }
 }
 
@@ -1188,7 +1164,6 @@ async function generateBillingSummaryPdf(tw: any, entries: any[], outPath: strin
 // ─── Timesheet reminder scheduler ────────────────────────────────────────────
 
 export async function checkTimesheetReminders() {
-  const { db, pool } = getDb();
   try {
     // 24h reminder for sent_to_customer (no action yet)
     const remind24Res = await db.execute(sql`
@@ -1256,8 +1231,6 @@ export async function checkTimesheetReminders() {
     }
   } catch (e: any) {
     console.error("[timesheet-reminders] error:", e.message);
-  } finally {
-    await pool.end();
   }
 }
 
