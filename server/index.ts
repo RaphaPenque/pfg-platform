@@ -6,6 +6,7 @@ import { createServer } from "http";
 import { warmupDb } from "./storage";
 import { checkSurveyReminders } from "./survey-scheduler";
 import { checkAndSendWeeklyReports } from "./report-scheduler";
+import { checkTimesheetReminders } from "./timesheet-routes";
 import { pollInboxes } from "./email-poller";
 
 const app = express();
@@ -122,6 +123,11 @@ app.use((req, res, next) => {
     if (now.getDay() === 1 && now.getUTCHours() === 7) { // 7 UTC = 8 BST
       checkAndSendWeeklyReports().catch(err => console.error('[report-scheduler]', err));
     }
+  }, 60 * 60 * 1000);
+
+  // Timesheet reminder check — every hour
+  setInterval(() => {
+    checkTimesheetReminders().catch(err => console.error('[timesheet-reminders] error:', err));
   }, 60 * 60 * 1000);
 
   // Poll email inboxes every 15 minutes

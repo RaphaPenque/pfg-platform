@@ -17,6 +17,7 @@ import UserManagement from "./pages/UserManagement";
 import Login from "./pages/Login";
 import ConfirmAssignment from "./pages/ConfirmAssignment";
 import MilestoneApprovalPage from "./pages/MilestoneApprovalPage";
+import TimesheetApprovalPage from "./pages/TimesheetApprovalPage";
 import NotFound from "./pages/not-found";
 import { LogOut, Loader2 } from "lucide-react";
 
@@ -220,6 +221,12 @@ function AppContent() {
   if (location.startsWith("/milestone-approval/")) {
     const token = location.replace("/milestone-approval/", "");
     return <MilestoneApprovalPage params={{ token }} />;
+  }
+
+  // Timesheet approval — public, no auth required
+  if (location.startsWith("/timesheet-approval/")) {
+    const token = location.replace("/timesheet-approval/", "");
+    return <TimesheetApprovalPage params={{ token }} />;
   }
 
   // Auth verify redirect

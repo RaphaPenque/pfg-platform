@@ -510,6 +510,79 @@ export async function runSchemaUpdates() {
     }
     console.log('Seeded Croatian public holidays 2026-2027');
 
+    // ── Timesheet Module tables ─────────────────────────────────────────
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS timesheet_config (
+        id                        SERIAL PRIMARY KEY,
+        project_id                INTEGER NOT NULL REFERENCES projects(id),
+        day_shift_start           TIME,
+        day_shift_end             TIME,
+        night_shift_start         TIME,
+        night_shift_end           TIME,
+        unpaid_break_minutes      INTEGER CHECK (unpaid_break_minutes IN (30, 60)),
+        working_days              TEXT[],
+        customer_signoff_required BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at                TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        UNIQUE(project_id)
+      )
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS timesheet_weeks (
+        id                   SERIAL PRIMARY KEY,
+        project_id           INTEGER NOT NULL REFERENCES projects(id),
+        week_commencing      DATE NOT NULL,
+        status               TEXT NOT NULL DEFAULT 'draft'
+                               CHECK (status IN (
+                                 'draft','submitted','pm_approved',
+                                 'sent_to_customer','customer_approved','recalled'
+                               )),
+        submitted_at         TIMESTAMPTZ,
+        pm_approved_at       TIMESTAMPTZ,
+        sent_to_customer_at  TIMESTAMPTZ,
+        customer_approved_at TIMESTAMPTZ,
+        recalled_at          TIMESTAMPTZ,
+        approval_email       TEXT,
+        approval_name        TEXT,
+        approval_ip          TEXT,
+        approval_hash        TEXT,
+        approval_preimage    JSONB,
+        customer_token       TEXT,
+        token_expires_at     TIMESTAMPTZ,
+        token_used_at        TIMESTAMPTZ,
+        billing_pdf_path     TEXT,
+        timesheet_pdf_path   TEXT,
+        pm_reject_comment    TEXT,
+        customer_challenge   TEXT,
+        UNIQUE(project_id, week_commencing)
+      )
+    `);
+
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS timesheet_entries (
+        id                   SERIAL PRIMARY KEY,
+        timesheet_week_id    INTEGER NOT NULL REFERENCES timesheet_weeks(id) ON DELETE CASCADE,
+        worker_id            INTEGER NOT NULL REFERENCES workers(id),
+        entry_date           DATE NOT NULL,
+        shift                TEXT NOT NULL CHECK (shift IN ('day','night')),
+        time_in              TIME,
+        time_out             TIME,
+        unpaid_break_minutes INTEGER,
+        day_type             TEXT NOT NULL CHECK (day_type IN (
+                               'working','rest_day','mob','demob',
+                               'absent_sick','absent_unauthorised',
+                               'partial_mob','partial_demob'
+                             )),
+        total_hours          NUMERIC(5,2),
+        supervisor_note      TEXT,
+        is_override          BOOLEAN NOT NULL DEFAULT FALSE,
+        UNIQUE(timesheet_week_id, worker_id, entry_date)
+      )
+    `);
+
+    console.log('Timesheet tables created (if not exists)');
+
     console.log("Schema updates applied.");
   } catch (e: any) {
     console.error("Schema update error:", e.message);

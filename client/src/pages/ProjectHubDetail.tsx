@@ -16,6 +16,7 @@ import ProjectTeamTab from "@/components/project/ProjectTeamTab";
 import InlineField from "@/components/project/InlineField";
 import DailyReportHub from "@/components/project/DailyReportHub";
 import CommercialTab from "@/components/project/CommercialTab";
+import TimesheetHub from "@/components/project/TimesheetHub";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -1248,7 +1249,12 @@ export default function ProjectHubDetail({ params }: { params: { code: string } 
 
       {/* Tab bar */}
       <div className="flex border-b overflow-x-auto no-print" style={{ borderColor: "hsl(var(--border))" }}>
-        {TAB_DEFS.map((tab) => (
+        {TAB_DEFS.filter(tab => {
+          if (tab.key === "timesheets") {
+            return ["admin","resource_manager","project_manager","finance"].includes(user?.role || "");
+          }
+          return true;
+        }).map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
@@ -1277,7 +1283,7 @@ export default function ProjectHubDetail({ params }: { params: { code: string } 
           <ProjectTeamTab project={project} onUpdate={() => refetch()} />
         )}
         {activeTab === "timesheets" && (
-          <PlaceholderTab label="Timesheets" icon={<ClipboardList className="w-6 h-6" />} />
+          <TimesheetHub project={project} userRole={user?.role || "observer"} />
         )}
         {activeTab === "dailyReports" && (
           <DailyReportHub 

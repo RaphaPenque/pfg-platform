@@ -1,6 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import type { Server } from "http";
 import { storage } from "./storage";
+import { registerTimesheetRoutes, buildTimesheetEntries, checkTimesheetReminders } from "./timesheet-routes";
 import { insertWorkerSchema, insertProjectSchema, insertAssignmentSchema, insertDocumentSchema, insertOemTypeSchema, insertRoleSlotSchema, insertWorkExperienceSchema } from "@shared/schema";
 import type { User, WorkExperience } from "@shared/schema";
 import { sendMail, magicLinkEmail, welcomeEmail, confirmationEmail, confirmationResultEmail } from "./email";
@@ -588,7 +589,7 @@ export function registerRoutes(server: Server, app: Express) {
   app.use("/api", (req: Request, res: Response, next: NextFunction) => {
     // Skip auth for auth routes, portal, confirmation, and public survey/approval routes
     if (req.path.startsWith("/auth/") || req.path.startsWith("/portal/") || req.path.startsWith("/confirm/")) return next();
-    if (req.path.startsWith("/survey/") || req.path.startsWith("/delay-approval/") || req.path.startsWith("/milestone-approval/")) return next();
+    if (req.path.startsWith("/survey/") || req.path.startsWith("/delay-approval/") || req.path.startsWith("/milestone-approval/") || req.path.startsWith("/timesheet-approval/")) return next();
     // Skip auth for uploads serving (static files)
     if (req.path.startsWith("/uploads/")) return next();
     requireAuth(req, res, next);
@@ -1085,6 +1086,14 @@ export function registerRoutes(server: Server, app: Express) {
     if (!parsed.success) return res.status(400).json({ error: parsed.error });
     const assignment = await storage.createAssignment(parsed.data);
     await logAudit(req.user!.id, "assignment.create", "assignment", assignment.id);
+    // Trigger timesheet auto-build if project already has config
+    if (assignment.projectId) {
+      setImmediate(() => {
+        buildTimesheetEntries(assignment.projectId!).catch(e =>
+          console.error("[timesheet] assignment-hook rebuild error:", e.message)
+        );
+      });
+    }
     res.status(201).json(assignment);
   });
 
@@ -2318,4 +2327,7 @@ export function registerRoutes(server: Server, app: Express) {
     const feedback = await storage.getSurveyFeedbackByWorker(workerId);
     return res.json(feedback);
   });
+
+  // ── Timesheet Module routes ──────────────────────────────────────────────
+  registerTimesheetRoutes(app, requireAuth, requireRole);
 }
