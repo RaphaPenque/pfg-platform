@@ -543,6 +543,28 @@ function PMReportTab({
             Read-only
           </span>
         )}
+        {!isReadOnly && (
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              onClick={() => handleSave(false)}
+              disabled={saving}
+              className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg border disabled:opacity-50"
+              style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-navy)" }}
+            >
+              {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+              Save Draft
+            </button>
+            <button
+              onClick={() => handleSave(true)}
+              disabled={saving}
+              className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50"
+              style={{ background: "var(--pfg-navy)", color: "#fff" }}
+            >
+              {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+              Save & Publish
+            </button>
+          </div>
+        )}
       </div>
 
       {/* 2.1 Outage Milestones — hidden for T&M */}

@@ -267,7 +267,7 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
              ${day_shift_start || null}, ${day_shift_end || null},
              ${night_shift_start || null}, ${night_shift_end || null},
              ${unpaid_break_minutes || 60},
-             ${working_days || ["mon","tue","wed","thu","fri","sat"]},
+             ${JSON.stringify(working_days || ["mon","tue","wed","thu","fri","sat"])}::text[],
              ${customer_signoff_required !== false},
              NOW())
           ON CONFLICT (project_id) DO UPDATE SET
