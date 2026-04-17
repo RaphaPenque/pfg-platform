@@ -1255,9 +1255,18 @@ function SupervisorReportsTab({
 
   const isAdminOrRM = user?.role === "admin" || user?.role === "resource_manager";
 
+  const SUPERVISOR_ROLES = ["Superintendent", "Foreman", "Lead Technician", "HSE Officer"];
+
   const projectAssignments = assignments.filter(
     (a) => a.projectId === project.id && ["active", "confirmed", "pending_confirmation"].includes(a.status || "")
   );
+
+  // Only supervisory roles assigned to this project
+  const projectSupervisors = projectAssignments
+    .filter((a) => SUPERVISOR_ROLES.includes(a.role || ""))
+    .map((a) => workers.find((w) => w.id === a.workerId))
+    .filter((w): w is DashboardWorker => !!w)
+    .filter((w, i, arr) => arr.findIndex((x) => x.id === w.id) === i); // dedupe
 
   const { data: reports = [], isLoading, refetch } = useQuery<any[]>({
     queryKey: [`/api/projects/${project.id}/supervisor-reports`],
@@ -1352,8 +1361,8 @@ function SupervisorReportsTab({
                     }}
                   >
                     <option value="">Assign to...</option>
-                    {workers.map((w) => (
-                      <option key={w.id} value={w.id}>{w.name}</option>
+                    {projectSupervisors.map((w) => (
+                      <option key={w.id} value={w.id}>{w.name} ({assignments.find(a => a.workerId === w.id && a.projectId === project.id)?.role || ""})</option>
                     ))}
                   </select>
                 </div>
@@ -1398,12 +1407,10 @@ function SupervisorReportsTab({
                   className="w-full px-2 py-1.5 rounded border text-[12px]"
                   style={{ borderColor: "hsl(var(--border))" }}
                 >
-                  <option value="">Select worker...</option>
-                  {projectAssignments.map((a) => {
-                    const w = workers.find((wk) => wk.id === a.workerId);
-                    if (!w) return null;
-                    return <option key={w.id} value={w.id}>{w.name}</option>;
-                  })}
+                  <option value="">Select supervisor...</option>
+                  {projectSupervisors.map((w) => (
+                    <option key={w.id} value={w.id}>{w.name} ({assignments.find(a => a.workerId === w.id && a.projectId === project.id)?.role || ""})</option>
+                  ))}
                 </select>
               </div>
               <div>
