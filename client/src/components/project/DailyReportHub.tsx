@@ -496,8 +496,8 @@ function PMReportTab({
           delaysLog,
           toolingItems,
           personnelNotes,
-          publishedToPortal: publish,
-          emailNotificationSent: publish && sendEmail,
+          publishedToPortal: true,
+          emailNotificationSent: false,
         };
         if (reportData?.id) {
           await apiRequest("PATCH", `/api/daily-reports/${reportData.id}`, payload);
@@ -505,10 +505,7 @@ function PMReportTab({
           await apiRequest("POST", `/api/projects/${project.id}/daily-reports`, payload);
         }
         qc.invalidateQueries({ queryKey: [reportKey] });
-        toast({
-          title: publish ? "Report published to portal" : "Draft saved",
-          description: publish && sendEmail ? "Email notification queued." : undefined,
-        });
+        toast({ title: "Report saved" });
       } catch (e: any) {
         toast({ title: "Save failed", description: e.message, variant: "destructive" });
       }
@@ -516,6 +513,17 @@ function PMReportTab({
     },
     [project.id, selectedDate, completedTasks, delaysLog, toolingItems, personnelNotes, reportData, sendEmail, qc, reportKey, toast]
   );
+
+  // Auto-save: debounced 2s after any change
+  const autoSaveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  React.useEffect(() => {
+    if (isReadOnly || !selectedDate) return;
+    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
+    autoSaveTimer.current = setTimeout(() => {
+      handleSave(false);
+    }, 2000);
+    return () => { if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current); };
+  }, [completedTasks, delaysLog, toolingItems, personnelNotes]);
 
   // Send delay approval
   const handleSendDelayApproval = useCallback(
@@ -647,24 +655,14 @@ function PMReportTab({
         )}
         {!isReadOnly && (
           <div className="ml-auto flex items-center gap-2">
-            <button
-              onClick={() => handleSave(false)}
-              disabled={saving}
-              className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg border disabled:opacity-50"
-              style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-navy)" }}
-            >
-              {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-              Save Draft
-            </button>
-            <button
-              onClick={() => handleSave(true)}
-              disabled={saving}
-              className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg disabled:opacity-50"
-              style={{ background: "var(--pfg-navy)", color: "#fff" }}
-            >
-              {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-              Save & Publish
-            </button>
+            {saving ? (
+              <span className="flex items-center gap-1.5 text-[11px]" style={{ color: "var(--pfg-steel)" }}>
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Saving…
+              </span>
+            ) : (
+              <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Auto-saved</span>
+            )}
           </div>
         )}
       </div>
@@ -1347,40 +1345,7 @@ function PMReportTab({
         </div>
       )}
 
-      {/* Save / Publish controls */}
-      {!isReadOnly && (
-        <div
-          className="sticky bottom-0 rounded-xl border p-4 flex flex-wrap items-center gap-3"
-          style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))", zIndex: 10 }}
-        >
-          <label className="flex items-center gap-2 text-[12px] mr-auto">
-            <input
-              type="checkbox"
-              checked={sendEmail}
-              onChange={(e) => setSendEmail(e.target.checked)}
-            />
-            Send email notification to customer
-          </label>
-          <button
-            onClick={() => handleSave(false)}
-            disabled={saving}
-            className="flex items-center gap-1.5 text-[12px] font-semibold px-4 py-2 rounded-lg border disabled:opacity-50"
-            style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-navy)" }}
-          >
-            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-            Save Draft
-          </button>
-          <button
-            onClick={() => handleSave(true)}
-            disabled={saving}
-            className="flex items-center gap-1.5 text-[12px] font-semibold px-4 py-2 rounded-lg disabled:opacity-50"
-            style={{ background: "var(--pfg-navy)", color: "#fff" }}
-          >
-            {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-            Save & Publish to Portal
-          </button>
-        </div>
-      )}
+
     </div>
   );
 }
