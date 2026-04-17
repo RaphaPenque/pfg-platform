@@ -44,6 +44,13 @@ interface TimesheetWeek {
   billing_pdf_path: string | null;
   pm_reject_comment: string | null;
   customer_challenge: string | null;
+  // Supervisor flow fields
+  day_sup_token: string | null;
+  day_sup_submitted_at: string | null;
+  night_sup_token: string | null;
+  night_sup_submitted_at: string | null;
+  day_sup_name: string | null;
+  night_sup_name: string | null;
 }
 
 interface TimesheetEntry {
@@ -96,20 +103,122 @@ function calcWeeklyHours(config: Partial<TimesheetConfig>): number {
   return Math.round((days * mins / 60) * 10) / 10;
 }
 
-function statusBadge(status: string) {
-  const map: Record<string, { bg: string; text: string; label: string }> = {
-    draft: { bg: "#f3f4f6", text: "#6b7280", label: "Draft" },
-    submitted: { bg: "#dbeafe", text: "#1d4ed8", label: "Submitted" },
-    pm_approved: { bg: "#fef3c7", text: "#d97706", label: "PM Approved" },
-    sent_to_customer: { bg: "#ede9fe", text: "#7c3aed", label: "Sent to Customer" },
-    customer_approved: { bg: "#dcfce7", text: "#15803d", label: "Customer Approved" },
-    recalled: { bg: "#fee2e2", text: "#b91c1c", label: "Recalled" },
-  };
-  const s = map[status] || map.draft;
+function statusBadge(status: string, week?: TimesheetWeek) {
+  // Compute enriched label based on supervisor submission state
+  let label = "Draft";
+  let bg = "#f3f4f6";
+  let text = "#6b7280";
+
+  if (status === "draft" && week) {
+    const hasNightSup = !!week.night_sup_token;
+    const dayDone = !!week.day_sup_submitted_at;
+    const nightDone = !!week.night_sup_submitted_at;
+    if (hasNightSup && dayDone && !nightDone) {
+      label = "Partial — 1/2 shifts in";
+      bg = "#fff3cd"; text = "#856404";
+    } else if (hasNightSup && !dayDone && nightDone) {
+      label = "Partial — 1/2 shifts in";
+      bg = "#fff3cd"; text = "#856404";
+    } else if (!dayDone && !nightDone) {
+      label = "Not Started";
+      bg = "#f3f4f6"; text = "#6b7280";
+    } else {
+      label = "Draft";
+    }
+  } else {
+    const map: Record<string, { bg: string; text: string; label: string }> = {
+      draft: { bg: "#f3f4f6", text: "#6b7280", label: "Draft" },
+      submitted: { bg: "#dbeafe", text: "#1d4ed8", label: "Ready for PM Review" },
+      pm_approved: { bg: "#fef3c7", text: "#d97706", label: "PM Approved" },
+      sent_to_customer: { bg: "#ede9fe", text: "#7c3aed", label: "Sent to Customer" },
+      customer_approved: { bg: "#dcfce7", text: "#15803d", label: "Customer Approved" },
+      recalled: { bg: "#fee2e2", text: "#b91c1c", label: "Recalled" },
+    };
+    const s = map[status] || map.draft;
+    label = s.label; bg = s.bg; text = s.text;
+  }
+
   return (
-    <span style={{ background: s.bg, color: s.text, fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 20 }}>
-      {s.label}
+    <span style={{ background: bg, color: text, fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 20 }}>
+      {label}
     </span>
+  );
+}
+
+// ─── Shift Status Tiles ──────────────────────────────────────────────────────────────
+
+function fmtDateTime(iso: string | null): string {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleDateString("en-GB", {
+      day: "2-digit", month: "short", year: "numeric",
+      hour: "2-digit", minute: "2-digit",
+    });
+  } catch { return iso; }
+}
+
+function ShiftStatusTiles({ week }: { week: TimesheetWeek }) {
+  const hasNightSup = !!week.night_sup_token;
+
+  const TileIcon = ({ submitted }: { submitted: boolean }) => (
+    submitted
+      ? <CheckCircle2 className="w-4 h-4" style={{ color: "#16a34a" }} />
+      : <Clock className="w-4 h-4" style={{ color: "#d97706" }} />
+  );
+
+  return (
+    <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+      {/* Day shift tile */}
+      <div style={{
+        flex: 1, minWidth: 180, background: week.day_sup_submitted_at ? "#f0fdf4" : "#fffbeb",
+        borderRadius: 8, padding: "12px 14px",
+        border: `1px solid ${week.day_sup_submitted_at ? "#bbf7d0" : "#fde68a"}`,
+        display: "flex", alignItems: "center", gap: 10,
+      }}>
+        <TileIcon submitted={!!week.day_sup_submitted_at} />
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1D23" }}>Day Shift</div>
+          {week.day_sup_submitted_at ? (
+            <div style={{ fontSize: 11, color: "#15803d" }}>Submitted {fmtDateTime(week.day_sup_submitted_at)}</div>
+          ) : (
+            <div style={{ fontSize: 11, color: "#d97706" }}>Pending{week.day_sup_name ? ` — ${week.day_sup_name}` : ""}</div>
+          )}
+        </div>
+      </div>
+
+      {/* Night shift tile */}
+      {hasNightSup ? (
+        <div style={{
+          flex: 1, minWidth: 180, background: week.night_sup_submitted_at ? "#f0fdf4" : "#fffbeb",
+          borderRadius: 8, padding: "12px 14px",
+          border: `1px solid ${week.night_sup_submitted_at ? "#bbf7d0" : "#fde68a"}`,
+          display: "flex", alignItems: "center", gap: 10,
+        }}>
+          <TileIcon submitted={!!week.night_sup_submitted_at} />
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#1A1D23" }}>Night Shift</div>
+            {week.night_sup_submitted_at ? (
+              <div style={{ fontSize: 11, color: "#15803d" }}>Submitted {fmtDateTime(week.night_sup_submitted_at)}</div>
+            ) : (
+              <div style={{ fontSize: 11, color: "#d97706" }}>Pending{week.night_sup_name ? ` — ${week.night_sup_name}` : ""}</div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div style={{
+          flex: 1, minWidth: 180, background: "#f9fafb",
+          borderRadius: 8, padding: "12px 14px",
+          border: "1px solid #e5e7eb",
+          display: "flex", alignItems: "center", gap: 10, opacity: 0.7,
+        }}>
+          <Info className="w-4 h-4" style={{ color: "#9ca3af" }} />
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#6b7280" }}>Night Shift</div>
+            <div style={{ fontSize: 11, color: "#9ca3af" }}>N/A — no night supervisor</div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -329,7 +438,7 @@ function WeekList({ weeks, onSelect, selectedId }: {
             )}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            {statusBadge(w.status)}
+            {statusBadge(w.status, w)}
             <ChevronRight className="w-4 h-4" style={{ color: "#9ca3af" }} />
           </div>
         </div>
@@ -349,11 +458,8 @@ function SupervisorGrid({ week, entries, userRole, onRefresh }: {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [editCell, setEditCell] = useState<{ entryId: number; field: string } | null>(null);
-  const [submitComment, setSubmitComment] = useState("");
-  const [showSubmit, setShowSubmit] = useState(false);
 
   const isLocked = week.status === "customer_approved" || week.status === "submitted" || week.status === "pm_approved" || week.status === "sent_to_customer";
-  const canSubmit = week.status === "draft" || week.status === "recalled";
 
   const patchMutation = useMutation({
     mutationFn: (data: { id: number; patch: object }) =>
@@ -495,22 +601,7 @@ function SupervisorGrid({ week, entries, userRole, onRefresh }: {
         </table>
       </div>
 
-      {canSubmit && (
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10 }}>
-          <button
-            onClick={() => submitMutation.mutate()}
-            disabled={submitMutation.isPending}
-            style={{
-              background: "var(--pfg-navy, #1A1D23)", color: "#fff", fontWeight: 700, fontSize: 13,
-              padding: "10px 24px", borderRadius: 8, border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 8,
-              opacity: submitMutation.isPending ? 0.7 : 1,
-            }}
-          >
-            {submitMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-            Submit for PM Approval
-          </button>
-        </div>
-      )}
+      {/* Submit button removed — supervisors submit via their emailed links */}
     </div>
   );
 }

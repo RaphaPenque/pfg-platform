@@ -18,6 +18,7 @@ import Login from "./pages/Login";
 import ConfirmAssignment from "./pages/ConfirmAssignment";
 import MilestoneApprovalPage from "./pages/MilestoneApprovalPage";
 import TimesheetApprovalPage from "./pages/TimesheetApprovalPage";
+import TimesheetSupervisorPage from "./pages/TimesheetSupervisorPage";
 import NotFound from "./pages/not-found";
 import { LogOut, Loader2 } from "lucide-react";
 
@@ -227,6 +228,12 @@ function AppContent() {
   if (location.startsWith("/timesheet-approval/")) {
     const token = location.replace("/timesheet-approval/", "");
     return <TimesheetApprovalPage params={{ token }} />;
+  }
+
+  // Timesheet supervisor review — public, no auth required
+  if (location.startsWith("/timesheet-supervisor/")) {
+    const token = location.replace("/timesheet-supervisor/", "");
+    return <TimesheetSupervisorPage params={{ token }} />;
   }
 
   // Auth verify redirect

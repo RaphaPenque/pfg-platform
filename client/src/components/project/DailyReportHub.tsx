@@ -1953,7 +1953,6 @@ function QHSETab({
                 <tr>
                   <Th>Date</Th>
                   <Th>Shift</Th>
-                  <Th>Supervisor</Th>
                   <Th>Topic</Th>
                   <Th>Attendees</Th>
                   <Th>File</Th>
@@ -1967,7 +1966,6 @@ function QHSETab({
                     <tr style={{ borderTop: "1px solid hsl(var(--border))" }}>
                       <Td>{t.reportDate ? fmtDate(t.reportDate) : "—"}</Td>
                       <Td>{t.shift || "—"}</Td>
-                      <Td>{t.supervisor || "—"}</Td>
                       <Td>{t.topic || "—"}</Td>
                       <Td>{t.attendeeCount ?? "—"}</Td>
                       <Td>
@@ -1992,7 +1990,7 @@ function QHSETab({
                     </tr>
                     {editingTB === t.id && (
                       <tr style={{ borderTop: "1px solid hsl(var(--border))", background: "hsl(var(--muted))" }}>
-                        <td colSpan={8} className="px-4 py-3">
+                        <td colSpan={7} className="px-4 py-3">
                           <div className="flex items-center gap-3 flex-wrap">
                             <span className="text-[11px] font-semibold" style={{ color: "var(--pfg-steel)" }}>Edit TBT</span>
                             <div className="flex items-center gap-1.5">

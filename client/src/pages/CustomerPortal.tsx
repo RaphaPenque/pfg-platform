@@ -919,7 +919,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <thead>
                         <tr style={{ background: "#F4F5F7" }}>
-                          {["Date", "Shift", "Supervisor", "Topic", "Attendees", ""].map(h => (
+                          {["Date", "Shift", "Topic", "Attendees", ""].map(h => (
                             <th key={h} style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", padding: "12px 20px", textAlign: "left", borderBottom: "1px solid #e2e5eb", whiteSpace: "nowrap" }}>{h}</th>
                           ))}
                         </tr>
@@ -931,7 +931,6 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                             onMouseLeave={e => (e.currentTarget.style.background = "")}>
                             <td style={{ padding: "13px 20px", fontSize: 13, verticalAlign: "middle" }}>{t.reportDate}</td>
                             <td style={{ padding: "13px 20px", fontSize: 13, verticalAlign: "middle" }}>{t.shift || "—"}</td>
-                            <td style={{ padding: "13px 20px", fontSize: 13, verticalAlign: "middle" }}>{t.workerId ? "—" : "—"}</td>
                             <td style={{ padding: "13px 20px", fontSize: 13, verticalAlign: "middle" }}>{t.topic || "—"}</td>
                             <td style={{ padding: "13px 20px", fontSize: 13, verticalAlign: "middle" }}>{t.attendeeCount ?? "—"}</td>
                             <td style={{ padding: "13px 20px", verticalAlign: "middle" }}>

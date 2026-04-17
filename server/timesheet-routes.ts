@@ -142,6 +142,14 @@ export async function buildTimesheetEntries(projectId: number) {
       }
       const twId = tw.id;
 
+      // Task 2: Delete existing entries for draft weeks before re-building
+      // This ensures stale entries from old config are cleaned up
+      if (tw.status === 'draft') {
+        await db.execute(sql`
+          DELETE FROM timesheet_entries WHERE timesheet_week_id = ${twId}
+        `);
+      }
+
       // Build entries for each worker
       for (const asgn of assignments) {
         const mobDate = asgn.start_date ? new Date(asgn.start_date) : null;
@@ -869,6 +877,157 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
       return res.json({ ok: true, message: "Rebuild triggered" });
     }
   );
+
+  // ── POST /api/internal/send-supervisor-timesheets ── no auth (internal cron)
+  app.post("/api/internal/send-supervisor-timesheets", async (_req: any, res: any) => {
+    try {
+      const result = await sendWeeklySupervisorLinks();
+      return res.json({ ok: true, processed: result.processed });
+    } catch (e: any) {
+      return res.status(500).json({ error: String(e.message || e) });
+    }
+  });
+
+  // ── GET /api/timesheet-supervisor/:token ─────────────────────────────────
+  app.get("/api/timesheet-supervisor/:token", async (req: any, res: any) => {
+    try {
+      const rawToken = req.params.token;
+      if (!rawToken) return res.status(400).json({ error: "Token required" });
+      const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
+
+      // Find week matching day or night token
+      const weekRes = await db.execute(sql`
+        SELECT tw.*, p.name as project_name, p.code as project_code, p.customer
+        FROM timesheet_weeks tw
+        JOIN projects p ON p.id = tw.project_id
+        WHERE tw.day_sup_token = ${hashedToken}
+           OR tw.night_sup_token = ${hashedToken}
+        LIMIT 1
+      `);
+      const week = weekRes.rows[0] as any;
+      if (!week) return res.status(404).json({ error: "Invalid or expired link" });
+
+      // Determine which shift this token is for
+      const shift = week.day_sup_token === hashedToken ? "day" : "night";
+      const supervisorName = shift === "day" ? week.day_sup_name : week.night_sup_name;
+
+      // Fetch entries scoped to this shift
+      const entriesRes = await db.execute(sql`
+        SELECT e.*, w.name as worker_name, w.role as worker_role
+        FROM timesheet_entries e
+        JOIN workers w ON w.id = e.worker_id
+        WHERE e.timesheet_week_id = ${week.id}
+          AND e.shift = ${shift}
+        ORDER BY w.name, e.entry_date
+      `);
+      const entries = entriesRes.rows as any[];
+
+      return res.json({
+        week: {
+          id: week.id,
+          project_id: week.project_id,
+          project_name: week.project_name,
+          project_code: week.project_code,
+          customer: week.customer,
+          week_commencing: week.week_commencing,
+          status: week.status,
+          day_sup_submitted_at: week.day_sup_submitted_at,
+          night_sup_submitted_at: week.night_sup_submitted_at,
+          day_sup_name: week.day_sup_name,
+          night_sup_name: week.night_sup_name,
+          night_sup_token: week.night_sup_token,
+        },
+        shift,
+        supervisor_name: supervisorName,
+        entries,
+      });
+    } catch (e: any) {
+      return res.status(500).json({ error: String(e.message || e) });
+    }
+  });
+
+  // ── POST /api/timesheet-supervisor/:token/submit ─────────────────────────
+  app.post("/api/timesheet-supervisor/:token/submit", async (req: any, res: any) => {
+    try {
+      const rawToken = req.params.token;
+      if (!rawToken) return res.status(400).json({ error: "Token required" });
+      const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
+
+      const weekRes = await db.execute(sql`
+        SELECT tw.*, p.name as project_name, p.code as project_code
+        FROM timesheet_weeks tw
+        JOIN projects p ON p.id = tw.project_id
+        WHERE tw.day_sup_token = ${hashedToken}
+           OR tw.night_sup_token = ${hashedToken}
+        LIMIT 1
+      `);
+      const week = weekRes.rows[0] as any;
+      if (!week) return res.status(404).json({ error: "Invalid or expired link" });
+
+      const shift = week.day_sup_token === hashedToken ? "day" : "night";
+      const now = new Date();
+
+      if (shift === "day") {
+        await db.execute(sql`
+          UPDATE timesheet_weeks SET day_sup_submitted_at = ${now}
+          WHERE id = ${week.id}
+        `);
+      } else {
+        await db.execute(sql`
+          UPDATE timesheet_weeks SET night_sup_submitted_at = ${now}
+          WHERE id = ${week.id}
+        `);
+      }
+
+      // Re-fetch to check if all required shifts submitted
+      const reloadRes = await db.execute(sql`
+        SELECT * FROM timesheet_weeks WHERE id = ${week.id}
+      `);
+      const updatedWeek = reloadRes.rows[0] as any;
+
+      const hasNightSup = !!updatedWeek.night_sup_token;
+      const daySubmitted = !!updatedWeek.day_sup_submitted_at;
+      const nightSubmitted = !!updatedWeek.night_sup_submitted_at;
+
+      const allSubmitted = hasNightSup
+        ? (daySubmitted && nightSubmitted)
+        : daySubmitted;
+
+      if (allSubmitted && updatedWeek.status === "draft") {
+        await db.execute(sql`
+          UPDATE timesheet_weeks SET status = 'submitted', submitted_at = NOW()
+          WHERE id = ${week.id}
+        `);
+        // Notify PM
+        const pmRes = await db.execute(sql`
+          SELECT u.email, u.name FROM project_leads pl
+          JOIN users u ON u.id = pl.user_id
+          WHERE pl.project_id = ${week.project_id}
+          LIMIT 1
+        `);
+        const pm = pmRes.rows[0] as any;
+        if (pm?.email) {
+          const weekStr = updatedWeek.week_commencing?.toString().substring(0, 10) || "";
+          await sendMail({
+            to: pm.email,
+            subject: `Timesheet ready for review — ${week.project_name} w/c ${weekStr}`,
+            html: buildNotificationEmail(
+              `Timesheet Ready for Review`,
+              `All shifts for <strong>${week.project_name}</strong> (w/c ${weekStr}) have been submitted by the site supervisors and are ready for your approval.`,
+              `${APP_URL}/#/projects/${week.project_code}`,
+              "Review Timesheet"
+            ),
+            text: `All shifts for ${week.project_name} w/c ${weekStr} have been submitted. Please review and approve.`,
+          });
+        }
+      }
+
+      const finalRes = await db.execute(sql`SELECT * FROM timesheet_weeks WHERE id = ${week.id}`);
+      return res.json({ ok: true, week: finalRes.rows[0] });
+    } catch (e: any) {
+      return res.status(500).json({ error: String(e.message || e) });
+    }
+  });
 }
 
 // ─── Output generation (Steps 6 & 7) ────────────────────────────────────────
@@ -1285,4 +1444,240 @@ function buildCustomerApprovalEmail(firstName: string, projectName: string, week
     </div>
   </div>
 </body></html>`;
+}
+
+// ─── Supervisor email template ────────────────────────────────────────────────
+
+function buildSupervisorTimesheetEmail(
+  supervisorName: string,
+  projectName: string,
+  projectCode: string,
+  weekComm: string,
+  shift: string,
+  reviewUrl: string,
+): string {
+  const firstName = supervisorName.split(" ")[0];
+  const weekFormatted = weekComm?.toString().substring(0, 10) || "";
+  const shiftLabel = shift === "night" ? "Night" : "Day";
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"></head>
+<body style="font-family:Arial,sans-serif;background:#f4f4f5;padding:40px 0;">
+  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
+    <div style="background:#1A1D23;padding:28px 32px;text-align:center;">
+      <img src="${APP_URL}/logo-gold.png" alt="Powerforce Global" height="36" style="display:block;margin:0 auto;" />
+    </div>
+    <div style="padding:32px;color:#1A1D23;">
+      <h2 style="margin:0 0 8px;font-size:20px;font-weight:700;">Hi ${firstName},</h2>
+      <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
+        Please review and submit the <strong>${shiftLabel} Shift</strong> timesheet for
+        <strong>${projectName}</strong> (${projectCode}) — week commencing <strong>${weekFormatted}</strong>.
+      </p>
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:13px;">
+        <tr style="border-bottom:1px solid #f0f0f0;">
+          <td style="padding:8px 12px;color:#6b7280;">Project</td>
+          <td style="padding:8px 12px;font-weight:600;color:#1A1D23;">${projectName}</td>
+        </tr>
+        <tr style="border-bottom:1px solid #f0f0f0;">
+          <td style="padding:8px 12px;color:#6b7280;">Week commencing</td>
+          <td style="padding:8px 12px;font-weight:600;color:#1A1D23;">${weekFormatted}</td>
+        </tr>
+        <tr>
+          <td style="padding:8px 12px;color:#6b7280;">Your shift</td>
+          <td style="padding:8px 12px;font-weight:600;color:#1A1D23;">${shiftLabel} Shift</td>
+        </tr>
+      </table>
+      <p style="margin:0 0 8px;color:#4b5563;font-size:14px;line-height:1.6;">
+        Review each worker's hours, make any corrections needed, then click <strong>Submit Timesheet</strong>.
+        This will notify your project manager that the timesheet is ready for review.
+      </p>
+      <div style="text-align:center;margin:28px 0;">
+        <a href="${reviewUrl}" style="display:inline-block;background:#1A1D23;color:#F5BD00;font-weight:700;font-size:15px;padding:14px 36px;border-radius:8px;text-decoration:none;">
+          Review Timesheet &rarr;
+        </a>
+      </div>
+      <p style="margin:16px 0 0;font-size:12px;color:#9ca3af;text-align:center;">
+        This link is personal to you. Do not forward it to others.
+      </p>
+    </div>
+    <div style="padding:16px 32px;font-size:11px;color:#9ca3af;border-top:1px solid #f0f0f0;text-align:center;">
+      &copy; ${new Date().getFullYear()} Powerforce Global &middot; Confidential
+    </div>
+  </div>
+</body></html>`;
+}
+
+// ─── Sunday send: generate & dispatch supervisor timesheet links ─────────────
+
+/** Return the Monday of the NEXT ISO week after triggerDate (or today) */
+function nextMondayAfter(triggerDate?: Date): Date {
+  const base = triggerDate ? new Date(triggerDate) : new Date();
+  base.setUTCHours(0, 0, 0, 0);
+  // Move to next Monday
+  const day = base.getUTCDay(); // 0=Sun
+  const daysUntilMonday = day === 0 ? 1 : 8 - day;
+  base.setUTCDate(base.getUTCDate() + daysUntilMonday);
+  return base;
+}
+
+export async function sendWeeklySupervisorLinks(triggerDate?: Date): Promise<{ processed: number }> {
+  let processed = 0;
+  try {
+    // 1. Get all active projects
+    const projRes = await db.execute(sql`
+      SELECT id, name, code FROM projects WHERE status = 'active'
+    `);
+    const projects = projRes.rows as any[];
+    if (projects.length === 0) {
+      console.log("[supervisor-links] No active projects found.");
+      return { processed: 0 };
+    }
+
+    const nextMonday = nextMondayAfter(triggerDate);
+    const weekComm = isoDate(nextMonday);
+    console.log(`[supervisor-links] Sending for week commencing ${weekComm}, ${projects.length} active projects`);
+
+    for (const project of projects) {
+      try {
+        // 2. Ensure timesheet_weeks row exists
+        await db.execute(sql`
+          INSERT INTO timesheet_weeks (project_id, week_commencing, status)
+          VALUES (${project.id}, ${weekComm}::date, 'draft')
+          ON CONFLICT (project_id, week_commencing) DO NOTHING
+        `);
+
+        const twRes = await db.execute(sql`
+          SELECT id FROM timesheet_weeks
+          WHERE project_id = ${project.id} AND week_commencing = ${weekComm}::date
+        `);
+        const tw = twRes.rows[0] as any;
+        if (!tw) continue;
+        const twId = tw.id;
+
+        // 3. Find PM email via project_leads → users
+        const pmRes = await db.execute(sql`
+          SELECT u.email FROM project_leads pl
+          JOIN users u ON u.id = pl.user_id
+          WHERE pl.project_id = ${project.id}
+          LIMIT 1
+        `);
+        const pmEmail = (pmRes.rows[0] as any)?.email || null;
+
+        // 4. Find day shift supervisor (Superintendent > Foreman)
+        const dayWorkersRes = await db.execute(sql`
+          SELECT w.id, w.name, w.role,
+                 COALESCE(w.work_email, w.personal_email) as email
+          FROM assignments a
+          JOIN workers w ON w.id = a.worker_id
+          WHERE a.project_id = ${project.id}
+            AND a.status NOT IN ('cancelled','declined')
+            AND LOWER(a.shift) LIKE 'day%'
+          ORDER BY
+            CASE WHEN w.role ILIKE '%superintendent%' THEN 0 ELSE 1 END,
+            w.id
+        `);
+        const dayWorkers = dayWorkersRes.rows as any[];
+
+        // 5. Find night shift workers
+        const nightWorkersRes = await db.execute(sql`
+          SELECT w.id, w.name, w.role,
+                 COALESCE(w.work_email, w.personal_email) as email
+          FROM assignments a
+          JOIN workers w ON w.id = a.worker_id
+          WHERE a.project_id = ${project.id}
+            AND a.status NOT IN ('cancelled','declined')
+            AND LOWER(a.shift) LIKE 'night%'
+          ORDER BY
+            CASE WHEN w.role ILIKE '%superintendent%' THEN 0 ELSE 1 END,
+            w.id
+        `);
+        const nightWorkers = nightWorkersRes.rows as any[];
+        const hasNightShift = nightWorkers.length > 0;
+
+        // Find supervisor from workers list (Superintendent > Foreman > first available)
+        function pickSupervisor(workers: any[]): any | null {
+          const super_ = workers.find(w => w.role?.toLowerCase().includes("superintendent"));
+          if (super_) return super_;
+          const foreman = workers.find(w => w.role?.toLowerCase().includes("foreman"));
+          if (foreman) return foreman;
+          return workers[0] || null;
+        }
+
+        const daySup = pickSupervisor(dayWorkers);
+        const nightSup = hasNightShift ? pickSupervisor(nightWorkers) : null;
+
+        // 6. Process day supervisor
+        if (daySup) {
+          if (!daySup.email) {
+            // Send warning to PM
+            if (pmEmail) {
+              await sendMail({
+                to: pmEmail,
+                subject: `Timesheet not sent — missing email for ${daySup.name} (${project.name})`,
+                html: `<p>The weekly timesheet for <strong>${project.name}</strong> (w/c ${weekComm}) could not be sent to <strong>${daySup.name}</strong> (${daySup.role}, Day Shift) — no email address is on their worker record.</p><p>Please update their email in the system.</p>`,
+                text: `Timesheet not sent to ${daySup.name} (${daySup.role}, Day Shift) for ${project.name} w/c ${weekComm} — no email on record.`,
+              });
+            }
+          } else {
+            const rawToken = crypto.randomBytes(32).toString("hex");
+            const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
+            await db.execute(sql`
+              UPDATE timesheet_weeks
+              SET day_sup_token = ${hashedToken},
+                  day_sup_name = ${daySup.name}
+              WHERE id = ${twId}
+            `);
+            const reviewUrl = `${APP_URL}/#/timesheet-supervisor/${rawToken}`;
+            await sendMail({
+              to: daySup.email,
+              from: pmEmail || undefined,
+              subject: `Timesheet review — ${project.name} w/c ${weekComm}`,
+              html: buildSupervisorTimesheetEmail(daySup.name, project.name, project.code, weekComm, "day", reviewUrl),
+              text: `Hi ${daySup.name},\n\nPlease review the Day Shift timesheet for ${project.name} w/c ${weekComm}:\n\n${reviewUrl}\n\nPowerforce Global`,
+            });
+            console.log(`[supervisor-links] Sent day link to ${daySup.email} for project ${project.code}`);
+          }
+        }
+
+        // 7. Process night supervisor
+        if (nightSup) {
+          if (!nightSup.email) {
+            if (pmEmail) {
+              await sendMail({
+                to: pmEmail,
+                subject: `Timesheet not sent — missing email for ${nightSup.name} (${project.name})`,
+                html: `<p>The weekly timesheet for <strong>${project.name}</strong> (w/c ${weekComm}) could not be sent to <strong>${nightSup.name}</strong> (${nightSup.role}, Night Shift) — no email address is on their worker record.</p><p>Please update their email in the system.</p>`,
+                text: `Timesheet not sent to ${nightSup.name} (${nightSup.role}, Night Shift) for ${project.name} w/c ${weekComm} — no email on record.`,
+              });
+            }
+          } else {
+            const rawToken = crypto.randomBytes(32).toString("hex");
+            const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
+            await db.execute(sql`
+              UPDATE timesheet_weeks
+              SET night_sup_token = ${hashedToken},
+                  night_sup_name = ${nightSup.name}
+              WHERE id = ${twId}
+            `);
+            const reviewUrl = `${APP_URL}/#/timesheet-supervisor/${rawToken}`;
+            await sendMail({
+              to: nightSup.email,
+              from: pmEmail || undefined,
+              subject: `Timesheet review — ${project.name} w/c ${weekComm}`,
+              html: buildSupervisorTimesheetEmail(nightSup.name, project.name, project.code, weekComm, "night", reviewUrl),
+              text: `Hi ${nightSup.name},\n\nPlease review the Night Shift timesheet for ${project.name} w/c ${weekComm}:\n\n${reviewUrl}\n\nPowerforce Global`,
+            });
+            console.log(`[supervisor-links] Sent night link to ${nightSup.email} for project ${project.code}`);
+          }
+        }
+
+        processed++;
+      } catch (projErr: any) {
+        console.error(`[supervisor-links] Error processing project ${project.id}:`, projErr.message);
+      }
+    }
+
+    console.log(`[supervisor-links] Done. Processed ${processed}/${projects.length} projects for w/c ${weekComm}.`);
+  } catch (e: any) {
+    console.error("[supervisor-links] Fatal error:", e.message);
+  }
+  return { processed };
 }

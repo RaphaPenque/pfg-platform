@@ -583,6 +583,15 @@ export async function runSchemaUpdates() {
 
     console.log('Timesheet tables created (if not exists)');
 
+    // ── Timesheet Supervisor Flow — supervisor token columns ─────────────────
+    await db.execute(sql`ALTER TABLE timesheet_weeks ADD COLUMN IF NOT EXISTS day_sup_token text`);
+    await db.execute(sql`ALTER TABLE timesheet_weeks ADD COLUMN IF NOT EXISTS day_sup_submitted_at timestamptz`);
+    await db.execute(sql`ALTER TABLE timesheet_weeks ADD COLUMN IF NOT EXISTS night_sup_token text`);
+    await db.execute(sql`ALTER TABLE timesheet_weeks ADD COLUMN IF NOT EXISTS night_sup_submitted_at timestamptz`);
+    await db.execute(sql`ALTER TABLE timesheet_weeks ADD COLUMN IF NOT EXISTS day_sup_name text`);
+    await db.execute(sql`ALTER TABLE timesheet_weeks ADD COLUMN IF NOT EXISTS night_sup_name text`);
+    console.log('Supervisor token columns added to timesheet_weeks (if not exists)');
+
     console.log("Schema updates applied.");
   } catch (e: any) {
     console.error("Schema update error:", e.message);
