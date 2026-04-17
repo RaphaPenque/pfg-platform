@@ -169,6 +169,8 @@ export interface IStorage {
   // Comments Log
   getCommentsLog(projectId: number): Promise<CommentsLog[]>;
   createCommentsLogEntry(data: InsertCommentsLog): Promise<CommentsLog>;
+  updateCommentsLogEntry(id: number, entry: string, logDate: string): Promise<CommentsLog | undefined>;
+  deleteCommentsLogEntry(id: number): Promise<void>;
 
   // Delay Approvals
   createDelayApproval(data: Omit<DelayApproval, 'id' | 'createdAt'>): Promise<DelayApproval>;
@@ -714,6 +716,18 @@ export class PostgresStorage implements IStorage {
   async createCommentsLogEntry(data: InsertCommentsLog): Promise<CommentsLog> {
     const [row] = await db.insert(commentsLog).values(data).returning();
     return row;
+  }
+
+  async updateCommentsLogEntry(id: number, entry: string, logDate: string): Promise<CommentsLog | undefined> {
+    const [row] = await db.update(commentsLog)
+      .set({ entry, logDate })
+      .where(eq(commentsLog.id, id))
+      .returning();
+    return row;
+  }
+
+  async deleteCommentsLogEntry(id: number): Promise<void> {
+    await db.delete(commentsLog).where(eq(commentsLog.id, id));
   }
 
   // ── Delay Approvals ───────────────────────────────────────────

@@ -6,7 +6,7 @@
 
 import { storage } from './storage';
 import { sendMail } from './email';
-import { generateWeeklyReportPdf, type ReportData } from './report-generator';
+import { generateWeeklyReportPdfHtml, type ReportData } from './report-generator';
 
 const APP_URL = process.env.APP_URL || 'https://pfg-platform.onrender.com';
 
@@ -217,7 +217,7 @@ async function sendReportForProject(
     isFinalReport: isFinal,
   };
 
-  const pdfBuffer = await generateWeeklyReportPdf(reportData as any);
+  const pdfBuffer = await generateWeeklyReportPdfHtml(reportData as any);
   const base64Pdf = pdfBuffer.toString('base64');
   const filename = isFinal
     ? `${project.code}-final-report-${report.reportDate}.pdf`

@@ -244,6 +244,104 @@ interface DailyReport {
   emailNotificationSent: boolean;
 }
 
+// ─── Inline edit/delete for concern log entries ───────────────────
+function CommentLogEntry({ entry, currentUserId, currentUserRole, projectId, qc }: {
+  entry: any; currentUserId?: number; currentUserRole?: string;
+  projectId: number; qc: any;
+}) {
+  const { toast } = useToast();
+  const [editing, setEditing] = React.useState(false);
+  const [editText, setEditText] = React.useState(entry.entry || entry.text || "");
+  const [editDate, setEditDate] = React.useState(entry.logDate || "");
+  const [saving, setSaving] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
+
+  const canEdit = currentUserRole === "admin" || currentUserRole === "resource_manager" || currentUserRole === "project_manager";
+
+  async function handleSave() {
+    if (!editText.trim()) return;
+    setSaving(true);
+    try {
+      await apiRequest("PUT", `/api/comments-log/${entry.id}`, { entry: editText, logDate: editDate });
+      qc.invalidateQueries({ queryKey: [`/api/projects/${projectId}/comments-log`] });
+      setEditing(false);
+      toast({ title: "Entry updated" });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally { setSaving(false); }
+  }
+
+  async function handleDelete() {
+    if (!confirm("Delete this entry? This cannot be undone.")) return;
+    setDeleting(true);
+    try {
+      await apiRequest("DELETE", `/api/comments-log/${entry.id}`);
+      qc.invalidateQueries({ queryKey: [`/api/projects/${projectId}/comments-log`] });
+      toast({ title: "Entry deleted" });
+    } catch (e: any) {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    } finally { setDeleting(false); }
+  }
+
+  if (editing) {
+    return (
+      <div className="rounded-lg px-3 py-2.5 text-[12px] border" style={{ background: "#FFFBF0", borderColor: "#F1D98A" }}>
+        <div className="flex gap-2 mb-1.5">
+          <span className="font-semibold text-pfg-navy">{entry.user || "Unknown"}</span>
+          <input
+            type="date" value={editDate}
+            onChange={e => setEditDate(e.target.value)}
+            className="border rounded px-1.5 py-0.5 text-[11px]" style={{ borderColor: "hsl(var(--border))" }}
+          />
+        </div>
+        <textarea
+          value={editText}
+          onChange={e => setEditText(e.target.value)}
+          rows={3}
+          className="w-full border rounded px-2 py-1.5 text-[12px] resize-none mb-2"
+          style={{ borderColor: "hsl(var(--border))" }}
+        />
+        <div className="flex gap-2">
+          <button onClick={handleSave} disabled={saving}
+            className="px-3 py-1 rounded text-[11px] font-semibold text-white disabled:opacity-50"
+            style={{ background: "var(--pfg-navy)" }}>
+            {saving ? "Saving..." : "Save"}
+          </button>
+          <button onClick={() => setEditing(false)}
+            className="px-3 py-1 rounded text-[11px] font-semibold border"
+            style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-steel)" }}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg px-3 py-2 text-[12px] group" style={{ background: "hsl(var(--muted))" }}>
+      <div className="flex items-center justify-between gap-2 mb-0.5">
+        <div className="flex gap-2">
+          <span className="font-semibold text-pfg-navy">{entry.user || "Unknown"}</span>
+          <span style={{ color: "var(--pfg-steel)" }}>{entry.logDate || entry.date || ""}</span>
+        </div>
+        {canEdit && (
+          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button onClick={() => setEditing(true)}
+              className="p-1 rounded hover:bg-white transition-colors" title="Edit">
+              <Pencil className="w-3 h-3" style={{ color: "var(--pfg-steel)" }} />
+            </button>
+            <button onClick={handleDelete} disabled={deleting}
+              className="p-1 rounded hover:bg-white transition-colors" title="Delete">
+              {deleting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" style={{ color: "#B91C1C" }} />}
+            </button>
+          </div>
+        )}
+      </div>
+      <p>{entry.entry || entry.text}</p>
+    </div>
+  );
+}
+
 function PMReportTab({
   project,
   workers,
@@ -1005,14 +1103,15 @@ function PMReportTab({
           <EmptyState message="No comments logged yet." />
         ) : (
           <div className="space-y-2 max-h-64 overflow-y-auto">
-            {sortedComments.map((c: any, i: number) => (
-              <div key={i} className="rounded-lg px-3 py-2 text-[12px]" style={{ background: "hsl(var(--muted))" }}>
-                <div className="flex gap-2 mb-0.5">
-                  <span className="font-semibold text-pfg-navy">{c.user || "Unknown"}</span>
-                  <span style={{ color: "var(--pfg-steel)" }}>{fmtDate(c.logDate || c.date)}</span>
-                </div>
-                <p>{c.entry || c.text}</p>
-              </div>
+            {sortedComments.map((c: any) => (
+              <CommentLogEntry
+                key={c.id}
+                entry={c}
+                currentUserId={user?.id}
+                currentUserRole={user?.role}
+                projectId={project.id}
+                qc={qc}
+              />
             ))}
           </div>
         )}

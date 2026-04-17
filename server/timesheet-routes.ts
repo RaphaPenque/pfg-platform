@@ -10,6 +10,7 @@ import crypto from "crypto";
 import fs from "fs";
 import path from "path";
 import { sendMail } from "./email";
+import { generateTimesheetPdfHtml } from "./html-pdf";
 
 const APP_URL = process.env.APP_URL || "https://pfg-platform.onrender.com";
 const UPLOAD_ROOT = process.env.UPLOAD_ROOT || "/data/uploads";
@@ -1062,7 +1063,7 @@ export async function generateTimesheetOutputs(weekId: number) {
     // Generate signed timesheet PDF
     const tsFilename = `timesheet-${weekStr}-${weekId}.pdf`;
     const tsPath = path.join(outDir, tsFilename);
-    await generateTimesheetPdf(tw, entries, tsPath);
+    await generateTimesheetPdfHtml(tw, entries, tsPath);
     await db.execute(sql`UPDATE timesheet_weeks SET timesheet_pdf_path = ${tsPath} WHERE id = ${weekId}`);
 
     // Generate billing summary PDF
@@ -1417,33 +1418,49 @@ function buildNotificationEmail(title: string, body: string, url: string, ctaLab
 
 function buildCustomerApprovalEmail(firstName: string, projectName: string, weekComm: string, approvalUrl: string, isReminder = false): string {
   const greeting = firstName ? `Hi ${firstName},` : "Dear Customer Representative,";
-  const subject = isReminder ? "Reminder: Your approval is still awaited" : "Your signature is required";
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8"></head>
-<body style="font-family:Arial,sans-serif;background:#f4f4f5;padding:40px 0;">
-  <div style="max-width:520px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
-    <div style="background:#1A1D23;padding:28px 32px;text-align:center;">
-      <img src="${APP_URL}/logo-gold.png" alt="Powerforce Global" height="36" style="display:block;margin:0 auto;" />
-    </div>
-    <div style="padding:32px;color:#1A1D23;">
-      <h2 style="margin:0 0 8px;font-size:20px;font-weight:700;">${greeting}</h2>
-      <p style="margin:0 0 8px;color:#4b5563;font-size:15px;line-height:1.6;">${subject}</p>
-      <p style="margin:0 0 16px;color:#4b5563;font-size:14px;line-height:1.6;">
-        Please review and approve the timesheet for <strong>${projectName}</strong> — week commencing <strong>${weekComm?.toString().substring(0, 10) || ""}</strong>.
-      </p>
-      <p style="margin:0 0 16px;color:#4b5563;font-size:13px;line-height:1.6;">
-        Click below to view the complete timesheet and either approve it or raise a challenge.
-      </p>
-      <div style="text-align:center;margin:24px 0;">
-        <a href="${approvalUrl}" style="display:inline-block;background:#F5BD00;color:#1A1D23;font-weight:700;font-size:15px;padding:14px 32px;border-radius:8px;text-decoration:none;">Review &amp; Approve Timesheet</a>
-      </div>
-      <p style="margin:16px 0 0;font-size:12px;color:#9ca3af;text-align:center;">
-        This link is personal to you and expires in 48 hours.
-      </p>
-    </div>
-    <div style="padding:16px 32px;font-size:11px;color:#9ca3af;border-top:1px solid #f0f0f0;text-align:center;">
-      &copy; ${new Date().getFullYear()} Powerforce Global &middot; Confidential
-    </div>
-  </div>
+  const weekStr = weekComm?.toString().substring(0, 10) || "";
+  const iconUrl = `${APP_URL}/logo-gold-mark.png`;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#F4F5F7;font-family:'Helvetica Neue',Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F4F5F7;min-height:100vh;"><tr><td align="center" style="padding:40px 16px;">
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:540px;background:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 4px 24px rgba(17,24,39,0.09);">
+      <!-- Header -->
+      <tr><td style="background:#1a2744;padding:20px 32px;border-bottom:3px solid #D4A017;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td><img src="${iconUrl}" alt="Powerforce Global" height="34" style="display:block;height:34px;width:auto;"/></td>
+          <td align="right" style="vertical-align:middle;"><span style="font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.4);">Timesheet ${isReminder ? "Reminder" : "Approval"}</span></td>
+        </tr></table>
+      </td></tr>
+      <!-- Body -->
+      <tr><td style="padding:28px 32px 22px;">
+        <p style="margin:0 0 20px;font-size:19px;font-weight:700;color:#111827;">${greeting}</p>
+        <!-- Project card -->
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#EEF1F7;border-radius:8px;margin-bottom:22px;overflow:hidden;"><tr>
+          <td style="padding:18px 20px;">
+            <p style="margin:0 0 2px;font-size:9px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#6B7C93;">Project</p>
+            <p style="margin:0 0 14px;font-size:16px;font-weight:700;color:#111827;">${projectName}</p>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+              <td width="50%"><p style="margin:0 0 2px;font-size:9px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#6B7C93;">Week Commencing</p><p style="margin:0;font-size:13px;font-weight:600;color:#111827;">${weekStr}</p></td>
+            </tr></table>
+          </td>
+          <td width="4" style="background:#D4A017;">&nbsp;</td>
+        </tr></table>
+        <p style="margin:0 0 20px;font-size:13px;color:#374151;line-height:1.65;">Please review the full timesheet for all personnel and either <strong>approve</strong> it or <strong>raise a challenge</strong> if you have any concerns.</p>
+        <!-- CTA -->
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:22px 0;"><tr><td align="center;">
+          <a href="${approvalUrl}" style="display:inline-block;background:#D4A017;color:#1a2744;font-family:'Helvetica Neue',Arial,sans-serif;font-weight:700;font-size:14px;padding:13px 34px;border-radius:8px;text-decoration:none;">Review &amp; Approve Timesheet &rarr;</a>
+        </td></tr></table>
+        <p style="margin:0;font-size:11px;color:#9CA3AF;line-height:1.6;text-align:center;">This link is personal to you and expires in <strong style="color:#6B7280;">48 hours</strong>.<br>By approving, your name, email, IP address and timestamp will be recorded.</p>
+      </td></tr>
+      <!-- Divider -->
+      <tr><td style="padding:0 32px;"><div style="height:1px;background:#E5E7EB;"></div></td></tr>
+      <!-- Footer -->
+      <tr><td style="padding:16px 32px 20px;"><table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+        <td><p style="margin:0;font-size:11px;color:#9CA3AF;">Sent by <strong style="color:#6B7280;">Powerforce Global</strong><br>&copy; ${new Date().getFullYear()} Powerforce Global &middot; Confidential</p></td>
+        <td align="right"><span style="display:inline-block;background:#EEF1F7;color:#6B7C93;font-size:9px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;padding:4px 8px;border-radius:3px;">Confidential</span></td>
+      </tr></table></td></tr>
+    </table>
+  </td></tr></table>
 </body></html>`;
 }
 

@@ -606,3 +606,173 @@ export async function generateWeeklyReportPdf(data: ReportData): Promise<Buffer>
     }
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Playwright HTML-to-PDF weekly report (replaces Python/ReportLab)
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { renderHtmlToPdf, logoBase64 } from "./html-pdf";
+
+export async function generateWeeklyReportPdfHtml(data: ReportData): Promise<Buffer> {
+  const tmpPath = path.join(os.tmpdir(), `pfg-report-${Date.now()}.pdf`);
+  const iconB64 = logoBase64("logo-gold-mark");
+
+  const oem = data.oemColour || "#005E60";
+  const oemSoft = oem + "18";
+
+  const safetyRows = [
+    { label: "Toolbox Talks", value: data.safetyData.toolboxTalks },
+    { label: "Safety Observations", value: data.safetyData.observations },
+    { label: "Near Misses", value: data.safetyData.nearMisses, warn: data.safetyData.nearMisses > 0 },
+    { label: "Incidents", value: data.safetyData.incidents, warn: data.safetyData.incidents > 0 },
+  ];
+
+  const delaysHtml = data.delaysLog.length === 0
+    ? `<p style="color:#9CA3AF;font-size:11px;padding:12px 0;">No agreed delays recorded this week.</p>`
+    : data.delaysLog.map(d => `
+        <div style="padding:10px 0;border-bottom:1px solid #E5E7EB;">
+          <div style="font-weight:600;font-size:11px;color:#111827;">${d.description}</div>
+          ${d.duration ? `<div style="font-size:10px;color:#6B7280;margin-top:2px;">Duration: ${d.duration}${d.agreedWithCustomer ? " · Customer agreed" : ""}</div>` : ""}
+        </div>`).join("");
+
+  const commentsHtml = data.commentsEntries.length === 0
+    ? `<p style="color:#9CA3AF;font-size:11px;padding:12px 0;">No comments recorded this week.</p>`
+    : data.commentsEntries.map(c => `
+        <div style="padding:10px 0;border-bottom:1px solid #E5E7EB;">
+          <div style="font-size:10px;font-weight:700;color:#6B7C93;margin-bottom:3px;">${c.userName} · ${c.date}</div>
+          <div style="font-size:11px;color:#1F2937;line-height:1.5;">${c.entry}</div>
+        </div>`).join("");
+
+  const teamRows = data.teamMembers.map((m, i) => `
+    <tr>
+      <td style="padding:7px 10px;border:1px solid #E5E7EB;font-weight:600;font-size:10.5px;color:#1a2744;background:${i % 2 === 0 ? "#FAFBFC" : "white"};">${m.name}</td>
+      <td style="padding:7px 8px;border:1px solid #E5E7EB;font-size:10px;color:#6B7280;background:${i % 2 === 0 ? "#FAFBFC" : "white"};">${m.role}</td>
+      <td style="padding:7px 8px;border:1px solid #E5E7EB;font-size:10px;text-align:center;font-weight:600;color:${m.shift?.toLowerCase().startsWith("n") ? "#3730A3" : "#B45309"};background:${i % 2 === 0 ? "#FAFBFC" : "white"};">${m.shift}</td>
+      <td style="padding:7px 8px;border:1px solid #E5E7EB;font-size:10px;text-align:center;background:${i % 2 === 0 ? "#FAFBFC" : "white"};">${m.startDate}</td>
+      <td style="padding:7px 8px;border:1px solid #E5E7EB;font-size:10px;text-align:center;background:${i % 2 === 0 ? "#FAFBFC" : "white"};">${m.endDate}</td>
+    </tr>`).join("");
+
+  const html = `<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:#F8F9FA;color:#111827;font-size:12px;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+.page{max-width:900px;margin:0 auto;background:white;border:1px solid #E5E7EB;}
+.doc-head{display:flex;justify-content:space-between;align-items:flex-start;padding:32px 44px 18px;border-bottom:3px solid #1a2744;}
+.doc-title{font-size:16px;font-weight:700;color:#1a2744;letter-spacing:0.04em;text-transform:uppercase;}
+.doc-meta{font-size:10px;color:#6B7C93;margin-top:4px;}
+.meta-grid{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #E5E7EB;}
+.meta-item{padding:10px 14px;border-right:1px solid #E5E7EB;background:#FAFBFC;}
+.meta-item:last-child{border-right:none;}
+.meta-label{font-size:9px;font-weight:700;color:#6B7C93;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:3px;}
+.meta-value{font-size:11px;font-weight:600;color:#1a2744;}
+.body{padding:24px 44px 36px;}
+.section{margin-bottom:22px;}
+.section-title{font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#6B7C93;margin-bottom:10px;display:flex;align-items:center;gap:10px;}
+.section-title::after{content:"";flex:1;height:1px;background:#E5E7EB;}
+.hs-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+.hs-tile{background:#FAFBFC;border:1px solid #E5E7EB;border-radius:6px;padding:12px 14px;}
+.hs-label{font-size:9px;font-weight:700;color:#6B7C93;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;}
+.hs-value{font-size:22px;font-weight:800;color:#1a2744;line-height:1;}
+.hs-value.warn{color:#B91C1C;}
+.prog-bar-wrap{height:8px;background:#E5E7EB;border-radius:4px;overflow:hidden;margin-top:8px;}
+.prog-bar{height:100%;border-radius:4px;}
+.doc-footer{border-top:1px solid #E5E7EB;padding:10px 44px;display:flex;justify-content:space-between;font-size:9px;color:#9CA3AF;}
+@media print{body{background:white;}.page{border:none;}}
+</style></head><body>
+<div class="page">
+  <div class="doc-head">
+    <img src="${iconB64}" alt="Powerforce Global" style="height:38px;width:auto;display:block;"/>
+    <div style="text-align:right;">
+      <div class="doc-title">Weekly Project Report</div>
+      <div class="doc-meta">Week Commencing ${data.weekStart} &nbsp;·&nbsp; ${data.projectCode}</div>
+    </div>
+  </div>
+
+  <div class="meta-grid">
+    <div class="meta-item"><div class="meta-label">Project</div><div class="meta-value">${data.projectName}</div></div>
+    <div class="meta-item"><div class="meta-label">Customer</div><div class="meta-value">${data.customer}</div></div>
+    <div class="meta-item"><div class="meta-label">Week</div><div class="meta-value">${data.weekStart} – ${data.weekEnd}</div></div>
+    <div class="meta-item"><div class="meta-label">PM</div><div class="meta-value">${data.pmName}</div></div>
+  </div>
+
+  <div class="body">
+
+    <!-- H&S -->
+    <div class="section">
+      <div class="section-title">Health &amp; Safety</div>
+      <div class="hs-grid">
+        ${safetyRows.map(r => `
+          <div class="hs-tile">
+            <div class="hs-label">${r.label}</div>
+            <div class="hs-value${r.warn ? " warn" : ""}">${r.value}</div>
+          </div>`).join("")}
+      </div>
+    </div>
+
+    <!-- Delays -->
+    <div class="section">
+      <div class="section-title">Agreed Delays</div>
+      ${delaysHtml}
+    </div>
+
+    <!-- Comments -->
+    <div class="section">
+      <div class="section-title">Comments &amp; Concerns</div>
+      ${commentsHtml}
+    </div>
+
+    <!-- Workforce -->
+    <div class="section">
+      <div class="section-title">On-Site Workforce (${data.teamMembers.length} personnel)</div>
+      <table style="width:100%;border-collapse:collapse;font-size:10.5px;">
+        <thead>
+          <tr>
+            <th style="background:#1a2744;color:white;padding:8px 10px;text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;">Name</th>
+            <th style="background:#1a2744;color:white;padding:8px 8px;text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;">Role</th>
+            <th style="background:#1a2744;color:white;padding:8px 8px;text-align:center;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;">Shift</th>
+            <th style="background:#1a2744;color:white;padding:8px 8px;text-align:center;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;">From</th>
+            <th style="background:#1a2744;color:white;padding:8px 8px;text-align:center;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;">To</th>
+          </tr>
+        </thead>
+        <tbody>${teamRows}</tbody>
+      </table>
+    </div>
+
+    <!-- Progress -->
+    <div class="section">
+      <div class="section-title">Project Progress</div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;">
+        <div style="flex:1;min-width:120px;background:#FAFBFC;border:1px solid #E5E7EB;border-radius:6px;padding:12px 14px;">
+          <div class="meta-label">Progress</div>
+          <div style="font-size:22px;font-weight:800;color:#1a2744;">${data.progressPct}%</div>
+          <div class="prog-bar-wrap"><div class="prog-bar" style="width:${data.progressPct}%;background:${oem};"></div></div>
+        </div>
+        <div style="flex:1;min-width:120px;background:#FAFBFC;border:1px solid #E5E7EB;border-radius:6px;padding:12px 14px;">
+          <div class="meta-label">Active Team</div>
+          <div style="font-size:22px;font-weight:800;color:#1a2744;">${data.activeTeam}</div>
+          <div style="font-size:10px;color:#6B7280;margin-top:3px;">on site this week</div>
+        </div>
+        <div style="flex:1;min-width:120px;background:#FAFBFC;border:1px solid #E5E7EB;border-radius:6px;padding:12px 14px;">
+          <div class="meta-label">Days Remaining</div>
+          <div style="font-size:22px;font-weight:800;color:#1a2744;">${data.daysRemaining}</div>
+          <div style="font-size:10px;color:#6B7280;margin-top:3px;">calendar days</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /body -->
+
+  <div class="doc-footer">
+    <span>${data.projectName} &nbsp;·&nbsp; ${data.projectCode} &nbsp;·&nbsp; w/c ${data.weekStart}</span>
+    <span>© ${new Date().getFullYear()} Powerforce Global &nbsp;·&nbsp; Confidential</span>
+  </div>
+</div>
+</body></html>`;
+
+  await renderHtmlToPdf(html, tmpPath);
+  const buf = fs.readFileSync(tmpPath);
+  try { fs.unlinkSync(tmpPath); } catch { /* ignore */ }
+  return buf;
+}

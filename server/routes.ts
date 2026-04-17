@@ -1427,6 +1427,29 @@ export function registerRoutes(server: Server, app: Express) {
     res.status(201).json(logEntry);
   });
 
+  app.put("/api/comments-log/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { entry, logDate } = req.body;
+      if (!entry) return res.status(400).json({ error: "entry required" });
+      const updated = await storage.updateCommentsLogEntry(id, entry, logDate);
+      if (!updated) return res.status(404).json({ error: "Entry not found" });
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/comments-log/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteCommentsLogEntry(id);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ===== DELAY APPROVALS =====
   // Public routes — no auth required
   app.get("/api/delay-approval/:token", async (req: Request, res: Response) => {
