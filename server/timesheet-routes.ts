@@ -879,10 +879,11 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
   );
 
   // ── POST /api/internal/send-supervisor-timesheets ── no auth (internal cron)
-  app.post("/api/internal/send-supervisor-timesheets", async (_req: any, res: any) => {
+  app.post("/api/internal/send-supervisor-timesheets", async (req: any, res: any) => {
     try {
-      const result = await sendWeeklySupervisorLinks();
-      return res.json({ ok: true, processed: result.processed });
+      const triggerDate = req.body?.triggerDate ? new Date(req.body.triggerDate) : undefined;
+      const result = await sendWeeklySupervisorLinks(triggerDate);
+      return res.json({ ok: true, processed: result.processed, weekCommencing: result.weekCommencing });
     } catch (e: any) {
       return res.status(500).json({ error: String(e.message || e) });
     }
@@ -1508,18 +1509,22 @@ function buildSupervisorTimesheetEmail(
 // ─── Sunday send: generate & dispatch supervisor timesheet links ─────────────
 
 /** Return the Monday of the NEXT ISO week after triggerDate (or today) */
-function nextMondayAfter(triggerDate?: Date): Date {
+function previousMondayBefore(triggerDate?: Date): Date {
+  // Sunday send: return the Monday that started the week just finished
+  // e.g. triggered Sunday 19 Apr → returns Monday 13 Apr
   const base = triggerDate ? new Date(triggerDate) : new Date();
   base.setUTCHours(0, 0, 0, 0);
-  // Move to next Monday
-  const day = base.getUTCDay(); // 0=Sun
-  const daysUntilMonday = day === 0 ? 1 : 8 - day;
-  base.setUTCDate(base.getUTCDate() + daysUntilMonday);
+  const day = base.getUTCDay(); // 0=Sun, 1=Mon...
+  // If Sunday (0): go back 6 days to previous Monday
+  // If any other day: go back to the Monday of the current week
+  const daysBack = day === 0 ? 6 : day - 1;
+  base.setUTCDate(base.getUTCDate() - daysBack);
   return base;
 }
 
-export async function sendWeeklySupervisorLinks(triggerDate?: Date): Promise<{ processed: number }> {
+export async function sendWeeklySupervisorLinks(triggerDate?: Date): Promise<{ processed: number; weekCommencing?: string }> {
   let processed = 0;
+  let weekCommencing: string | undefined;
   try {
     // 1. Get all active projects
     const projRes = await db.execute(sql`
@@ -1531,8 +1536,9 @@ export async function sendWeeklySupervisorLinks(triggerDate?: Date): Promise<{ p
       return { processed: 0 };
     }
 
-    const nextMonday = nextMondayAfter(triggerDate);
-    const weekComm = isoDate(nextMonday);
+    const prevMonday = previousMondayBefore(triggerDate);
+    const weekComm = isoDate(prevMonday);
+    weekCommencing = weekComm;
     console.log(`[supervisor-links] Sending for week commencing ${weekComm}, ${projects.length} active projects`);
 
     for (const project of projects) {
