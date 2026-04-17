@@ -95,7 +95,7 @@ export async function buildTimesheetEntries(projectId: number) {
 
     // Get all active assignments for this project
     const asRes = await db.execute(sql`
-      SELECT a.id, a.worker_id, a.shift, a.start_date, a.end_date, w.name as worker_name
+      SELECT a.id, a.worker_id, a.shift, a.start_date, a.end_date, REGEXP_REPLACE(w.name, ' \([^)]*\)$', '') as worker_name
       FROM assignments a
       JOIN workers w ON w.id = a.worker_id
       WHERE a.project_id = ${projectId}
@@ -331,7 +331,7 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
       if (isNaN(weekId)) return res.status(400).json({ error: "Invalid week ID" });
         try {
         const r = await db.execute(sql`
-          SELECT e.*, w.name as worker_name, w.role as worker_role, w.cost_centre
+          SELECT e.*, REGEXP_REPLACE(w.name, ' \([^)]*\)$', '') as worker_name, w.role as worker_role, w.cost_centre
           FROM timesheet_entries e
           JOIN workers w ON w.id = e.worker_id
           WHERE e.timesheet_week_id = ${weekId}
@@ -608,7 +608,7 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
       }
 
       const entriesRes = await db.execute(sql`
-        SELECT e.*, w.name as worker_name, w.role as worker_role
+        SELECT e.*, REGEXP_REPLACE(w.name, ' \([^)]*\)$', '') as worker_name, w.role as worker_role
         FROM timesheet_entries e
         JOIN workers w ON w.id = e.worker_id
         WHERE e.timesheet_week_id = ${tw.id}
@@ -913,7 +913,7 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
 
       // Fetch entries scoped to this shift
       const entriesRes = await db.execute(sql`
-        SELECT e.*, w.name as worker_name, w.role as worker_role
+        SELECT e.*, REGEXP_REPLACE(w.name, ' \([^)]*\)$', '') as worker_name, w.role as worker_role
         FROM timesheet_entries e
         JOIN workers w ON w.id = e.worker_id
         WHERE e.timesheet_week_id = ${week.id}
@@ -1044,7 +1044,7 @@ export async function generateTimesheetOutputs(weekId: number) {
     if (!tw) return;
 
     const entriesRes = await db.execute(sql`
-      SELECT e.*, w.name as worker_name, w.role as worker_role, w.cost_centre
+      SELECT e.*, REGEXP_REPLACE(w.name, ' \([^)]*\)$', '') as worker_name, w.role as worker_role, w.cost_centre
       FROM timesheet_entries e
       JOIN workers w ON w.id = e.worker_id
       WHERE e.timesheet_week_id = ${weekId}
@@ -1563,7 +1563,7 @@ export async function sendWeeklySupervisorLinks(triggerDate?: Date): Promise<{ p
 
         // 4. Find day shift supervisor (Superintendent > Foreman)
         const dayWorkersRes = await db.execute(sql`
-          SELECT w.id, w.name, w.role,
+          SELECT w.id, REGEXP_REPLACE(w.name, ' \([^)]*\)$', '') as name, w.role,
                  COALESCE(w.work_email, w.personal_email) as email
           FROM assignments a
           JOIN workers w ON w.id = a.worker_id
@@ -1578,7 +1578,7 @@ export async function sendWeeklySupervisorLinks(triggerDate?: Date): Promise<{ p
 
         // 5. Find night shift workers
         const nightWorkersRes = await db.execute(sql`
-          SELECT w.id, w.name, w.role,
+          SELECT w.id, REGEXP_REPLACE(w.name, ' \([^)]*\)$', '') as name, w.role,
                  COALESCE(w.work_email, w.personal_email) as email
           FROM assignments a
           JOIN workers w ON w.id = a.worker_id

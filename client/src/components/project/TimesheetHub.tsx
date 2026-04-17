@@ -470,14 +470,27 @@ function SupervisorGrid({ week, entries, userRole, onRefresh }: {
     onError: (e: any) => toast({ title: "Update failed", description: e.message, variant: "destructive" }),
   });
 
+  // Strip cost-centre suffixes from worker names e.g. "Pablo Gomez (PFG SP)" → "Pablo Gomez"
+  const cleanName = (n: string) => n?.replace(/\s*\([^)]*\)\s*$/, "").trim() || n;
+
+  // Role sort order — Superintendent first, then hierarchy down
+  const ROLE_ORDER = ["Superintendent","Foreman","Lead Technician","Technician 2","Technician 1","HSE Officer","Rigger","Crane Driver","Welder","I&C Technician","Electrician","Apprentice"];
+
   // Build worker map
   const workerMap = new Map<number, { name: string; role: string; entries: TimesheetEntry[] }>();
   for (const e of entries) {
     if (!workerMap.has(e.worker_id)) {
-      workerMap.set(e.worker_id, { name: e.worker_name, role: e.worker_role, entries: [] });
+      workerMap.set(e.worker_id, { name: cleanName(e.worker_name), role: e.worker_role, entries: [] });
     }
     workerMap.get(e.worker_id)!.entries.push(e);
   }
+
+  // Sort by role hierarchy
+  const sortedWorkers = Array.from(workerMap.values()).sort((a, b) => {
+    const ra = ROLE_ORDER.indexOf(a.role || "");
+    const rb = ROLE_ORDER.indexOf(b.role || "");
+    return (ra === -1 ? 99 : ra) - (rb === -1 ? 99 : rb);
+  });
 
   const dates = weekDates(week.week_commencing);
 
@@ -521,7 +534,7 @@ function SupervisorGrid({ week, entries, userRole, onRefresh }: {
             </tr>
           </thead>
           <tbody>
-            {Array.from(workerMap.values()).map((worker, wi) => {
+            {sortedWorkers.map((worker, wi) => {
               const totalHours = worker.entries.reduce((sum, e) => sum + (parseFloat(e.total_hours || "0") || 0), 0);
               return (
                 <tr key={wi} style={{ borderBottom: "1px solid hsl(var(--border))" }}>
