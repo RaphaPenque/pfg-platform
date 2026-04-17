@@ -1149,7 +1149,7 @@ export default function ProjectHubDetail({ params }: { params: { code: string } 
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState("overview");
   const [cancelling, setCancelling] = useState(false);
-  const canEdit = user?.role === "admin" || user?.role === "resource_manager";
+  const canEdit = user?.role === "admin" || user?.role === "resource_manager" || user?.role === "project_manager";
 
   const project = useMemo(
     () => data?.projects.find(p => p.code === params.code) || null,
