@@ -389,7 +389,7 @@ function PMReportTab({
       try {
         const payload = {
           projectId: project.id,
-          date: selectedDate,
+          reportDate: selectedDate,
           completedTasks,
           delaysLog,
           toolingItems,
