@@ -593,13 +593,11 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                         const personName = row.assignedWorker ? cleanName(row.assignedWorker.name) : null;
                         const roleName = row.slot.role;
                         const isFilled = row.filled;
-                        // Use periods for multi-bar, fallback to single assignment dates
-                        const barsToRender: Array<{ start: string; end: string }> = isFilled && row.assignment?.periods && row.assignment.periods.length > 0
-                          ? row.assignment.periods.map((p: any) => ({ start: p.startDate, end: p.endDate }))
-                          : [{
-                              start: isFilled && row.assignment?.startDate ? row.assignment.startDate : row.slot.startDate,
-                              end: isFilled && row.assignment?.endDate ? row.assignment.endDate : row.slot.endDate,
-                            }];
+                        // Bars come from slot periods — same for filled and unfilled
+                        const slotPeriods = (row.slot as any).periods as Array<{ startDate: string; endDate: string }> | undefined;
+                        const barsToRender: Array<{ start: string; end: string }> = slotPeriods && slotPeriods.length > 0
+                          ? slotPeriods.map(p => ({ start: p.startDate, end: p.endDate }))
+                          : [{ start: row.slot.startDate, end: row.slot.endDate }];
                         const barStart = barsToRender[0].start;
                         const barEnd = barsToRender[barsToRender.length - 1].end;
 

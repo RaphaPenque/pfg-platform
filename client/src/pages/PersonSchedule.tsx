@@ -40,6 +40,7 @@ const STATUS_FILTERS: { key: ProjectStatus; label: string }[] = [
 
 export default function PersonSchedule() {
   const { data, isLoading } = useDashboardData();
+  const allRoleSlots = data?.roleSlots || [];
   const [search, setSearch] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
   const [activeStatusFilters, setActiveStatusFilters] = useState<Set<ProjectStatus>>(() => new Set<ProjectStatus>(["active"]));
@@ -296,6 +297,7 @@ export default function PersonSchedule() {
                     todayDayFrac={todayDayFrac}
                     visibleProjectIds={visibleProjectIds}
                     projectMap={projectMap}
+                    allRoleSlots={allRoleSlots}
                   />
                 ))
               )}
@@ -313,12 +315,14 @@ function PersonRow({
   todayDayFrac,
   visibleProjectIds,
   projectMap,
+  allRoleSlots,
 }: {
   worker: DashboardWorker;
   todayMonth: number;
   todayDayFrac: number;
   visibleProjectIds: Set<number>;
   projectMap: Record<number, { customer: string | null; code: string }>;
+  allRoleSlots: any[];
 }) {
   const util = calcUtilisation(worker.assignments);
   const utilColor = util.pct >= 80 ? "var(--green)" : util.pct >= 50 ? "var(--amber)" : "var(--red)";
@@ -326,14 +330,16 @@ function PersonRow({
   // Only show bars for assignments in visible projects
   const visibleAssignments = worker.assignments.filter((a) => visibleProjectIds.has(a.projectId));
 
-  // Build assignment bars per month — one bar per period (or one bar per assignment if no periods)
+  // Build assignment bars — one bar per role slot period
   const assignmentBars = visibleAssignments.flatMap((a) => {
     const proj = projectMap[a.projectId];
     const color = proj ? getProjectColorFromProject(proj) : getProjectColor(a.projectCode);
     const isFlagged = a.status === "flagged";
-
-    const periodsToRender = (a.periods && a.periods.length > 0)
-      ? a.periods
+    // Find the role slot for this assignment
+    const slot = allRoleSlots.find((s: any) => s.id === a.roleSlotId);
+    const slotPeriods = slot?.periods as Array<{ startDate: string; endDate: string }> | undefined;
+    const periodsToRender = (slotPeriods && slotPeriods.length > 0)
+      ? slotPeriods
       : [{ startDate: a.startDate, endDate: a.endDate }];
 
     return periodsToRender.map((period: any, pIdx: number) => {
@@ -452,7 +458,7 @@ function PersonRow({
                   >
                     <div className="font-semibold">{bar.assignment.projectCode} — {bar.assignment.projectName}</div>
                     <div className="opacity-80 mt-0.5">
-                      {bar.assignment.task || "—"} · {bar.periodStart || bar.assignment.startDate} → {bar.periodEnd || bar.assignment.endDate}{(bar.assignment.periods?.length ?? 0) > 1 ? ` (Period ${bar.periodIndex + 1})` : ""}
+                      {bar.assignment.task || "—"} · {bar.periodStart || bar.assignment.startDate} → {bar.periodEnd || bar.assignment.endDate}{bar.periodIndex > 0 ? ` (Period ${bar.periodIndex + 1})` : ""}
                     </div>
                   </div>
                 </div>

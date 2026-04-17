@@ -1284,6 +1284,7 @@ export default function ProjectHubDetail({ params }: { params: { code: string } 
             project={project} 
             workers={data?.workers || []} 
             assignments={assignments}
+            roleSlots={data?.roleSlots || []}
             user={user}
           />
         )}

@@ -196,20 +196,19 @@ export function sortSlots<T extends { role: string; shift?: string }>(slots: T[]
   });
 }
 
-// ── Assignment Period Helpers ──────────────────────────────────────────────
+// ── Availability Helpers ──────────────────────────────────────────────────
 
 type Period = { startDate: string; endDate: string };
 
-/** Returns true if any of the assignment's periods cover the given date */
+/** Returns true if the assignment is active on a given date, using slot periods if available */
 export function workerOnSiteOnDate(
-  assignment: { startDate?: string | null; endDate?: string | null; periods?: Period[] },
-  date: string
+  assignment: { startDate?: string | null; endDate?: string | null },
+  date: string,
+  slotPeriods?: Period[]
 ): boolean {
-  const periods = assignment.periods;
-  if (periods && periods.length > 0) {
-    return periods.some(p => p.startDate <= date && p.endDate >= date);
+  if (slotPeriods && slotPeriods.length > 0) {
+    return slotPeriods.some(p => p.startDate <= date && p.endDate >= date);
   }
-  // Fallback to assignment-level dates (pre-migration or missing periods)
   const s = assignment.startDate;
   const e = assignment.endDate;
   if (s && date < s) return false;
@@ -217,10 +216,11 @@ export function workerOnSiteOnDate(
   return true;
 }
 
-/** Returns true if any of the assignment's periods overlap with today */
+/** Returns true if the assignment is active today. Pass slotPeriods for period-aware check. */
 export function isCurrentlyActive(
-  assignment: { startDate?: string | null; endDate?: string | null; periods?: Period[] }
+  assignment: { startDate?: string | null; endDate?: string | null },
+  slotPeriods?: Period[]
 ): boolean {
   const today = new Date().toISOString().split('T')[0];
-  return workerOnSiteOnDate(assignment, today);
+  return workerOnSiteOnDate(assignment, today, slotPeriods);
 }

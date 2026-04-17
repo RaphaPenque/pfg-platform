@@ -127,21 +127,21 @@ export const insertAssignmentSchema = createInsertSchema(assignments).omit({ id:
 export type InsertAssignment = z.infer<typeof insertAssignmentSchema>;
 export type Assignment = typeof assignments.$inferSelect;
 
-// ===== ASSIGNMENT PERIODS =====
-export const assignmentPeriods = pgTable("assignment_periods", {
+// ===== ROLE SLOT PERIODS =====
+// A role slot can have multiple active windows (e.g. initial mob + remob after a gap)
+export const roleSlotPeriods = pgTable("role_slot_periods", {
   id: serial("id").primaryKey(),
-  assignmentId: integer("assignment_id").notNull().references(() => assignments.id, { onDelete: "cascade" }),
-  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }), // denormalised for fast availability queries
-  workerId: integer("worker_id").notNull().references(() => workers.id, { onDelete: "cascade" }), // denormalised
+  roleSlotId: integer("role_slot_id").notNull().references(() => roleSlots.id, { onDelete: "cascade" }),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }), // denormalised
   startDate: text("start_date").notNull(),
   endDate: text("end_date").notNull(),
   periodType: text("period_type").notNull().default("initial"), // "initial" | "remob"
   notes: text("notes"),
   createdAt: timestamp("created_at").defaultNow(),
 });
-export const insertAssignmentPeriodSchema = createInsertSchema(assignmentPeriods).omit({ id: true, createdAt: true });
-export type AssignmentPeriod = typeof assignmentPeriods.$inferSelect;
-export type InsertAssignmentPeriod = z.infer<typeof insertAssignmentPeriodSchema>;
+export const insertRoleSlotPeriodSchema = createInsertSchema(roleSlotPeriods).omit({ id: true, createdAt: true });
+export type RoleSlotPeriod = typeof roleSlotPeriods.$inferSelect;
+export type InsertRoleSlotPeriod = z.infer<typeof insertRoleSlotPeriodSchema>;
 
 // ===== DOCUMENTS =====
 export const documents = pgTable("documents", {

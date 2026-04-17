@@ -25,6 +25,7 @@ interface DailyReportHubProps {
   project: DashboardProject;
   workers: DashboardWorker[];
   assignments: DashboardAssignment[];
+  roleSlots?: any[];
   user: any;
 }
 
@@ -246,11 +247,13 @@ function PMReportTab({
   project,
   workers,
   assignments,
+  roleSlots,
   user,
 }: {
   project: DashboardProject;
   workers: DashboardWorker[];
   assignments: DashboardAssignment[];
+  roleSlots?: any[];
   user: any;
 }) {
   const { toast } = useToast();
@@ -351,10 +354,12 @@ function PMReportTab({
     const active = assignments.filter(
       (a) => a.projectId === project.id && ["active", "confirmed", "pending_confirmation"].includes(a.status || "")
     );
-    // Filter to workers on site on selectedDate — use periods if available
+    // Filter to workers on site on selectedDate — use the role slot's periods
     const onSite = active.filter((a) => {
-      if (a.periods && a.periods.length > 0) {
-        return a.periods.some((p: any) => p.startDate <= selectedDate && p.endDate >= selectedDate);
+      const slot = roleSlots?.find((s: any) => s.id === a.roleSlotId);
+      const slotPeriods = slot?.periods as Array<{ startDate: string; endDate: string }> | undefined;
+      if (slotPeriods && slotPeriods.length > 0) {
+        return slotPeriods.some(p => p.startDate <= selectedDate && p.endDate >= selectedDate);
       }
       // Fallback to assignment-level dates
       const start = a.startDate ? a.startDate.slice(0, 10) : null;
@@ -2396,7 +2401,7 @@ function SafetyKPIsTab({ project }: { project: DashboardProject }) {
 // MAIN COMPONENT
 // ════════════════════════════════════════════════════════════════════
 
-export default function DailyReportHub({ project, workers, assignments, user }: DailyReportHubProps) {
+export default function DailyReportHub({ project, workers, assignments, roleSlots, user }: DailyReportHubProps) {
   const [activeSubTab, setActiveSubTab] = useState("pm");
 
   return (
@@ -2422,7 +2427,7 @@ export default function DailyReportHub({ project, workers, assignments, user }: 
 
       {/* Sub-tab content */}
       {activeSubTab === "pm" && (
-        <PMReportTab project={project} workers={workers} assignments={assignments} user={user} />
+        <PMReportTab project={project} workers={workers} assignments={assignments} roleSlots={roleSlots} user={user} />
       )}
       {activeSubTab === "supervisor" && (
         <SupervisorReportsTab project={project} workers={workers} assignments={assignments} user={user} />

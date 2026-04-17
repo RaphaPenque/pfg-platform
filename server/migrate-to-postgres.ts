@@ -403,13 +403,15 @@ export async function runSchemaUpdates() {
     // Back-dated entries support
     await db.execute(sql`ALTER TABLE comments_log ADD COLUMN IF NOT EXISTS log_date TEXT`);
 
-    // ── Assignment Periods ────────────────────────────────────────────────────
+    // ── Role Slot Periods ──────────────────────────────────────────────────
+    // Drop assignment_periods if it was created in a previous deploy
+    await db.execute(sql`DROP TABLE IF EXISTS assignment_periods`);
+
     await db.execute(sql`
-      CREATE TABLE IF NOT EXISTS assignment_periods (
+      CREATE TABLE IF NOT EXISTS role_slot_periods (
         id SERIAL PRIMARY KEY,
-        assignment_id INTEGER NOT NULL REFERENCES assignments(id) ON DELETE CASCADE,
+        role_slot_id INTEGER NOT NULL REFERENCES role_slots(id) ON DELETE CASCADE,
         project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-        worker_id INTEGER NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
         start_date TEXT NOT NULL,
         end_date TEXT NOT NULL,
         period_type TEXT NOT NULL DEFAULT 'initial',
@@ -418,22 +420,21 @@ export async function runSchemaUpdates() {
       )
     `);
 
-    // Seed existing assignment startDate/endDate into assignment_periods (idempotent)
+    // Seed existing role_slot startDate/endDate as the initial period (idempotent)
     await db.execute(sql`
-      INSERT INTO assignment_periods (assignment_id, project_id, worker_id, start_date, end_date, period_type)
+      INSERT INTO role_slot_periods (role_slot_id, project_id, start_date, end_date, period_type)
       SELECT
-        a.id,
-        a.project_id,
-        a.worker_id,
-        a.start_date,
-        a.end_date,
+        rs.id,
+        rs.project_id,
+        rs.start_date,
+        rs.end_date,
         'initial'
-      FROM assignments a
+      FROM role_slots rs
       WHERE
-        a.start_date IS NOT NULL
-        AND a.end_date IS NOT NULL
+        rs.start_date IS NOT NULL
+        AND rs.end_date IS NOT NULL
         AND NOT EXISTS (
-          SELECT 1 FROM assignment_periods ap WHERE ap.assignment_id = a.id
+          SELECT 1 FROM role_slot_periods rsp WHERE rsp.role_slot_id = rs.id
         )
     `);
 

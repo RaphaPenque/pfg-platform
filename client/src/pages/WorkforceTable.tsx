@@ -2044,6 +2044,7 @@ export default function WorkforceTable() {
   const { user: authUser } = useAuth();
   const canAddWorker = authUser?.role === "admin" || authUser?.role === "resource_manager";
   const { data, isLoading } = useDashboardData();
+  const roleSlots = data?.roleSlots || [];
   const [search, setSearch] = useState("");
   const [filterRole, setFilterRole] = useState<string[]>([]);
   const [filterStatus, setFilterStatus] = useState<string[]>([]);
@@ -2139,10 +2140,12 @@ export default function WorkforceTable() {
   const totalTemp = workers.filter(w => w.status === "Temp").length;
   const isAssigned = (a: DashboardAssignment) => a.status === "active" || a.status === "flagged" || a.status === "confirmed" || a.status === "pending_confirmation";
   const today = new Date().toISOString().split("T")[0];
-  // Current active assignments — use periods for date check
-  const isCurrentlyAssigned = (w: any) => w.assignments.some((a: DashboardAssignment) =>
-    isAssigned(a) && isCurrentlyActive(a)
-  );
+  // Current active assignments — use slot periods for date check
+  const isCurrentlyAssigned = (w: any) => w.assignments.some((a: DashboardAssignment) => {
+    if (!isAssigned(a)) return false;
+    const slot = roleSlots.find(s => s.id === a.roleSlotId);
+    return isCurrentlyActive(a, slot?.periods);
+  });
   const fteOnProject = workers.filter(w => w.status === "FTE" && isCurrentlyAssigned(w)).length;
   const tempOnProject = workers.filter(w => w.status !== "FTE" && isCurrentlyAssigned(w)).length;
   const availFte = workers.filter(w => w.status === "FTE" && !isCurrentlyAssigned(w)).length;
@@ -2304,10 +2307,11 @@ export default function WorkforceTable() {
               const rows = sorted.map(w => {
                 const util = calcUtilisation(w.assignments);
                 const today = new Date().toISOString().split("T")[0];
-                const activeAssignment = w.assignments.find((a: DashboardAssignment) =>
-                  (a.status === "active" || a.status === "flagged" || a.status === "confirmed" || a.status === "pending_confirmation") &&
-                  isCurrentlyActive(a)
-                );
+                const activeAssignment = w.assignments.find((a: DashboardAssignment) => {
+                  if (!(a.status === "active" || a.status === "flagged" || a.status === "confirmed" || a.status === "pending_confirmation")) return false;
+                  const slot = roleSlots.find(s => s.id === a.roleSlotId);
+                  return isCurrentlyActive(a, slot?.periods);
+                });
                 const availabilityLabel = w.status === "FTE" ? "Available" : "Potentially Available";
                 const assignmentLabel = activeAssignment
                   ? activeAssignment.status === "pending_confirmation"
@@ -2401,10 +2405,11 @@ export default function WorkforceTable() {
                 sorted.map(w => {
                   const isExpanded = expandedId === w.id;
                   const today = new Date().toISOString().split("T")[0];
-                const activeAssignment = w.assignments.find((a: DashboardAssignment) =>
-                  (a.status === "active" || a.status === "flagged" || a.status === "confirmed" || a.status === "pending_confirmation") &&
-                  isCurrentlyActive(a)
-                );
+                const activeAssignment = w.assignments.find((a: DashboardAssignment) => {
+                  if (!(a.status === "active" || a.status === "flagged" || a.status === "confirmed" || a.status === "pending_confirmation")) return false;
+                  const slot = roleSlots.find(s => s.id === a.roleSlotId);
+                  return isCurrentlyActive(a, slot?.periods);
+                });
                 const availabilityLabel = w.status === "FTE" ? "Available" : "Potentially Available";
                   const hasFlagged = w.assignments.some(a => a.status === "flagged");
                   const isPendingConfirmation = activeAssignment?.status === "pending_confirmation";

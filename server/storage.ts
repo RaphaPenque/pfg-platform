@@ -2,7 +2,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { eq, and, gt, desc, sql } from "drizzle-orm";
 import {
-  workers, projects, assignments, assignmentPeriods, documents, oemTypes, roleSlots,
+  workers, projects, assignments, roleSlotPeriods, documents, oemTypes, roleSlots,
   users, sessions, magicLinks, auditLogs, projectLeads, payrollRules,
   workExperience, oemExperience,
   workPackages, dailyReports, dailyReportWpProgress, commentsLog, delayApprovals,
@@ -12,7 +12,7 @@ import {
   type Worker, type InsertWorker,
   type Project, type InsertProject,
   type Assignment, type InsertAssignment,
-  type AssignmentPeriod, type InsertAssignmentPeriod,
+  type RoleSlotPeriod, type InsertRoleSlotPeriod,
   type Document, type InsertDocument,
   type OemType, type InsertOemType,
   type RoleSlot, type InsertRoleSlot,
@@ -180,15 +180,15 @@ export interface IStorage {
   createSupervisorReport(data: InsertSupervisorReport): Promise<SupervisorReport>;
   updateSupervisorReport(id: number, data: Partial<InsertSupervisorReport>): Promise<SupervisorReport | undefined>;
 
-  // Assignment Periods
-  getAssignmentPeriods(assignmentId: number): Promise<AssignmentPeriod[]>;
-  getAssignmentPeriodsByWorker(workerId: number): Promise<AssignmentPeriod[]>;
-  getAssignmentPeriodsByProject(projectId: number): Promise<AssignmentPeriod[]>;
-  createAssignmentPeriod(data: InsertAssignmentPeriod): Promise<AssignmentPeriod>;
-  updateAssignmentPeriod(id: number, data: Partial<InsertAssignmentPeriod>): Promise<AssignmentPeriod | undefined>;
-  deleteAssignmentPeriod(id: number): Promise<void>;
-  recomputeAssignmentDates(assignmentId: number): Promise<void>;
-  getAllAssignmentPeriods(): Promise<AssignmentPeriod[]>;
+  // Role Slot Periods
+  getRoleSlotPeriods(roleSlotId: number): Promise<RoleSlotPeriod[]>;
+  getRoleSlotPeriodsByProject(projectId: number): Promise<RoleSlotPeriod[]>;
+  getAllRoleSlotPeriods(): Promise<RoleSlotPeriod[]>;
+  createRoleSlotPeriod(data: InsertRoleSlotPeriod): Promise<RoleSlotPeriod>;
+  updateRoleSlotPeriod(id: number, data: Partial<InsertRoleSlotPeriod>): Promise<RoleSlotPeriod | undefined>;
+  deleteRoleSlotPeriod(id: number): Promise<void>;
+  recomputeRoleSlotDates(roleSlotId: number): Promise<void>;
+  getWorkerActivePeriodsOnDate(workerId: number, date: string): Promise<RoleSlotPeriod[]>;
   getSupervisorReportReplies(reportId: number): Promise<SupervisorReportReply[]>;
   createSupervisorReportReply(data: { reportId: number; authorId: number; message: string }): Promise<SupervisorReportReply>;
 
@@ -743,58 +743,66 @@ export class PostgresStorage implements IStorage {
     return row;
   }
 
-  // ── Assignment Periods ──────────────────────────────────────────────────
-  async getAssignmentPeriods(assignmentId: number): Promise<AssignmentPeriod[]> {
-    return db.select().from(assignmentPeriods)
-      .where(eq(assignmentPeriods.assignmentId, assignmentId))
-      .orderBy(assignmentPeriods.startDate);
+  // ── Role Slot Periods ─────────────────────────────────────────────────
+  async getRoleSlotPeriods(roleSlotId: number): Promise<RoleSlotPeriod[]> {
+    return db.select().from(roleSlotPeriods)
+      .where(eq(roleSlotPeriods.roleSlotId, roleSlotId))
+      .orderBy(roleSlotPeriods.startDate);
   }
 
-  async getAssignmentPeriodsByWorker(workerId: number): Promise<AssignmentPeriod[]> {
-    return db.select().from(assignmentPeriods)
-      .where(eq(assignmentPeriods.workerId, workerId))
-      .orderBy(assignmentPeriods.startDate);
+  async getRoleSlotPeriodsByProject(projectId: number): Promise<RoleSlotPeriod[]> {
+    return db.select().from(roleSlotPeriods)
+      .where(eq(roleSlotPeriods.projectId, projectId))
+      .orderBy(roleSlotPeriods.startDate);
   }
 
-  async getAssignmentPeriodsByProject(projectId: number): Promise<AssignmentPeriod[]> {
-    return db.select().from(assignmentPeriods)
-      .where(eq(assignmentPeriods.projectId, projectId))
-      .orderBy(assignmentPeriods.startDate);
+  async getAllRoleSlotPeriods(): Promise<RoleSlotPeriod[]> {
+    return db.select().from(roleSlotPeriods).orderBy(roleSlotPeriods.startDate);
   }
 
-  async getAllAssignmentPeriods(): Promise<AssignmentPeriod[]> {
-    return db.select().from(assignmentPeriods).orderBy(assignmentPeriods.startDate);
-  }
-
-  async createAssignmentPeriod(data: InsertAssignmentPeriod): Promise<AssignmentPeriod> {
-    const [row] = await db.insert(assignmentPeriods).values(data).returning();
-    await this.recomputeAssignmentDates(data.assignmentId);
+  async createRoleSlotPeriod(data: InsertRoleSlotPeriod): Promise<RoleSlotPeriod> {
+    const [row] = await db.insert(roleSlotPeriods).values(data).returning();
+    await this.recomputeRoleSlotDates(data.roleSlotId);
     return row;
   }
 
-  async updateAssignmentPeriod(id: number, data: Partial<InsertAssignmentPeriod>): Promise<AssignmentPeriod | undefined> {
-    const [row] = await db.update(assignmentPeriods).set(data).where(eq(assignmentPeriods.id, id)).returning();
-    if (row) await this.recomputeAssignmentDates(row.assignmentId);
+  async updateRoleSlotPeriod(id: number, data: Partial<InsertRoleSlotPeriod>): Promise<RoleSlotPeriod | undefined> {
+    const [row] = await db.update(roleSlotPeriods).set(data).where(eq(roleSlotPeriods.id, id)).returning();
+    if (row) await this.recomputeRoleSlotDates(row.roleSlotId);
     return row;
   }
 
-  async deleteAssignmentPeriod(id: number): Promise<void> {
-    const [row] = await db.select().from(assignmentPeriods).where(eq(assignmentPeriods.id, id)).limit(1);
+  async deleteRoleSlotPeriod(id: number): Promise<void> {
+    const [row] = await db.select().from(roleSlotPeriods).where(eq(roleSlotPeriods.id, id)).limit(1);
     if (row) {
-      await db.delete(assignmentPeriods).where(eq(assignmentPeriods.id, id));
-      await this.recomputeAssignmentDates(row.assignmentId);
+      await db.delete(roleSlotPeriods).where(eq(roleSlotPeriods.id, id));
+      await this.recomputeRoleSlotDates(row.roleSlotId);
     }
   }
 
-  /** Recompute the assignment's startDate/endDate cache from its periods */
-  async recomputeAssignmentDates(assignmentId: number): Promise<void> {
-    const periods = await this.getAssignmentPeriods(assignmentId);
+  /** Recompute the role slot's startDate/endDate cache from its periods */
+  async recomputeRoleSlotDates(roleSlotId: number): Promise<void> {
+    const periods = await this.getRoleSlotPeriods(roleSlotId);
     if (periods.length === 0) return;
     const earliest = periods.reduce((min, p) => p.startDate < min ? p.startDate : min, periods[0].startDate);
     const latest = periods.reduce((max, p) => p.endDate > max ? p.endDate : max, periods[0].endDate);
-    await db.update(assignments)
+    await db.update(roleSlots)
       .set({ startDate: earliest, endDate: latest })
-      .where(eq(assignments.id, assignmentId));
+      .where(eq(roleSlots.id, roleSlotId));
+  }
+
+  /** Get all role slot periods where a worker is assigned and active on a given date */
+  async getWorkerActivePeriodsOnDate(workerId: number, date: string): Promise<RoleSlotPeriod[]> {
+    const workerAssignments = await this.getAssignmentsByWorker(workerId);
+    const slotIds = workerAssignments
+      .filter(a => a.roleSlotId && ['active','confirmed','pending_confirmation'].includes(a.status || ''))
+      .map(a => a.roleSlotId!);
+    if (slotIds.length === 0) return [];
+    const allPeriods = await this.getAllRoleSlotPeriods();
+    return allPeriods.filter(p =>
+      slotIds.includes(p.roleSlotId) &&
+      p.startDate <= date && p.endDate >= date
+    );
   }
 
   async updateSupervisorReport(id: number, data: Partial<InsertSupervisorReport>): Promise<SupervisorReport | undefined> {

@@ -80,7 +80,6 @@ export interface DashboardAssignment {
   equipmentType?: string | null;
   scopeOfWork?: string | null;
   siteName?: string | null;
-  periods?: Array<{ id: number; startDate: string; endDate: string; periodType: string; notes?: string | null }>;
 }
 
 export interface DashboardProject {
@@ -110,6 +109,16 @@ export interface DashboardProject {
   timesheetSignatoryEmail: string | null;
 }
 
+export interface RoleSlotPeriod {
+  id: number;
+  roleSlotId: number;
+  projectId: number;
+  startDate: string;
+  endDate: string;
+  periodType: string;
+  notes?: string | null;
+}
+
 export interface DashboardRoleSlot {
   id: number;
   projectId: number;
@@ -120,6 +129,7 @@ export interface DashboardRoleSlot {
   shift: string;
   projectCode: string;
   projectName: string;
+  periods?: RoleSlotPeriod[];
 }
 
 export interface DashboardData {
