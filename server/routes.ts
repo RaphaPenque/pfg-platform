@@ -1509,11 +1509,10 @@ export function registerRoutes(server: Server, app: Express) {
   // ===== SUPERVISOR REPORTS =====
 
   // Multer config for project-scoped uploads
-  const projectUpload = multer({
+  const makeProjectUploader = (subDir: string) => multer({
     storage: multer.diskStorage({
       destination: (req, _file, cb) => {
         const projectId = req.params.projectId || req.params.id || "0";
-        const subDir = req.path.includes("toolbox") || req.path.includes("safety") || req.path.includes("incident") ? "qhse" : "supervisor";
         const dir = path.join(UPLOAD_BASE, projectId, subDir);
         if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
         cb(null, dir);
@@ -1527,6 +1526,10 @@ export function registerRoutes(server: Server, app: Express) {
     }),
     limits: { fileSize: 25 * 1024 * 1024 },
   });
+  const supervisorUpload = makeProjectUploader("supervisor");
+  const qhseUpload = makeProjectUploader("qhse");
+  // Keep projectUpload as alias for backwards compat
+  const projectUpload = supervisorUpload;
 
   app.get("/api/projects/:projectId/supervisor-reports", requireAuth, async (req: Request, res: Response) => {
     const projectId = parseInt(req.params.projectId);
@@ -1638,7 +1641,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(talks);
   });
 
-  app.post("/api/projects/:projectId/toolbox-talks/upload", requireAuth, requireRole("admin", "resource_manager", "project_manager"), projectUpload.single("file"), async (req: any, res: Response) => {
+  app.post("/api/projects/:projectId/toolbox-talks/upload", requireAuth, requireRole("admin", "resource_manager", "project_manager"), qhseUpload.single("file"), async (req: any, res: Response) => {
     const projectId = parseInt(req.params.projectId);
     const { date, shift, workerId, topic, attendeeCount, notes } = req.body;
     if (!date) return res.status(400).json({ error: "date required" });
@@ -1681,7 +1684,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(obs);
   });
 
-  app.post("/api/projects/:projectId/safety-observations", requireAuth, requireRole("admin", "resource_manager", "project_manager"), projectUpload.single("file"), async (req: any, res: Response) => {
+  app.post("/api/projects/:projectId/safety-observations", requireAuth, requireRole("admin", "resource_manager", "project_manager"), qhseUpload.single("file"), async (req: any, res: Response) => {
     const projectId = parseInt(req.params.projectId);
     const filePath = req.file ? `/api/uploads/${projectId}/qhse/${req.file.filename}` : null;
     const body = req.body;
@@ -1748,7 +1751,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(incidents);
   });
 
-  app.post("/api/projects/:projectId/incident-reports", requireAuth, requireRole("admin", "resource_manager", "project_manager"), projectUpload.single("file"), async (req: any, res: Response) => {
+  app.post("/api/projects/:projectId/incident-reports", requireAuth, requireRole("admin", "resource_manager", "project_manager"), qhseUpload.single("file"), async (req: any, res: Response) => {
     const projectId = parseInt(req.params.projectId);
     const filePath = req.file ? `/api/uploads/${projectId}/qhse/${req.file.filename}` : null;
     const body = req.body;

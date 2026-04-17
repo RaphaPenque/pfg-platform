@@ -360,7 +360,11 @@ function PMReportTab({
       const slot = roleSlots?.find((s: any) => s.id === a.roleSlotId);
       const slotPeriods = slot?.periods as Array<{ startDate: string; endDate: string }> | undefined;
       if (slotPeriods && slotPeriods.length > 0) {
-        return slotPeriods.some(p => p.startDate <= selectedDate && p.endDate >= selectedDate);
+        // Periods exist — check if any covers the date
+        const coveredByPeriod = slotPeriods.some(p => p.startDate <= selectedDate && p.endDate >= selectedDate);
+        if (coveredByPeriod) return true;
+        // No period covers this date — fall through to assignment dates as fallback
+        // (handles case where periods were set incorrectly or worker is in a gap)
       }
       // Fallback to assignment-level dates
       const start = a.startDate ? a.startDate.slice(0, 10) : null;
@@ -1564,7 +1568,7 @@ function SupervisorReportsTab({
                   return (
                     <>
                       <tr key={r.id} style={{ borderTop: "1px solid hsl(var(--border))" }}>
-                        <Td>{r.date ? fmtDate(r.date) : "—"}</Td>
+                        <Td>{r.reportDate ? fmtDate(r.reportDate) : "—"}</Td>
                         <Td>
                           <span
                             className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
