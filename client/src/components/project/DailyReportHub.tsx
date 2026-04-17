@@ -343,9 +343,33 @@ function PMReportTab({
     }
   }, [reportData]);
 
-  const projectAssignments = assignments.filter(
-    (a) => a.projectId === project.id && ["active", "confirmed", "pending_confirmation"].includes(a.status || "")
-  );
+  // Role display order for sorting outage personnel
+  const ROLE_ORDER = ["Superintendent","Foreman","Lead Technician","Technician 2","Technician 1","HSE Officer","Rigger","Crane Driver","Welder","I&C Technician","Electrician","Apprentice"];
+
+  const projectAssignments = useMemo(() => {
+    const active = assignments.filter(
+      (a) => a.projectId === project.id && ["active", "confirmed", "pending_confirmation"].includes(a.status || "")
+    );
+    // Filter to workers on site on selectedDate
+    const onSite = active.filter((a) => {
+      const start = a.startDate ? a.startDate.slice(0, 10) : null;
+      const end = a.endDate ? a.endDate.slice(0, 10) : null;
+      if (start && selectedDate < start) return false;
+      if (end && selectedDate > end) return false;
+      return true;
+    });
+    // Sort: role order first, then day before night shift
+    return onSite.sort((a, b) => {
+      const ra = ROLE_ORDER.indexOf(a.role || "");
+      const rb = ROLE_ORDER.indexOf(b.role || "");
+      const roleSort = (ra === -1 ? 99 : ra) - (rb === -1 ? 99 : rb);
+      if (roleSort !== 0) return roleSort;
+      const shiftA = (a as any).shift || "Day";
+      const shiftB = (b as any).shift || "Day";
+      if (shiftA === shiftB) return 0;
+      return shiftA === "Day" ? -1 : 1;
+    });
+  }, [assignments, project.id, selectedDate]);
 
   // Save draft / publish
   const handleSave = useCallback(
@@ -412,13 +436,14 @@ function PMReportTab({
       ].join('-');
       await apiRequest("POST", `/api/projects/${project.id}/comments-log`, { entry: newComment, logDate });
       setNewComment("");
+      setCommentDate(new Date());
       refetchComments();
       toast({ title: "Comment added" });
     } catch (e: any) {
       toast({ title: "Failed", description: e.message, variant: "destructive" });
     }
     setAddingComment(false);
-  }, [newComment, project.id, refetchComments, toast]);
+  }, [newComment, commentDate, project.id, refetchComments, toast]);
 
   const filteredComments = useMemo(() => {
     if (!commentSearch) return commentsLog;
@@ -1589,10 +1614,10 @@ function QHSETab({
 
   // Toolbox talks
   const { data: toolboxTalks = [], isLoading: tbLoading, refetch: refetchTB } = useQuery<any[]>({
-    queryKey: [`/api/projects/${project.id}/qhse/toolbox-talks`],
+    queryKey: [`/api/projects/${project.id}/toolbox-talks`],
     queryFn: async () => {
       try {
-        const res = await apiRequest("GET", `/api/projects/${project.id}/qhse/toolbox-talks`);
+        const res = await apiRequest("GET", `/api/projects/${project.id}/toolbox-talks`);
         return res.json();
       } catch { return []; }
     },
@@ -1600,10 +1625,10 @@ function QHSETab({
 
   // Safety observations
   const { data: observations = [], isLoading: obsLoading, refetch: refetchObs } = useQuery<any[]>({
-    queryKey: [`/api/projects/${project.id}/qhse/observations`],
+    queryKey: [`/api/projects/${project.id}/safety-observations`],
     queryFn: async () => {
       try {
-        const res = await apiRequest("GET", `/api/projects/${project.id}/qhse/observations`);
+        const res = await apiRequest("GET", `/api/projects/${project.id}/safety-observations`);
         return res.json();
       } catch { return []; }
     },
@@ -1611,10 +1636,10 @@ function QHSETab({
 
   // Incidents
   const { data: incidents = [], isLoading: incLoading, refetch: refetchInc } = useQuery<any[]>({
-    queryKey: [`/api/projects/${project.id}/qhse/incidents`],
+    queryKey: [`/api/projects/${project.id}/incident-reports`],
     queryFn: async () => {
       try {
-        const res = await apiRequest("GET", `/api/projects/${project.id}/qhse/incidents`);
+        const res = await apiRequest("GET", `/api/projects/${project.id}/incident-reports`);
         return res.json();
       } catch { return []; }
     },
@@ -1646,7 +1671,7 @@ function QHSETab({
       const fd = new FormData();
       Object.entries(tbForm).forEach(([k, v]) => fd.append(k, String(v)));
       if (tbFile) fd.append("file", tbFile);
-      await fetch(`/api/projects/${project.id}/qhse/toolbox-talks`, {
+      await fetch(`/api/projects/${project.id}/toolbox-talks/upload`, {
         method: "POST", credentials: "include", body: fd,
       });
       setShowTBModal(false);
@@ -1661,7 +1686,7 @@ function QHSETab({
   const handleSaveObs = async () => {
     setSaving(true);
     try {
-      await apiRequest("POST", `/api/projects/${project.id}/qhse/observations`, obsForm);
+      await apiRequest("POST", `/api/projects/${project.id}/safety-observations`, obsForm);
       setShowObsModal(false);
       refetchObs();
       toast({ title: "Observation logged" });
@@ -1674,7 +1699,7 @@ function QHSETab({
   const handleSaveInc = async () => {
     setSaving(true);
     try {
-      await apiRequest("POST", `/api/projects/${project.id}/qhse/incidents`, incForm);
+      await apiRequest("POST", `/api/projects/${project.id}/incident-reports`, incForm);
       setShowIncModal(false);
       refetchInc();
       toast({ title: "Incident logged" });
@@ -2073,23 +2098,23 @@ function ModalField({ label, children }: { label: string; children: React.ReactN
 function SafetyKPIsTab({ project }: { project: DashboardProject }) {
   // Load all QHSE data for calculations
   const { data: observations = [] } = useQuery<any[]>({
-    queryKey: [`/api/projects/${project.id}/qhse/observations`],
+    queryKey: [`/api/projects/${project.id}/safety-observations`],
     queryFn: async () => {
-      try { const r = await apiRequest("GET", `/api/projects/${project.id}/qhse/observations`); return r.json(); }
+      try { const r = await apiRequest("GET", `/api/projects/${project.id}/safety-observations`); return r.json(); }
       catch { return []; }
     },
   });
   const { data: incidents = [] } = useQuery<any[]>({
-    queryKey: [`/api/projects/${project.id}/qhse/incidents`],
+    queryKey: [`/api/projects/${project.id}/incident-reports`],
     queryFn: async () => {
-      try { const r = await apiRequest("GET", `/api/projects/${project.id}/qhse/incidents`); return r.json(); }
+      try { const r = await apiRequest("GET", `/api/projects/${project.id}/incident-reports`); return r.json(); }
       catch { return []; }
     },
   });
   const { data: toolboxTalks = [] } = useQuery<any[]>({
-    queryKey: [`/api/projects/${project.id}/qhse/toolbox-talks`],
+    queryKey: [`/api/projects/${project.id}/toolbox-talks`],
     queryFn: async () => {
-      try { const r = await apiRequest("GET", `/api/projects/${project.id}/qhse/toolbox-talks`); return r.json(); }
+      try { const r = await apiRequest("GET", `/api/projects/${project.id}/toolbox-talks`); return r.json(); }
       catch { return []; }
     },
   });
