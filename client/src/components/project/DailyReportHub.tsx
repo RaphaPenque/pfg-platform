@@ -268,12 +268,13 @@ function PMReportTab({
   const isObserver = user?.role === "observer";
 
   // Load report for this date
-  const reportKey = `/api/projects/${project.id}/daily-reports?date=${selectedDate}`;
+  const reportKey = `/api/projects/${project.id}/daily-reports/${selectedDate}`;
   const { data: reportData, isLoading: reportLoading } = useQuery<DailyReport | null>({
     queryKey: [reportKey],
     queryFn: async () => {
       try {
-        const res = await apiRequest("GET", `/api/projects/${project.id}/daily-reports?date=${selectedDate}`);
+        const res = await apiRequest("GET", `/api/projects/${project.id}/daily-reports/${selectedDate}`);
+        if (!res.ok) return null;
         return res.json();
       } catch {
         return null;
@@ -338,14 +339,13 @@ function PMReportTab({
   const [commentDateOpen, setCommentDateOpen] = useState(false);
   const [dateNavOpen, setDateNavOpen] = useState(false);
 
-  // Sync local state when report data loads
-  useMemo(() => {
-    if (reportData) {
-      setCompletedTasks(reportData.completedTasks || []);
-      setDelaysLog(reportData.delaysLog || []);
-      setToolingItems(reportData.toolingItems || []);
-      setPersonnelNotes(reportData.personnelNotes || {});
-    }
+  // Sync local state when report data loads or date changes
+  // useEffect (not useMemo) ensures setState side-effects fire correctly
+  React.useEffect(() => {
+    setCompletedTasks(reportData?.completedTasks || []);
+    setDelaysLog(reportData?.delaysLog || []);
+    setToolingItems(reportData?.toolingItems || []);
+    setPersonnelNotes(reportData?.personnelNotes || {});
   }, [reportData]);
 
   // Role display order for sorting outage personnel
