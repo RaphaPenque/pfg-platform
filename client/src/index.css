@@ -101,3 +101,24 @@
 
 /* Tabular nums for data */
 .tabular-nums { font-variant-numeric: tabular-nums lining-nums; }
+
+/* Modal input fields */
+.modal-input {
+  width: 100%;
+  padding: 8px 10px;
+  font-size: 13px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 6px;
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  outline: none;
+  transition: border-color 120ms;
+}
+.modal-input:focus {
+  border-color: var(--pfg-navy, #1A1D23);
+  box-shadow: 0 0 0 2px rgba(26,29,35,0.08);
+}
+textarea.modal-input {
+  resize: vertical;
+  min-height: 72px;
+}

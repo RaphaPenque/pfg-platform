@@ -2222,6 +2222,10 @@ function QHSETab({
                                 <input type="text" value={editObsForm.locationOnSite} onChange={e => setEditObsForm(f => ({ ...f, locationOnSite: e.target.value }))} className="text-[11px] px-2 py-1 border rounded w-32" style={{ borderColor: "hsl(var(--border))" }} />
                               </div>
                               <div className="flex items-center gap-1.5">
+                                <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Description</span>
+                                <textarea value={editObsForm.description} onChange={e => setEditObsForm(f => ({ ...f, description: e.target.value }))} className="text-[11px] px-2 py-1 border rounded w-64" style={{ borderColor: "hsl(var(--border))", minHeight: 48, resize: "vertical" }} />
+                              </div>
+                              <div className="flex items-center gap-1.5">
                                 <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Status</span>
                                 <select value={editObsForm.status} onChange={e => setEditObsForm(f => ({ ...f, status: e.target.value }))} className="text-[11px] px-2 py-1 border rounded" style={{ borderColor: "hsl(var(--border))" }}>
                                   <option value="open">Open</option>
