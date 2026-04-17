@@ -189,12 +189,13 @@ export function registerRoutes(server: Server, app: Express) {
     const project = await storage.getProjectByCode((req.params.code as string).toUpperCase());
     if (!project) return res.status(404).json({ error: "Project not found" });
 
-    const [projectAssignments, allWorkers, roleSlots, projectPeriods] = await Promise.all([
+    const [projectAssignments, allWorkers, roleSlots] = await Promise.all([
       storage.getAssignmentsByProject(project.id),
       storage.getWorkers(),
       storage.getRoleSlotsByProject(project.id),
-      storage.getAssignmentPeriodsByProject(project.id),
     ]);
+    let projectPeriods: any[] = [];
+    try { projectPeriods = await storage.getAssignmentPeriodsByProject(project.id); } catch { projectPeriods = []; }
 
     const workerMap = Object.fromEntries(allWorkers.map(w => [w.id, w]));
 
@@ -691,9 +692,10 @@ export function registerRoutes(server: Server, app: Express) {
 
     const today = new Date().toISOString().split("T")[0];
     // Use periods for availability — assignment.startDate/endDate is just a cache
-    const workerPeriods = await storage.getAssignmentPeriodsByWorker(id);
+    let workerPeriods: any[] = [];
+    try { workerPeriods = await storage.getAssignmentPeriodsByWorker(id); } catch { workerPeriods = []; }
     const workerAssignments = await storage.getAssignmentsByWorker(id);
-    const activePeriods = workerPeriods.filter(p => p.endDate >= today);
+    const activePeriods = workerPeriods.filter((p: any) => p.endDate >= today);
     if (activePeriods.length > 0) {
       const allProjects = await storage.getProjects();
       const projectMap = Object.fromEntries(allProjects.map(p => [p.id, p]));
@@ -1947,7 +1949,9 @@ export function registerRoutes(server: Server, app: Express) {
     const allOemTypes = await storage.getOemTypes();
 
     // Load all periods in one query and build lookup by assignmentId
-    const allPeriodsFlat = await storage.getAllAssignmentPeriods();
+    // Wrapped in try/catch — table may not exist yet on first deploy
+    let allPeriodsFlat: any[] = [];
+    try { allPeriodsFlat = await storage.getAllAssignmentPeriods(); } catch { allPeriodsFlat = []; }
     const periodsByAssignmentDash: Record<number, any[]> = {};
     allPeriodsFlat.forEach(p => {
       if (!periodsByAssignmentDash[p.assignmentId]) periodsByAssignmentDash[p.assignmentId] = [];
