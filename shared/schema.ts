@@ -250,15 +250,21 @@ export const payrollRules = pgTable("payroll_rules", {
   countryName: text("country_name").notNull(),
 
   // Weekly OT threshold (null = no weekly OT tracking)
+  // Croatia: 40h/week (statutory). Spain: null (annual tracking instead)
   weeklyOtThresholdHours: integer("weekly_ot_threshold_hours"),
 
   // Annual OT threshold (null = no annual OT tracking)
-  // For Spain: 1600 hrs/calendar year, hours above = OT
+  // Spain: 1,600 hrs/calendar year — hours above = OT
   annualOtThresholdHours: integer("annual_ot_threshold_hours"),
 
-  // Night shift tracking (null start/end = not tracked)
+  // Night shift tracking: hours between nightShiftStart and nightShiftEnd
+  // are classified NS (standard) or OT NS (if also over OT threshold)
+  // null start/end = night shift not tracked for this cost centre
   nightShiftStart: text("night_shift_start"),  // "22:00"
   nightShiftEnd: text("night_shift_end"),      // "06:00"
+
+  // Public holiday tracking — uses public_holidays table for this countryCode
+  trackPublicHolidays: boolean("track_public_holidays").default(false).notNull(),
 
   // Sunday hours tracked separately
   trackSundayHours: boolean("track_sunday_hours").default(false).notNull(),
@@ -271,9 +277,23 @@ export const payrollRules = pgTable("payroll_rules", {
   updatedBy: integer("updated_by").references(() => users.id),
 });
 
+// Updated payroll rules — daily OT threshold + public holiday tracking
 export const insertPayrollRulesSchema = createInsertSchema(payrollRules).omit({ id: true });
 export type PayrollRule = typeof payrollRules.$inferSelect;
 export type InsertPayrollRule = typeof insertPayrollRulesSchema._type;
+
+// ===== PUBLIC HOLIDAYS =====
+export const publicHolidays = pgTable("public_holidays", {
+  id: serial("id").primaryKey(),
+  countryCode: text("country_code").notNull(), // ISO 3166-1 alpha-2, e.g. "HR"
+  date: text("date").notNull(),               // YYYY-MM-DD
+  name: text("name").notNull(),               // English name
+  nameLocal: text("name_local"),              // Local language name
+  year: integer("year").notNull(),
+});
+export const insertPublicHolidaySchema = createInsertSchema(publicHolidays).omit({ id: true });
+export type PublicHoliday = typeof publicHolidays.$inferSelect;
+export type InsertPublicHoliday = z.infer<typeof insertPublicHolidaySchema>;
 
 // ===== WORK EXPERIENCE =====
 export const workExperience = pgTable("work_experience", {

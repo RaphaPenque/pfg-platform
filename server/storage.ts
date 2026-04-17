@@ -2,7 +2,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { eq, and, gt, desc, sql } from "drizzle-orm";
 import {
-  workers, projects, assignments, roleSlotPeriods, documents, oemTypes, roleSlots,
+  workers, projects, assignments, roleSlotPeriods, documents, oemTypes, roleSlots, publicHolidays,
   users, sessions, magicLinks, auditLogs, projectLeads, payrollRules,
   workExperience, oemExperience,
   workPackages, dailyReports, dailyReportWpProgress, commentsLog, delayApprovals,
@@ -13,6 +13,7 @@ import {
   type Project, type InsertProject,
   type Assignment, type InsertAssignment,
   type RoleSlotPeriod, type InsertRoleSlotPeriod,
+  type PublicHoliday,
   type Document, type InsertDocument,
   type OemType, type InsertOemType,
   type RoleSlot, type InsertRoleSlot,
@@ -189,6 +190,10 @@ export interface IStorage {
   deleteRoleSlotPeriod(id: number): Promise<void>;
   recomputeRoleSlotDates(roleSlotId: number): Promise<void>;
   getWorkerActivePeriodsOnDate(workerId: number, date: string): Promise<RoleSlotPeriod[]>;
+
+  // Public Holidays
+  getPublicHolidays(countryCode: string, year: number): Promise<PublicHoliday[]>;
+  isPublicHoliday(countryCode: string, date: string): Promise<boolean>;
   getSupervisorReportReplies(reportId: number): Promise<SupervisorReportReply[]>;
   createSupervisorReportReply(data: { reportId: number; authorId: number; message: string }): Promise<SupervisorReportReply>;
 
@@ -803,6 +808,20 @@ export class PostgresStorage implements IStorage {
       slotIds.includes(p.roleSlotId) &&
       p.startDate <= date && p.endDate >= date
     );
+  }
+
+  // ── Public Holidays ───────────────────────────────────────────────────
+  async getPublicHolidays(countryCode: string, year: number): Promise<PublicHoliday[]> {
+    return db.select().from(publicHolidays)
+      .where(and(eq(publicHolidays.countryCode, countryCode), eq(publicHolidays.year, year)))
+      .orderBy(publicHolidays.date);
+  }
+
+  async isPublicHoliday(countryCode: string, date: string): Promise<boolean> {
+    const [row] = await db.select().from(publicHolidays)
+      .where(and(eq(publicHolidays.countryCode, countryCode), eq(publicHolidays.date, date)))
+      .limit(1);
+    return !!row;
   }
 
   async updateSupervisorReport(id: number, data: Partial<InsertSupervisorReport>): Promise<SupervisorReport | undefined> {

@@ -438,6 +438,78 @@ export async function runSchemaUpdates() {
         )
     `);
 
+    // ── Public Holidays table ────────────────────────────────────────────
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS public_holidays (
+        id SERIAL PRIMARY KEY,
+        country_code TEXT NOT NULL,
+        date TEXT NOT NULL,
+        name TEXT NOT NULL,
+        name_local TEXT,
+        year INTEGER NOT NULL,
+        UNIQUE(country_code, date)
+      )
+    `);
+
+    // Add track_public_holidays column to payroll_rules if missing
+    await db.execute(sql`ALTER TABLE payroll_rules ADD COLUMN IF NOT EXISTS track_public_holidays BOOLEAN NOT NULL DEFAULT FALSE`);
+
+    // Update Croatia rule: weekly OT 40h, night shift 22:00-06:00, public holidays enabled
+    await db.execute(sql`
+      UPDATE payroll_rules
+      SET
+        weekly_ot_threshold_hours = 40,
+        night_shift_start = '22:00',
+        night_shift_end = '06:00',
+        track_public_holidays = TRUE
+      WHERE country_code = 'HR'
+    `);
+
+    // Seed Croatian public holidays 2026 (idempotent via ON CONFLICT DO NOTHING)
+    const hr2026 = [
+      ['2026-01-01', 'New Year\'s Day', 'Nova godina'],
+      ['2026-01-06', 'Epiphany', 'Sveta tri kralja'],
+      ['2026-04-05', 'Easter Sunday', 'Uskrs'],
+      ['2026-04-06', 'Easter Monday', 'Uskrsni ponedjeljak'],
+      ['2026-05-01', 'Labour Day', 'Praznik rada'],
+      ['2026-05-30', 'Statehood Day', 'Dan dr\u017eavnosti'],
+      ['2026-06-04', 'Corpus Christi', 'Tijelovo'],
+      ['2026-06-22', 'Anti-Fascist Struggle Day', 'Dan antifa\u0161isti\u010dke borbe'],
+      ['2026-08-05', 'Victory and Homeland Thanksgiving Day', 'Dan pobjede i domovinske zahvalnosti'],
+      ['2026-08-15', 'Assumption Day', 'Velika Gospa'],
+      ['2026-11-01', 'All Saints\' Day', 'Svi sveti'],
+      ['2026-11-18', 'Remembrance Day for Homeland War Victims', 'Dan sje\u0107anja na \u017ertve Domovinskog rata'],
+      ['2026-12-25', 'Christmas Day', 'Bo\u017ei\u0107'],
+      ['2026-12-26', 'St. Stephen\'s Day', 'Sveti Stjepan'],
+    ];
+
+    const hr2027 = [
+      ['2027-01-01', 'New Year\'s Day', 'Nova godina'],
+      ['2027-01-06', 'Epiphany', 'Sveta tri kralja'],
+      ['2027-03-28', 'Easter Sunday', 'Uskrs'],
+      ['2027-03-29', 'Easter Monday', 'Uskrsni ponedjeljak'],
+      ['2027-05-01', 'Labour Day', 'Praznik rada'],
+      ['2027-05-27', 'Corpus Christi', 'Tijelovo'],
+      ['2027-05-30', 'Statehood Day', 'Dan dr\u017eavnosti'],
+      ['2027-06-22', 'Anti-Fascist Struggle Day', 'Dan antifa\u0161isti\u010dke borbe'],
+      ['2027-08-05', 'Victory and Homeland Thanksgiving Day', 'Dan pobjede i domovinske zahvalnosti'],
+      ['2027-08-15', 'Assumption Day', 'Velika Gospa'],
+      ['2027-11-01', 'All Saints\' Day', 'Svi sveti'],
+      ['2027-11-18', 'Remembrance Day for Homeland War Victims', 'Dan sje\u0107anja na \u017ertve Domovinskog rata'],
+      ['2027-12-25', 'Christmas Day', 'Bo\u017ei\u0107'],
+      ['2027-12-26', 'St. Stephen\'s Day', 'Sveti Stjepan'],
+    ];
+
+    for (const [date, name, nameLocal] of [...hr2026, ...hr2027]) {
+      const year = parseInt(date.split('-')[0]);
+      await db.execute(sql`
+        INSERT INTO public_holidays (country_code, date, name, name_local, year)
+        VALUES ('HR', ${date}, ${name}, ${nameLocal}, ${year})
+        ON CONFLICT (country_code, date) DO NOTHING
+      `);
+    }
+    console.log('Seeded Croatian public holidays 2026-2027');
+
     console.log("Schema updates applied.");
   } catch (e: any) {
     console.error("Schema update error:", e.message);
