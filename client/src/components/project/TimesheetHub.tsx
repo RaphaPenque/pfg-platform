@@ -835,6 +835,19 @@ export default function TimesheetHub({ project, userRole }: TimesheetHubProps) {
 
   const selectedWeek = weeks.find(w => w.id === selectedWeekId) || null;
 
+  // Auto-select the current week when weeks first load
+  React.useEffect(() => {
+    if (weeks.length === 0 || selectedWeekId !== null) return;
+    const todayISO = new Date().toISOString().split('T')[0];
+    // Find the week whose week_commencing is <= today and closest to today
+    const sorted = [...weeks].sort((a, b) =>
+      a.week_commencing > b.week_commencing ? -1 : 1
+    );
+    const current = sorted.find(w => w.week_commencing <= todayISO);
+    if (current) setSelectedWeekId(current.id);
+    else if (sorted.length > 0) setSelectedWeekId(sorted[sorted.length - 1].id);
+  }, [weeks, selectedWeekId]);
+
   const handleRefresh = useCallback(() => {
     refetchWeeks();
     if (selectedWeekId) refetchEntries();
