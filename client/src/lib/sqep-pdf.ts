@@ -681,8 +681,12 @@ const HEADER_H = 36;
     doc.setFont("helvetica", "normal");
     doc.text(truncate(roleLabel, 24), rosterCols[1].x, y);
     doc.text(rowShift, rosterCols[2].x, y);
-    doc.text(m.assignment.startDate || "—", rosterCols[3].x, y);
-    doc.text(m.assignment.endDate || "—", rosterCols[4].x, y);
+    // Use periods for full engagement range if available
+    const periods = (m.assignment as any).periods;
+    const displayStart = periods?.length > 0 ? periods[0].startDate : m.assignment.startDate;
+    const displayEnd = periods?.length > 0 ? periods[periods.length - 1].endDate : m.assignment.endDate;
+    doc.text(displayStart || "—", rosterCols[3].x, y);
+    doc.text(displayEnd || "—", rosterCols[4].x, y);
     doc.setFontSize(7);
     doc.setTextColor(99, 117, 140);
     doc.text(truncate(oemText || "—", 50), rosterCols[5].x, y);

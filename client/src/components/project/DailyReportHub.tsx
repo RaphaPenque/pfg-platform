@@ -11,7 +11,7 @@ import {
   FileText, Users, Shield, BarChart3,
   ChevronLeft, ChevronRight, Plus, Trash2, Upload,
   Send, Download, Search, AlertTriangle, CheckCircle,
-  Clock, XCircle, Loader2, Eye, MessageSquare,
+  Clock, XCircle, Loader2, Eye, MessageSquare, Pencil,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -351,8 +351,12 @@ function PMReportTab({
     const active = assignments.filter(
       (a) => a.projectId === project.id && ["active", "confirmed", "pending_confirmation"].includes(a.status || "")
     );
-    // Filter to workers on site on selectedDate
+    // Filter to workers on site on selectedDate — use periods if available
     const onSite = active.filter((a) => {
+      if (a.periods && a.periods.length > 0) {
+        return a.periods.some((p: any) => p.startDate <= selectedDate && p.endDate >= selectedDate);
+      }
+      // Fallback to assignment-level dates
       const start = a.startDate ? a.startDate.slice(0, 10) : null;
       const end = a.endDate ? a.endDate.slice(0, 10) : null;
       if (start && selectedDate < start) return false;
@@ -1273,6 +1277,35 @@ function SupervisorReportsTab({
   const [uploading, setUploading] = useState(false);
   const [uploadForm, setUploadForm] = useState({ workerId: "", date: todayStr(), shift: "Day" });
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
+  const [editingReport, setEditingReport] = useState<number | null>(null);
+  const [editReportForm, setEditReportForm] = useState<{ workerId: string; date: string; shift: string }>({ workerId: "", date: "", shift: "Day" });
+  const [savingEditReport, setSavingEditReport] = useState(false);
+
+  const handleSaveEditReport = useCallback(async (reportId: number) => {
+    // Validate
+    if (editReportForm.date && !/^\d{4}-\d{2}-\d{2}$/.test(editReportForm.date)) {
+      toast({ title: "Invalid date", description: "Date must be YYYY-MM-DD", variant: "destructive" });
+      return;
+    }
+    if (editReportForm.shift && !["Day", "Night"].includes(editReportForm.shift)) {
+      toast({ title: "Invalid shift", variant: "destructive" }); return;
+    }
+    setSavingEditReport(true);
+    try {
+      const payload: Record<string, any> = {};
+      if (editReportForm.date) payload.reportDate = editReportForm.date;
+      if (editReportForm.shift) payload.shift = editReportForm.shift;
+      if (editReportForm.workerId) payload.workerId = parseInt(editReportForm.workerId);
+      await apiRequest("PATCH", `/api/supervisor-reports/${reportId}`, payload);
+      setEditingReport(null);
+      await qc.invalidateQueries({ queryKey: [`/api/projects/${project.id}/supervisor-reports`] });
+      toast({ title: "Report updated" });
+    } catch (e: any) {
+      toast({ title: "Update failed", description: e.message, variant: "destructive" });
+    }
+    setSavingEditReport(false);
+  }, [editReportForm, project.id, qc, toast]);
+
   const [replyText, setReplyText] = useState<Record<number, string>>({});
   const [sendingReply, setSendingReply] = useState<number | null>(null);
 
@@ -1542,6 +1575,25 @@ function SupervisorReportsTab({
                               </a>
                             )}
                             <button
+                              onClick={() => {
+                                if (editingReport === r.id) {
+                                  setEditingReport(null);
+                                } else {
+                                  setEditingReport(r.id);
+                                  setEditReportForm({
+                                    workerId: String(r.workerId || ""),
+                                    date: r.reportDate || "",
+                                    shift: r.shift || "Day",
+                                  });
+                                }
+                              }}
+                              className="text-[11px] font-semibold"
+                              style={{ color: editingReport === r.id ? "var(--pfg-navy)" : "var(--pfg-steel)" }}
+                              title="Edit metadata"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
                               onClick={() => setExpandedRow(isExpanded ? null : r.id)}
                               className="flex items-center gap-1 text-[11px] font-semibold"
                               style={{ color: "var(--pfg-steel)" }}
@@ -1552,6 +1604,39 @@ function SupervisorReportsTab({
                           </div>
                         </Td>
                       </tr>
+                      {editingReport === r.id && (
+                        <tr style={{ borderTop: "1px solid hsl(var(--border))", background: "hsl(var(--muted))" }}>
+                          <td colSpan={6} className="px-4 py-3">
+                            <div className="flex items-center gap-3 flex-wrap">
+                              <span className="text-[11px] font-semibold" style={{ color: "var(--pfg-steel)" }}>Edit Report</span>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Date</span>
+                                <input type="date" value={editReportForm.date} onChange={e => setEditReportForm(f => ({ ...f, date: e.target.value }))} className="text-[11px] px-2 py-1 border rounded" style={{ borderColor: "hsl(var(--border))" }} />
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Shift</span>
+                                <select value={editReportForm.shift} onChange={e => setEditReportForm(f => ({ ...f, shift: e.target.value }))} className="text-[11px] px-2 py-1 border rounded" style={{ borderColor: "hsl(var(--border))" }}>
+                                  <option value="Day">Day</option>
+                                  <option value="Night">Night</option>
+                                </select>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Supervisor</span>
+                                <select value={editReportForm.workerId} onChange={e => setEditReportForm(f => ({ ...f, workerId: e.target.value }))} className="text-[11px] px-2 py-1 border rounded" style={{ borderColor: "hsl(var(--border))" }}>
+                                  <option value="">Select...</option>
+                                  {projectSupervisors.map((w: any) => (
+                                    <option key={w.id} value={w.id}>{w.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <button onClick={() => handleSaveEditReport(r.id)} disabled={savingEditReport} className="text-[11px] font-semibold px-3 py-1 rounded disabled:opacity-50" style={{ background: "var(--pfg-navy)", color: "#fff" }}>
+                                {savingEditReport ? <Loader2 className="w-3 h-3 animate-spin" /> : "Save"}
+                              </button>
+                              <button onClick={() => setEditingReport(null)} className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Cancel</button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
                       {isExpanded && (
                         <tr style={{ borderTop: "1px solid hsl(var(--border))" }}>
                           <td colSpan={6} className="px-4 py-3" style={{ background: "hsl(var(--muted))" }}>
@@ -1686,6 +1771,7 @@ function QHSETab({
     date: todayStr(), time: "08:00", shift: "Day", type: "Positive",
     reportedBy: "", location: "", description: "", status: "Open",
   });
+  const [obsFile, setObsFile] = useState<File | null>(null);
 
   // Incident modal state
   const [showIncModal, setShowIncModal] = useState(false);
@@ -1693,6 +1779,7 @@ function QHSETab({
     date: todayStr(), type: "Near Miss", workerInvolved: "",
     lostTime: false, description: "", status: "Open", rootCause: "",
   });
+  const [incFile, setIncFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
 
   const handleSaveTB = async () => {
@@ -1716,18 +1803,21 @@ function QHSETab({
   const handleSaveObs = async () => {
     setSaving(true);
     try {
-      const payload = {
-        observationDate: obsForm.date,
-        observationType: obsForm.type,
-        observationTime: obsForm.time,
-        shift: obsForm.shift,
-        reportedByWorkerId: obsForm.reportedBy || null,
-        locationOnSite: obsForm.location,
-        description: obsForm.description,
-        status: obsForm.status.toLowerCase(),
-      };
-      await apiRequest("POST", `/api/projects/${project.id}/safety-observations`, payload);
+      const fd = new FormData();
+      fd.append("observationDate", obsForm.date);
+      fd.append("observationType", obsForm.type);
+      fd.append("observationTime", obsForm.time);
+      fd.append("shift", obsForm.shift);
+      if (obsForm.reportedBy) fd.append("reportedByWorkerId", obsForm.reportedBy);
+      if (obsForm.location) fd.append("locationOnSite", obsForm.location);
+      if (obsForm.description) fd.append("description", obsForm.description);
+      fd.append("status", obsForm.status.toLowerCase());
+      if (obsFile) fd.append("file", obsFile);
+      await fetch(`/api/projects/${project.id}/safety-observations`, {
+        method: "POST", credentials: "include", body: fd,
+      });
       setShowObsModal(false);
+      setObsFile(null);
       refetchObs();
       toast({ title: "Observation logged" });
     } catch (e: any) {
@@ -1739,17 +1829,20 @@ function QHSETab({
   const handleSaveInc = async () => {
     setSaving(true);
     try {
-      const payload = {
-        incidentDate: incForm.date,
-        incidentType: incForm.type,
-        workerInvolvedId: incForm.workerInvolved || null,
-        lostTime: incForm.lostTime,
-        description: incForm.description,
-        rootCause: incForm.rootCause,
-        status: incForm.status.toLowerCase(),
-      };
-      await apiRequest("POST", `/api/projects/${project.id}/incident-reports`, payload);
+      const fd = new FormData();
+      fd.append("incidentDate", incForm.date);
+      fd.append("incidentType", incForm.type);
+      if (incForm.workerInvolved) fd.append("workerInvolvedId", incForm.workerInvolved);
+      fd.append("lostTime", String(incForm.lostTime));
+      if (incForm.description) fd.append("description", incForm.description);
+      if (incForm.rootCause) fd.append("rootCause", incForm.rootCause);
+      fd.append("status", incForm.status.toLowerCase());
+      if (incFile) fd.append("file", incFile);
+      await fetch(`/api/projects/${project.id}/incident-reports`, {
+        method: "POST", credentials: "include", body: fd,
+      });
       setShowIncModal(false);
+      setIncFile(null);
       refetchInc();
       toast({ title: "Incident logged" });
     } catch (e: any) {
@@ -2049,6 +2142,11 @@ function QHSETab({
             </ModalField>
             <div className="flex justify-end gap-2 pt-2">
               <button onClick={() => setShowObsModal(false)} className="text-[12px] px-4 py-2 rounded-lg border" style={{ borderColor: "hsl(var(--border))" }}>Cancel</button>
+              <div>
+                <label className="text-[11px] font-semibold uppercase tracking-wide block mb-1" style={{ color: "var(--pfg-steel)" }}>Attachment (optional)</label>
+                <input type="file" accept="image/*,.pdf" onChange={e => setObsFile(e.target.files?.[0] || null)} className="text-[11px]" />
+                {obsFile && <span className="text-[11px] ml-2" style={{ color: "var(--pfg-steel)" }}>{obsFile.name}</span>}
+              </div>
               <button onClick={handleSaveObs} disabled={saving} className="text-[12px] font-semibold px-4 py-2 rounded-lg disabled:opacity-50" style={{ background: "var(--pfg-navy)", color: "#fff" }}>
                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin inline" /> : "Save"}
               </button>
@@ -2100,6 +2198,11 @@ function QHSETab({
             </ModalField>
             <div className="flex justify-end gap-2 pt-2">
               <button onClick={() => setShowIncModal(false)} className="text-[12px] px-4 py-2 rounded-lg border" style={{ borderColor: "hsl(var(--border))" }}>Cancel</button>
+              <div>
+                <label className="text-[11px] font-semibold uppercase tracking-wide block mb-1" style={{ color: "var(--pfg-steel)" }}>Attachment (optional)</label>
+                <input type="file" accept="image/*,.pdf" onChange={e => setIncFile(e.target.files?.[0] || null)} className="text-[11px]" />
+                {incFile && <span className="text-[11px] ml-2" style={{ color: "var(--pfg-steel)" }}>{incFile.name}</span>}
+              </div>
               <button onClick={handleSaveInc} disabled={saving} className="text-[12px] font-semibold px-4 py-2 rounded-lg disabled:opacity-50" style={{ background: "var(--red)", color: "#fff" }}>
                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin inline" /> : "Save Incident"}
               </button>

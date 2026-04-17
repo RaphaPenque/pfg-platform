@@ -2,7 +2,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
 import { eq, and, gt, desc, sql } from "drizzle-orm";
 import {
-  workers, projects, assignments, documents, oemTypes, roleSlots,
+  workers, projects, assignments, assignmentPeriods, documents, oemTypes, roleSlots,
   users, sessions, magicLinks, auditLogs, projectLeads, payrollRules,
   workExperience, oemExperience,
   workPackages, dailyReports, dailyReportWpProgress, commentsLog, delayApprovals,
@@ -12,6 +12,7 @@ import {
   type Worker, type InsertWorker,
   type Project, type InsertProject,
   type Assignment, type InsertAssignment,
+  type AssignmentPeriod, type InsertAssignmentPeriod,
   type Document, type InsertDocument,
   type OemType, type InsertOemType,
   type RoleSlot, type InsertRoleSlot,
@@ -178,6 +179,16 @@ export interface IStorage {
   getPendingSupervisorReports(): Promise<SupervisorReport[]>;
   createSupervisorReport(data: InsertSupervisorReport): Promise<SupervisorReport>;
   updateSupervisorReport(id: number, data: Partial<InsertSupervisorReport>): Promise<SupervisorReport | undefined>;
+
+  // Assignment Periods
+  getAssignmentPeriods(assignmentId: number): Promise<AssignmentPeriod[]>;
+  getAssignmentPeriodsByWorker(workerId: number): Promise<AssignmentPeriod[]>;
+  getAssignmentPeriodsByProject(projectId: number): Promise<AssignmentPeriod[]>;
+  createAssignmentPeriod(data: InsertAssignmentPeriod): Promise<AssignmentPeriod>;
+  updateAssignmentPeriod(id: number, data: Partial<InsertAssignmentPeriod>): Promise<AssignmentPeriod | undefined>;
+  deleteAssignmentPeriod(id: number): Promise<void>;
+  recomputeAssignmentDates(assignmentId: number): Promise<void>;
+  getAllAssignmentPeriods(): Promise<AssignmentPeriod[]>;
   getSupervisorReportReplies(reportId: number): Promise<SupervisorReportReply[]>;
   createSupervisorReportReply(data: { reportId: number; authorId: number; message: string }): Promise<SupervisorReportReply>;
 
@@ -730,6 +741,64 @@ export class PostgresStorage implements IStorage {
   async createSupervisorReport(data: InsertSupervisorReport): Promise<SupervisorReport> {
     const [row] = await db.insert(supervisorReports).values(data).returning();
     return row;
+  }
+
+  // ── Assignment Periods ──────────────────────────────────────────────────
+  async getAssignmentPeriods(assignmentId: number): Promise<AssignmentPeriod[]> {
+    return db.select().from(assignmentPeriods)
+      .where(eq(assignmentPeriods.assignmentId, assignmentId))
+      .orderBy(assignmentPeriods.startDate)
+      .all();
+  }
+
+  async getAssignmentPeriodsByWorker(workerId: number): Promise<AssignmentPeriod[]> {
+    return db.select().from(assignmentPeriods)
+      .where(eq(assignmentPeriods.workerId, workerId))
+      .orderBy(assignmentPeriods.startDate)
+      .all();
+  }
+
+  async getAssignmentPeriodsByProject(projectId: number): Promise<AssignmentPeriod[]> {
+    return db.select().from(assignmentPeriods)
+      .where(eq(assignmentPeriods.projectId, projectId))
+      .orderBy(assignmentPeriods.startDate)
+      .all();
+  }
+
+  async getAllAssignmentPeriods(): Promise<AssignmentPeriod[]> {
+    return db.select().from(assignmentPeriods).orderBy(assignmentPeriods.startDate).all();
+  }
+
+  async createAssignmentPeriod(data: InsertAssignmentPeriod): Promise<AssignmentPeriod> {
+    const [row] = await db.insert(assignmentPeriods).values(data).returning();
+    await this.recomputeAssignmentDates(data.assignmentId);
+    return row;
+  }
+
+  async updateAssignmentPeriod(id: number, data: Partial<InsertAssignmentPeriod>): Promise<AssignmentPeriod | undefined> {
+    const [row] = await db.update(assignmentPeriods).set(data).where(eq(assignmentPeriods.id, id)).returning();
+    if (row) await this.recomputeAssignmentDates(row.assignmentId);
+    return row;
+  }
+
+  async deleteAssignmentPeriod(id: number): Promise<void> {
+    const [row] = await db.select().from(assignmentPeriods).where(eq(assignmentPeriods.id, id)).limit(1);
+    if (row) {
+      await db.delete(assignmentPeriods).where(eq(assignmentPeriods.id, id)).run();
+      await this.recomputeAssignmentDates(row.assignmentId);
+    }
+  }
+
+  /** Recompute the assignment's startDate/endDate cache from its periods */
+  async recomputeAssignmentDates(assignmentId: number): Promise<void> {
+    const periods = await this.getAssignmentPeriods(assignmentId);
+    if (periods.length === 0) return;
+    const earliest = periods.reduce((min, p) => p.startDate < min ? p.startDate : min, periods[0].startDate);
+    const latest = periods.reduce((max, p) => p.endDate > max ? p.endDate : max, periods[0].endDate);
+    await db.update(assignments)
+      .set({ startDate: earliest, endDate: latest })
+      .where(eq(assignments.id, assignmentId))
+      .run();
   }
 
   async updateSupervisorReport(id: number, data: Partial<InsertSupervisorReport>): Promise<SupervisorReport | undefined> {

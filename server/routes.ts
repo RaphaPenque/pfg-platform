@@ -189,10 +189,11 @@ export function registerRoutes(server: Server, app: Express) {
     const project = await storage.getProjectByCode((req.params.code as string).toUpperCase());
     if (!project) return res.status(404).json({ error: "Project not found" });
 
-    const [projectAssignments, allWorkers, roleSlots] = await Promise.all([
+    const [projectAssignments, allWorkers, roleSlots, projectPeriods] = await Promise.all([
       storage.getAssignmentsByProject(project.id),
       storage.getWorkers(),
       storage.getRoleSlotsByProject(project.id),
+      storage.getAssignmentPeriodsByProject(project.id),
     ]);
 
     const workerMap = Object.fromEntries(allWorkers.map(w => [w.id, w]));
@@ -228,6 +229,13 @@ export function registerRoutes(server: Server, app: Express) {
       };
     }
 
+    // Build periods lookup by assignmentId
+    const periodsByAssignment: Record<number, typeof projectPeriods> = {};
+    for (const p of projectPeriods) {
+      if (!periodsByAssignment[p.assignmentId]) periodsByAssignment[p.assignmentId] = [];
+      periodsByAssignment[p.assignmentId].push(p);
+    }
+
     const assignments = projectAssignments
       .filter(a => PORTAL_STATUSES.includes(a.status || ""))
       .map(a => ({
@@ -250,6 +258,7 @@ export function registerRoutes(server: Server, app: Express) {
         location: project.location,
         siteName: project.siteName,
         scopeOfWork: project.scopeOfWork,
+        periods: (periodsByAssignment[a.id] || []).sort((x, y) => x.startDate.localeCompare(y.startDate)),
       }));
 
     // Attach assignments to each worker object so SQEP PDF can render work experience
@@ -681,12 +690,14 @@ export function registerRoutes(server: Server, app: Express) {
     if (!worker) return res.status(404).json({ error: "Worker not found" });
 
     const today = new Date().toISOString().split("T")[0];
+    // Use periods for availability — assignment.startDate/endDate is just a cache
+    const workerPeriods = await storage.getAssignmentPeriodsByWorker(id);
     const workerAssignments = await storage.getAssignmentsByWorker(id);
-    const activeAssignments = workerAssignments.filter(a => a.endDate && a.endDate >= today && a.status === "active");
-    if (activeAssignments.length > 0) {
+    const activePeriods = workerPeriods.filter(p => p.endDate >= today);
+    if (activePeriods.length > 0) {
       const allProjects = await storage.getProjects();
       const projectMap = Object.fromEntries(allProjects.map(p => [p.id, p]));
-      const projectNames = Array.from(new Set(activeAssignments.map(a => projectMap[a.projectId]?.name || "Unknown")));
+      const projectNames = Array.from(new Set(activePeriods.map(p => projectMap[p.projectId]?.name || "Unknown")));
       return res.status(409).json({ message: "Worker has active assignments", projects: projectNames });
     }
 
@@ -1112,6 +1123,80 @@ export function registerRoutes(server: Server, app: Express) {
     res.status(204).send();
   });
 
+  // ===== ASSIGNMENT PERIODS =====
+  app.get("/api/assignments/:assignmentId/periods", requireAuth, async (req: Request, res: Response) => {
+    const periods = await storage.getAssignmentPeriods(parseInt(req.params.assignmentId));
+    res.json(periods);
+  });
+
+  app.post("/api/assignments/:assignmentId/periods", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const assignmentId = parseInt(req.params.assignmentId);
+    const { startDate, endDate, periodType, notes } = req.body;
+    if (!startDate || !endDate) return res.status(400).json({ error: "startDate and endDate required" });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate))
+      return res.status(400).json({ error: "Dates must be YYYY-MM-DD" });
+    if (startDate > endDate) return res.status(400).json({ error: "startDate must be before endDate" });
+
+    // Get the assignment to confirm it exists and get projectId/workerId
+    const allAssignments = await storage.getAssignments();
+    const assignment = allAssignments.find(a => a.id === assignmentId);
+    if (!assignment) return res.status(404).json({ error: "Assignment not found" });
+
+    // Overlap check: no two periods for the same worker should overlap across any project
+    const workerPeriods = await storage.getAssignmentPeriodsByWorker(assignment.workerId);
+    const overlap = workerPeriods.find(p =>
+      p.assignmentId !== assignmentId &&
+      p.startDate <= endDate && p.endDate >= startDate
+    );
+    if (overlap) {
+      return res.status(409).json({ error: `Overlaps with an existing assignment period (${overlap.startDate} – ${overlap.endDate}) on another project` });
+    }
+
+    // Overlap check within same assignment: no two periods should overlap
+    const existing = await storage.getAssignmentPeriods(assignmentId);
+    const selfOverlap = existing.find(p => p.startDate <= endDate && p.endDate >= startDate);
+    if (selfOverlap) {
+      return res.status(409).json({ error: `Overlaps with existing period ${selfOverlap.startDate} – ${selfOverlap.endDate} on this assignment` });
+    }
+
+    const period = await storage.createAssignmentPeriod({
+      assignmentId,
+      projectId: assignment.projectId,
+      workerId: assignment.workerId,
+      startDate,
+      endDate,
+      periodType: periodType || "remob",
+      notes: notes || null,
+    });
+    await logAudit(req.user!.id, "assignment_period.create", "assignment_period", period.id);
+    res.status(201).json(period);
+  });
+
+  app.patch("/api/assignment-periods/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    const { startDate, endDate, periodType, notes } = req.body;
+    if (startDate && !/^\d{4}-\d{2}-\d{2}$/.test(startDate)) return res.status(400).json({ error: "startDate must be YYYY-MM-DD" });
+    if (endDate && !/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return res.status(400).json({ error: "endDate must be YYYY-MM-DD" });
+
+    const period = await storage.updateAssignmentPeriod(id, { startDate, endDate, periodType, notes });
+    if (!period) return res.status(404).json({ error: "Period not found" });
+    await logAudit(req.user!.id, "assignment_period.update", "assignment_period", id);
+    res.json(period);
+  });
+
+  app.delete("/api/assignment-periods/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    const id = parseInt(req.params.id);
+    // Block deletion of last period
+    const [period] = await storage.getAssignmentPeriods(parseInt(req.params.id)).then(ps => ps.filter(p => p.id === id));
+    if (period) {
+      const allPeriods = await storage.getAssignmentPeriods(period.assignmentId);
+      if (allPeriods.length <= 1) return res.status(400).json({ error: "Cannot delete the last period. Delete the assignment instead." });
+    }
+    await storage.deleteAssignmentPeriod(id);
+    await logAudit(req.user!.id, "assignment_period.delete", "assignment_period", id);
+    res.status(204).send();
+  });
+
   // ===== DOCUMENTS =====
   app.get("/api/workers/:workerId/documents", async (req: Request, res: Response) => {
     const docs = await storage.getDocumentsByWorker(parseInt(req.params.workerId));
@@ -1484,7 +1569,26 @@ export function registerRoutes(server: Server, app: Express) {
 
   app.patch("/api/supervisor-reports/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
-    const report = await storage.updateSupervisorReport(id, req.body);
+    const { workerId, reportDate, shift } = req.body;
+
+    // Validate — only whitelist safe fields, never allow projectId/filePath/fileName changes
+    if (reportDate && !/^\d{4}-\d{2}-\d{2}$/.test(reportDate))
+      return res.status(400).json({ error: "reportDate must be YYYY-MM-DD" });
+    if (shift && !["Day", "Night"].includes(shift))
+      return res.status(400).json({ error: "shift must be Day or Night" });
+    if (workerId !== undefined) {
+      const worker = await storage.getWorker(workerId);
+      if (!worker) return res.status(400).json({ error: "Worker not found" });
+    }
+
+    const payload: Record<string, any> = {};
+    if (reportDate !== undefined) payload.reportDate = reportDate;
+    if (shift !== undefined) payload.shift = shift;
+    if (workerId !== undefined) payload.workerId = workerId;
+    // If assigning a worker, mark as filed
+    if (workerId !== undefined) payload.status = "filed";
+
+    const report = await storage.updateSupervisorReport(id, payload);
     if (!report) return res.status(404).json({ error: "Supervisor report not found" });
     await logAudit(req.user!.id, "supervisor_report.update", "supervisor_report", id);
     res.json(report);
@@ -1842,6 +1946,14 @@ export function registerRoutes(server: Server, app: Express) {
     const allAssignments = await storage.getAssignments();
     const allOemTypes = await storage.getOemTypes();
 
+    // Load all periods in one query and build lookup by assignmentId
+    const allPeriodsFlat = await storage.getAllAssignmentPeriods();
+    const periodsByAssignmentDash: Record<number, any[]> = {};
+    allPeriodsFlat.forEach(p => {
+      if (!periodsByAssignmentDash[p.assignmentId]) periodsByAssignmentDash[p.assignmentId] = [];
+      periodsByAssignmentDash[p.assignmentId].push(p);
+    });
+
     const projectMap = Object.fromEntries(allProjects.map(p => [p.id, p]));
     const assignmentsByWorker: Record<number, any[]> = {};
     allAssignments.forEach(a => {
@@ -1856,6 +1968,7 @@ export function registerRoutes(server: Server, app: Express) {
         equipmentType: proj?.equipmentType || "",
         scopeOfWork: proj?.scopeOfWork || "",
         siteName: proj?.siteName || "",
+        periods: (periodsByAssignmentDash[a.id] || []).sort((x: any, y: any) => x.startDate.localeCompare(y.startDate)),
       });
     });
 

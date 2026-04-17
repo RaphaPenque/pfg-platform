@@ -80,6 +80,7 @@ export interface DashboardAssignment {
   equipmentType?: string | null;
   scopeOfWork?: string | null;
   siteName?: string | null;
+  periods?: Array<{ id: number; startDate: string; endDate: string; periodType: string; notes?: string | null }>;
 }
 
 export interface DashboardProject {

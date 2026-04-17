@@ -590,13 +590,18 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                       let lastShift: string | null = null;
                       histogramRows.forEach((row, idx) => {
                         const shift = row.slot.shift || "Day";
-                        const barStart = row.filled && row.assignment?.startDate ? row.assignment.startDate : row.slot.startDate;
-                        const barEnd = row.filled && row.assignment?.endDate ? row.assignment.endDate : row.slot.endDate;
-                        const barStartDate = new Date(barStart);
-                        const barEndDate = new Date(barEnd);
                         const personName = row.assignedWorker ? cleanName(row.assignedWorker.name) : null;
                         const roleName = row.slot.role;
                         const isFilled = row.filled;
+                        // Use periods for multi-bar, fallback to single assignment dates
+                        const barsToRender: Array<{ start: string; end: string }> = isFilled && row.assignment?.periods && row.assignment.periods.length > 0
+                          ? row.assignment.periods.map((p: any) => ({ start: p.startDate, end: p.endDate }))
+                          : [{
+                              start: isFilled && row.assignment?.startDate ? row.assignment.startDate : row.slot.startDate,
+                              end: isFilled && row.assignment?.endDate ? row.assignment.endDate : row.slot.endDate,
+                            }];
+                        const barStart = barsToRender[0].start;
+                        const barEnd = barsToRender[barsToRender.length - 1].end;
 
                         if (shift !== lastShift) {
                           elements.push(
@@ -617,13 +622,21 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                           lastShift = shift;
                         }
 
+                        // Position number: index among all rows sharing the same slotId
+                        const slotRows = histogramRows.filter(r => r.slot.id === row.slot.id || (r.slot.id === 0 && row.slot.id === 0 && r.slot.role === row.slot.role));
+                        const posNum = slotRows.indexOf(row) + 1;
+                        const slotTotal = row.slot.quantity;
+                        const showPosition = slotTotal > 1;
+
                         elements.push(
                           <div key={idx} style={{ display: "grid", gridTemplateColumns: "220px 1fr", alignItems: "center", minHeight: 40, borderBottom: "1px solid #eaecf0" }}>
                             <div style={{ paddingRight: 16 }}>
                               <div style={{ fontSize: 13, fontWeight: 500, color: "#111318", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                                 {personName || <span style={{ color: "#d97706", fontStyle: "italic" }}>Unfilled</span>}
                               </div>
-                              <div style={{ fontSize: 11, color: "#6b7280" }}>{roleName}</div>
+                              <div style={{ fontSize: 11, color: "#6b7280" }}>
+                                {roleName}{showPosition ? <span style={{ marginLeft: 4, opacity: 0.6 }}>{posNum}/{slotTotal}</span> : null}
+                              </div>
                             </div>
                             <div style={{ position: "relative", height: 40, display: "flex", alignItems: "center" }}>
                               {/* Grid cells */}
@@ -632,7 +645,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                                   <div key={ci} style={{ borderRight: ci < weekColumns.length - 1 ? "1px solid #eaecf0" : "none" }} />
                                 ))}
                               </div>
-                              {/* Bar using percentage-based positioning */}
+                              {/* Bars — one per period */}
                               {(() => {
                                 const totalCols = weekColumns.length;
                                 if (totalCols === 0) return null;
@@ -640,25 +653,31 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                                 const rangeEnd = weekColumns[totalCols - 1].endDay.getTime();
                                 const rangeMs = rangeEnd - rangeStart;
                                 if (rangeMs <= 0) return null;
-                                const leftPct = Math.max(0, Math.min(100, (barStartDate.getTime() - rangeStart) / rangeMs * 100));
-                                const rightMs = Math.max(rangeStart, Math.min(rangeEnd, barEndDate.getTime()));
-                                const widthPct = Math.max(0, (rightMs - Math.max(barStartDate.getTime(), rangeStart)) / rangeMs * 100);
-                                return (
-                                  <div
-                                    style={{
-                                      position: "absolute",
-                                      left: `${leftPct}%`,
-                                      width: `${widthPct}%`,
-                                      height: 20,
-                                      borderRadius: 3,
-                                      background: isFilled ? color : "transparent",
-                                      border: isFilled ? "none" : `1.5px dashed ${color}`,
-                                      opacity: isFilled ? 0.85 : 0.55,
-                                      zIndex: 1,
-                                    }}
-                                    title={`${roleName} — ${personName || "Unfilled"} (${barStart} → ${barEnd})`}
-                                  />
-                                );
+                                return barsToRender.map((bar, bIdx) => {
+                                  const barStartDate = new Date(bar.start);
+                                  const barEndDate = new Date(bar.end);
+                                  const leftPct = Math.max(0, Math.min(100, (barStartDate.getTime() - rangeStart) / rangeMs * 100));
+                                  const rightMs = Math.max(rangeStart, Math.min(rangeEnd, barEndDate.getTime()));
+                                  const widthPct = Math.max(0, (rightMs - Math.max(barStartDate.getTime(), rangeStart)) / rangeMs * 100);
+                                  const periodLabel = barsToRender.length > 1 ? ` — Period ${bIdx + 1}` : "";
+                                  return (
+                                    <div
+                                      key={bIdx}
+                                      style={{
+                                        position: "absolute",
+                                        left: `${leftPct}%`,
+                                        width: `${widthPct}%`,
+                                        height: 20,
+                                        borderRadius: 3,
+                                        background: isFilled ? color : "transparent",
+                                        border: isFilled ? "none" : `1.5px dashed ${color}`,
+                                        opacity: isFilled ? 0.85 : 0.55,
+                                        zIndex: 1,
+                                      }}
+                                      title={`${roleName} — ${personName || "Unfilled"} (${bar.start} → ${bar.end})${periodLabel}`}
+                                    />
+                                  );
+                                });
                               })()}
                               {/* Today line */}
                               {(() => {

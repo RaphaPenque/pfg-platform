@@ -326,25 +326,34 @@ function PersonRow({
   // Only show bars for assignments in visible projects
   const visibleAssignments = worker.assignments.filter((a) => visibleProjectIds.has(a.projectId));
 
-  // Build assignment bars per month
-  const assignmentBars = visibleAssignments.map((a) => {
-    const startMonth = dateToMonthIndex(a.startDate);
-    const endMonth = dateToMonthIndex(a.endDate);
+  // Build assignment bars per month — one bar per period (or one bar per assignment if no periods)
+  const assignmentBars = visibleAssignments.flatMap((a) => {
     const proj = projectMap[a.projectId];
     const color = proj ? getProjectColorFromProject(proj) : getProjectColor(a.projectCode);
-    const startFrac = a.startDate ? dateToDayFraction(a.startDate) : 0;
-    const endFrac = a.endDate ? dateToDayFraction(a.endDate) : 1;
     const isFlagged = a.status === "flagged";
 
-    return {
-      assignment: a,
-      startMonth: startMonth ?? 0,
-      endMonth: endMonth ?? 11,
-      startFrac,
-      endFrac,
-      color,
-      isFlagged,
-    };
+    const periodsToRender = (a.periods && a.periods.length > 0)
+      ? a.periods
+      : [{ startDate: a.startDate, endDate: a.endDate }];
+
+    return periodsToRender.map((period: any, pIdx: number) => {
+      const startMonth = dateToMonthIndex(period.startDate);
+      const endMonth = dateToMonthIndex(period.endDate);
+      const startFrac = period.startDate ? dateToDayFraction(period.startDate) : 0;
+      const endFrac = period.endDate ? dateToDayFraction(period.endDate) : 1;
+      return {
+        assignment: a,
+        periodIndex: pIdx,
+        startMonth: startMonth ?? 0,
+        endMonth: endMonth ?? 11,
+        startFrac,
+        endFrac,
+        color,
+        isFlagged,
+        periodStart: period.startDate,
+        periodEnd: period.endDate,
+      };
+    });
   });
 
   return (
@@ -443,7 +452,7 @@ function PersonRow({
                   >
                     <div className="font-semibold">{bar.assignment.projectCode} — {bar.assignment.projectName}</div>
                     <div className="opacity-80 mt-0.5">
-                      {bar.assignment.task || "—"} · {bar.assignment.startDate} → {bar.assignment.endDate}
+                      {bar.assignment.task || "—"} · {bar.periodStart || bar.assignment.startDate} → {bar.periodEnd || bar.assignment.endDate}{(bar.assignment.periods?.length ?? 0) > 1 ? ` (Period ${bar.periodIndex + 1})` : ""}
                     </div>
                   </div>
                 </div>

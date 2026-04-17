@@ -195,3 +195,32 @@ export function sortSlots<T extends { role: string; shift?: string }>(slots: T[]
     return rankA - rankB;
   });
 }
+
+// ── Assignment Period Helpers ──────────────────────────────────────────────
+
+type Period = { startDate: string; endDate: string };
+
+/** Returns true if any of the assignment's periods cover the given date */
+export function workerOnSiteOnDate(
+  assignment: { startDate?: string | null; endDate?: string | null; periods?: Period[] },
+  date: string
+): boolean {
+  const periods = assignment.periods;
+  if (periods && periods.length > 0) {
+    return periods.some(p => p.startDate <= date && p.endDate >= date);
+  }
+  // Fallback to assignment-level dates (pre-migration or missing periods)
+  const s = assignment.startDate;
+  const e = assignment.endDate;
+  if (s && date < s) return false;
+  if (e && date > e) return false;
+  return true;
+}
+
+/** Returns true if any of the assignment's periods overlap with today */
+export function isCurrentlyActive(
+  assignment: { startDate?: string | null; endDate?: string | null; periods?: Period[] }
+): boolean {
+  const today = new Date().toISOString().split('T')[0];
+  return workerOnSiteOnDate(assignment, today);
+}

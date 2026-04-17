@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useToast } from "@/hooks/use-toast";
 import {
   useDashboardData,
@@ -30,7 +30,10 @@ import {
   Send,
   Mail,
   PhoneCall,
+  CalendarDays,
+  Trash2,
 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -167,6 +170,105 @@ function workerIsAvailable(
 }
 
 // ─── Main Component ─────────────────────────────────────────────
+
+// ── Periods Manager ───────────────────────────────────────────────────
+function PeriodsManager({ assignmentId, onUpdate }: { assignmentId: number; onUpdate: () => void }) {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [addingPeriod, setAddingPeriod] = useState(false);
+  const [newPeriod, setNewPeriod] = useState({ startDate: "", endDate: "", notes: "" });
+  const [saving, setSaving] = useState(false);
+
+  const { data: periods = [], refetch } = useQuery<any[]>({
+    queryKey: [`/api/assignments/${assignmentId}/periods`],
+    enabled: open,
+  });
+
+  const handleAdd = useCallback(async () => {
+    if (!newPeriod.startDate || !newPeriod.endDate) return;
+    setSaving(true);
+    try {
+      await apiRequest("POST", `/api/assignments/${assignmentId}/periods`, {
+        ...newPeriod,
+        periodType: "remob",
+      });
+      setNewPeriod({ startDate: "", endDate: "", notes: "" });
+      setAddingPeriod(false);
+      refetch();
+      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      onUpdate();
+      toast({ title: "Period added" });
+    } catch (e: any) {
+      toast({ title: "Failed", description: e.message, variant: "destructive" });
+    }
+    setSaving(false);
+  }, [assignmentId, newPeriod, refetch, onUpdate, toast]);
+
+  const handleDelete = useCallback(async (periodId: number) => {
+    if (!confirm("Remove this period? The worker will show as available during these dates.")) return;
+    try {
+      await apiRequest("DELETE", `/api/assignment-periods/${periodId}`);
+      refetch();
+      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      onUpdate();
+      toast({ title: "Period removed" });
+    } catch (e: any) {
+      toast({ title: "Failed", description: e.message, variant: "destructive" });
+    }
+  }, [refetch, onUpdate, toast]);
+
+  return (
+    <div className="mt-1.5">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center gap-1.5 text-[11px] font-semibold"
+        style={{ color: "var(--pfg-steel)" }}
+      >
+        <CalendarDays className="w-3.5 h-3.5" />
+        Deployment Periods
+        {open ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+      </button>
+      {open && (
+        <div className="mt-1.5 space-y-1 pl-1">
+          {periods.map((p: any) => (
+            <div key={p.id} className="flex items-center gap-2 text-[11px]">
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold" style={{ background: p.periodType === "initial" ? "hsl(var(--muted))" : "#fef3c7", color: p.periodType === "initial" ? "var(--pfg-steel)" : "#92400e" }}>
+                {p.periodType === "initial" ? "Initial" : "Remob"}
+              </span>
+              <span style={{ color: "var(--pfg-navy)" }}>{p.startDate} → {p.endDate}</span>
+              {p.notes && <span style={{ color: "var(--pfg-steel)" }}>— {p.notes}</span>}
+              {p.periodType !== "initial" && (
+                <button onClick={() => handleDelete(p.id)} className="ml-auto opacity-50 hover:opacity-100">
+                  <Trash2 className="w-3 h-3" style={{ color: "#dc2626" }} />
+                </button>
+              )}
+            </div>
+          ))}
+          {addingPeriod ? (
+            <div className="flex items-center gap-2 mt-1">
+              <input type="date" value={newPeriod.startDate} onChange={e => setNewPeriod(p => ({ ...p, startDate: e.target.value }))} className="text-[11px] px-1.5 py-0.5 border rounded" style={{ borderColor: "hsl(var(--border))" }} />
+              <span style={{ color: "var(--pfg-steel)" }}>to</span>
+              <input type="date" value={newPeriod.endDate} onChange={e => setNewPeriod(p => ({ ...p, endDate: e.target.value }))} className="text-[11px] px-1.5 py-0.5 border rounded" style={{ borderColor: "hsl(var(--border))" }} />
+              <input type="text" value={newPeriod.notes} onChange={e => setNewPeriod(p => ({ ...p, notes: e.target.value }))} placeholder="Notes (optional)" className="text-[11px] px-1.5 py-0.5 border rounded flex-1" style={{ borderColor: "hsl(var(--border))" }} />
+              <button onClick={handleAdd} disabled={saving || !newPeriod.startDate || !newPeriod.endDate} className="text-[11px] font-semibold px-2 py-0.5 rounded disabled:opacity-50" style={{ background: "var(--pfg-navy)", color: "#fff" }}>
+                {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : "Add"}
+              </button>
+              <button onClick={() => setAddingPeriod(false)} className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Cancel</button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setAddingPeriod(true)}
+              className="flex items-center gap-1 text-[11px] font-semibold mt-1"
+              style={{ color: "var(--pfg-teal, #005E60)" }}
+            >
+              <Plus className="w-3 h-3" /> Add Remob Period
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ProjectTeamTab({
   project,
@@ -699,6 +801,7 @@ export default function ProjectTeamTab({
                                 </span>
                               )}
                           </div>
+                          <PeriodsManager assignmentId={m.assignment.id} onUpdate={onUpdate} />
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
                           <ShiftBadge shift={m.assignment.shift} />

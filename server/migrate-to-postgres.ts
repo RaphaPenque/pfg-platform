@@ -403,6 +403,40 @@ export async function runSchemaUpdates() {
     // Back-dated entries support
     await db.execute(sql`ALTER TABLE comments_log ADD COLUMN IF NOT EXISTS log_date TEXT`);
 
+    // ── Assignment Periods ────────────────────────────────────────────────────
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS assignment_periods (
+        id SERIAL PRIMARY KEY,
+        assignment_id INTEGER NOT NULL REFERENCES assignments(id) ON DELETE CASCADE,
+        project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        worker_id INTEGER NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
+        start_date TEXT NOT NULL,
+        end_date TEXT NOT NULL,
+        period_type TEXT NOT NULL DEFAULT 'initial',
+        notes TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    // Seed existing assignment startDate/endDate into assignment_periods (idempotent)
+    await db.execute(sql`
+      INSERT INTO assignment_periods (assignment_id, project_id, worker_id, start_date, end_date, period_type)
+      SELECT
+        a.id,
+        a.project_id,
+        a.worker_id,
+        a.start_date,
+        a.end_date,
+        'initial'
+      FROM assignments a
+      WHERE
+        a.start_date IS NOT NULL
+        AND a.end_date IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM assignment_periods ap WHERE ap.assignment_id = a.id
+        )
+    `);
+
     console.log("Schema updates applied.");
   } catch (e: any) {
     console.error("Schema update error:", e.message);

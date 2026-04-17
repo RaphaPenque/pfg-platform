@@ -22,7 +22,7 @@ class WeErrorBoundary extends Component<{ children: ReactNode }, { error: string
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/context/AuthContext";
 import { useDashboardData, type DashboardWorker, type DashboardAssignment } from "@/hooks/use-dashboard-data";
-import { OEM_BRAND_COLORS, CERT_DEFS, calcUtilisation, PROJECT_ROLES, COST_CENTRES, ENGLISH_LEVELS, ROLE_HIERARCHY, getHighestRole, EQUIPMENT_TYPES, OEM_OPTIONS, cleanName } from "@/lib/constants";
+import { OEM_BRAND_COLORS, CERT_DEFS, calcUtilisation, PROJECT_ROLES, COST_CENTRES, ENGLISH_LEVELS, ROLE_HIERARCHY, getHighestRole, EQUIPMENT_TYPES, OEM_OPTIONS, cleanName, isCurrentlyActive } from "@/lib/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Search, ChevronDown, ChevronUp, Info, Upload, Download, ArrowUpDown, Pencil, Plus, X, Check, Loader2, User, FileText, Trash2, CalendarIcon } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -2139,9 +2139,9 @@ export default function WorkforceTable() {
   const totalTemp = workers.filter(w => w.status === "Temp").length;
   const isAssigned = (a: DashboardAssignment) => a.status === "active" || a.status === "flagged" || a.status === "confirmed" || a.status === "pending_confirmation";
   const today = new Date().toISOString().split("T")[0];
-  // Current active assignments (date-scoped to today)
+  // Current active assignments — use periods for date check
   const isCurrentlyAssigned = (w: any) => w.assignments.some((a: DashboardAssignment) =>
-    isAssigned(a) && a.startDate && a.endDate && a.startDate <= today && a.endDate >= today
+    isAssigned(a) && isCurrentlyActive(a)
   );
   const fteOnProject = workers.filter(w => w.status === "FTE" && isCurrentlyAssigned(w)).length;
   const tempOnProject = workers.filter(w => w.status !== "FTE" && isCurrentlyAssigned(w)).length;
@@ -2304,10 +2304,9 @@ export default function WorkforceTable() {
               const rows = sorted.map(w => {
                 const util = calcUtilisation(w.assignments);
                 const today = new Date().toISOString().split("T")[0];
-                const activeAssignment = w.assignments.find(a =>
+                const activeAssignment = w.assignments.find((a: DashboardAssignment) =>
                   (a.status === "active" || a.status === "flagged" || a.status === "confirmed" || a.status === "pending_confirmation") &&
-                  a.startDate && a.endDate &&
-                  a.startDate <= today && a.endDate >= today
+                  isCurrentlyActive(a)
                 );
                 const availabilityLabel = w.status === "FTE" ? "Available" : "Potentially Available";
                 const assignmentLabel = activeAssignment
@@ -2402,10 +2401,9 @@ export default function WorkforceTable() {
                 sorted.map(w => {
                   const isExpanded = expandedId === w.id;
                   const today = new Date().toISOString().split("T")[0];
-                const activeAssignment = w.assignments.find(a =>
+                const activeAssignment = w.assignments.find((a: DashboardAssignment) =>
                   (a.status === "active" || a.status === "flagged" || a.status === "confirmed" || a.status === "pending_confirmation") &&
-                  a.startDate && a.endDate &&
-                  a.startDate <= today && a.endDate >= today
+                  isCurrentlyActive(a)
                 );
                 const availabilityLabel = w.status === "FTE" ? "Available" : "Potentially Available";
                   const hasFlagged = w.assignments.some(a => a.status === "flagged");
