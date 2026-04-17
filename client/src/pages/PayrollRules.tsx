@@ -16,6 +16,7 @@ interface PayrollRule {
   nightShiftStart: string | null;
   nightShiftEnd: string | null;
   trackSundayHours: boolean;
+  trackPublicHolidays: boolean;
   standbyDayHours: number;
   notes: string | null;
   updatedAt: string;
@@ -241,16 +242,24 @@ export default function PayrollRules() {
                     🌙 Night shift {rule.nightShiftStart}–{rule.nightShiftEnd}
                   </span>
                 )}
+                {rule.trackPublicHolidays && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full"
+                    style={{ background: "rgba(26,29,35,0.08)", color: "#1A1D23", border: "1px solid rgba(26,29,35,0.15)" }}>
+                    🗓 Public holidays tracked
+                  </span>
+                )}
                 {rule.trackSundayHours && (
                   <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full"
                     style={{ background: "rgba(26,29,35,0.08)", color: "#1A1D23", border: "1px solid rgba(26,29,35,0.15)" }}>
                     📆 Sunday hours tracked
                   </span>
                 )}
-                <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full"
-                  style={{ background: "hsl(var(--muted))", color: "var(--pfg-steel)", border: "1px solid hsl(var(--border))" }}>
-                  STD = {rule.standbyDayHours}hrs/day
-                </span>
+                {rule.weeklyOtThresholdHours != null && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full"
+                    style={{ background: "hsl(var(--muted))", color: "var(--pfg-steel)", border: "1px solid hsl(var(--border))" }}>
+                    Classifications: Std / NS / OT / OT NS{rule.trackPublicHolidays ? " / PH / PH OT NS" : ""}
+                  </span>
+                )}
               </div>
 
               {rule.notes && (
