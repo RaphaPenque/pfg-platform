@@ -503,7 +503,8 @@ function sortRosterMembers(members: { worker: DashboardWorker; assignment: Dashb
 export async function generateProjectOverviewPdf(
   project: { code: string; name: string; customer: string | null; location: string | null; equipmentType: string | null; startDate: string | null; endDate: string | null; shift: string | null; headcount: number | null; status: string | null },
   teamMembers: { worker: DashboardWorker; assignment: DashboardAssignment }[],
-  customerName: string
+  customerName: string,
+  roleSlots?: Array<{ id: number; periods?: Array<{ startDate: string; endDate: string }> }>
 ): Promise<jsPDF> {
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
@@ -681,10 +682,11 @@ const HEADER_H = 36;
     doc.setFont("helvetica", "normal");
     doc.text(truncate(roleLabel, 24), rosterCols[1].x, y);
     doc.text(rowShift, rosterCols[2].x, y);
-    // Use periods for full engagement range if available
-    const periods = (m.assignment as any).periods;
-    const displayStart = periods?.length > 0 ? periods[0].startDate : m.assignment.startDate;
-    const displayEnd = periods?.length > 0 ? periods[periods.length - 1].endDate : m.assignment.endDate;
+    // Use slot periods for full engagement range if available
+    const slot = roleSlots?.find(s => s.id === m.assignment.roleSlotId);
+    const slotPeriods = slot?.periods;
+    const displayStart = slotPeriods?.length ? slotPeriods[0].startDate : m.assignment.startDate;
+    const displayEnd = slotPeriods?.length ? slotPeriods[slotPeriods.length - 1].endDate : m.assignment.endDate;
     doc.text(displayStart || "—", rosterCols[3].x, y);
     doc.text(displayEnd || "—", rosterCols[4].x, y);
     doc.setFontSize(7);
@@ -702,14 +704,15 @@ const HEADER_H = 36;
 export async function downloadCustomerPack(
   project: { code: string; name: string; customer: string | null; location: string | null; equipmentType: string | null; startDate: string | null; endDate: string | null; shift: string | null; headcount: number | null; status: string | null },
   teamMembers: { worker: DashboardWorker; assignment: DashboardAssignment }[],
-  customerName: string
+  customerName: string,
+  roleSlots?: Array<{ id: number; periods?: Array<{ startDate: string; endDate: string }> }>
 ) {
   const zip = new JSZip();
   const date = new Date().toISOString().split("T")[0];
   const projectFolder = zip.folder(`${project.code}_CustomerPack_${date}`)!;
 
   // 1. Project overview PDF
-  const overviewDoc = await generateProjectOverviewPdf(project, teamMembers, customerName);
+  const overviewDoc = await generateProjectOverviewPdf(project, teamMembers, customerName, roleSlots);
   const overviewBlob = overviewDoc.output("blob");
   projectFolder.file(`${project.code}_ProjectOverview.pdf`, overviewBlob);
 

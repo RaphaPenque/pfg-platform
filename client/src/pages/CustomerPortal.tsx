@@ -534,7 +534,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                   onClick={async () => {
                     if (!portalData || downloading) return;
                     setDownloading(true);
-                    try { await downloadCustomerPack(portalData.project, portalData.teamMembers, portalData.customer); }
+                    try { await downloadCustomerPack(portalData.project, portalData.teamMembers, portalData.customer, portalData.projectRoleSlots); }
                     finally { setDownloading(false); }
                   }}
                   disabled={downloading}
@@ -727,7 +727,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                     onClick={async () => {
                       if (!portalData || downloading) return;
                       setDownloading(true);
-                      try { await downloadCustomerPack(portalData.project, portalData.teamMembers, portalData.customer); }
+                      try { await downloadCustomerPack(portalData.project, portalData.teamMembers, portalData.customer, portalData.projectRoleSlots); }
                       finally { setDownloading(false); }
                     }}
                     disabled={downloading}

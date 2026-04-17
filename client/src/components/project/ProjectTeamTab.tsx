@@ -630,14 +630,19 @@ export default function ProjectTeamTab({
                 {/* Existing members for this slot */}
                 {slotMembers.length > 0 && (
                   <div className="px-5 py-3 space-y-1.5">
-                    {slotMembers.map((m) => (
+                    {slotMembers.map((m, mIdx) => (
                       <div
                         key={m.assignment.id}
                         className="flex items-center gap-3 px-4 py-2.5 rounded-lg border transition-colors"
                         style={{ borderColor: "hsl(var(--border))" }}
                       >
                         <div className="flex-1 min-w-0">
-                          <div className="text-[13px] font-semibold text-pfg-navy">
+                          <div className="text-[13px] font-semibold text-pfg-navy flex items-center gap-1.5">
+                            {slot.quantity > 1 && (
+                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded tabular-nums" style={{ background: "hsl(var(--muted))", color: "var(--pfg-steel)" }}>
+                                {mIdx + 1}/{slot.quantity}
+                              </span>
+                            )}
                             {cleanName(m.worker.name)}
                             {m.worker.driversLicenseUploaded ? (
                               <span
