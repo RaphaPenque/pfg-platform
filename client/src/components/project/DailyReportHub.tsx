@@ -2105,6 +2105,7 @@ function QHSETab({
     .filter((a) => a.projectId === project.id)
     .map((a) => workers.find((w) => w.id === a.workerId))
     .filter(Boolean) as DashboardWorker[];
+  const projectWorkerCount = new Set(projectWorkers.map(w => w.id)).size;
 
   return (
     <div className="space-y-4">
@@ -2299,6 +2300,7 @@ function QHSETab({
                             {obsType.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
                           </span>
                         </Td>
+                        <Td>{o.reportedByWorkerId ? (workers.find((w: any) => String(w.id) === String(o.reportedByWorkerId))?.name || `Worker #${o.reportedByWorkerId}`) : "—"}</Td>
                         <Td>{o.locationOnSite || o.location || "—"}</Td>
                         <Td>{o.description ? o.description.substring(0, 60) + (o.description.length > 60 ? "…" : "") : "—"}</Td>
                         <Td>
@@ -2743,7 +2745,7 @@ function ModalField({ label, children }: { label: string; children: React.ReactN
 // SUB-TAB 4: Safety KPIs
 // ════════════════════════════════════════════════════════════════════
 
-function SafetyKPIsTab({ project }: { project: DashboardProject }) {
+function SafetyKPIsTab({ project, projectWorkerCount = 1 }: { project: DashboardProject; projectWorkerCount?: number }) {
   // Load all QHSE data for calculations
   const { data: observations = [] } = useQuery<any[]>({
     queryKey: [`/api/projects/${project.id}/safety-observations`],
@@ -2769,11 +2771,13 @@ function SafetyKPIsTab({ project }: { project: DashboardProject }) {
 
   // Calculate KPIs from data
   const kpis = useMemo(() => {
+    // observationType is snake_case from DB: positive, unsafe_condition, negative, near_miss, stop_work
+    const obsType = (o: any) => (o.observationType || o.type || "").toLowerCase().replace(/[\s-]/g, "_");
     const totalObs = observations.length;
-    const positiveObs = observations.filter((o: any) => o.type === "Positive").length;
-    const unsafeObs = observations.filter((o: any) => o.type === "Unsafe").length;
-    const negativeObs = observations.filter((o: any) => o.type === "Negative").length;
-    const stopWorkObs = observations.filter((o: any) => o.type === "STOP WORK").length;
+    const positiveObs = observations.filter((o: any) => obsType(o) === "positive").length;
+    const unsafeObs = observations.filter((o: any) => obsType(o) === "unsafe_condition").length;
+    const negativeObs = observations.filter((o: any) => obsType(o) === "negative").length;
+    const stopWorkObs = observations.filter((o: any) => obsType(o) === "stop_work").length;
 
     const totalInc = incidents.length;
     const ltiCount = incidents.filter((i: any) => i.lostTime || i.type === "LTI").length;
@@ -2786,11 +2790,9 @@ function SafetyKPIsTab({ project }: { project: DashboardProject }) {
 
     const positiveRate = totalObs > 0 ? Math.round((positiveObs / totalObs) * 100) : 0;
 
-    // Safety participation: unique reporters / total on-site workers × 100
+    // Safety participation: unique reporters / total workers on this project × 100
     const uniqueReporters = new Set(observations.map((o: any) => o.reportedByWorkerId).filter(Boolean)).size;
-    const onSiteCount = Math.max(1, toolboxTalks.length > 0
-      ? (new Set(toolboxTalks.map((t: any) => t.workerId).filter(Boolean)).size || 1)
-      : 1);
+    const onSiteCount = Math.max(1, projectWorkerCount);
     const participationRate = totalObs > 0 ? Math.min(100, Math.round((uniqueReporters / onSiteCount) * 100)) : 0;
 
     // TBT compliance: days with TBT / total project days
@@ -2930,7 +2932,7 @@ export default function DailyReportHub({ project, workers, assignments, roleSlot
         <QHSETab project={project} workers={workers} assignments={assignments} user={user} />
       )}
       {activeSubTab === "kpis" && (
-        <SafetyKPIsTab project={project} />
+        <SafetyKPIsTab project={project} projectWorkerCount={new Set(assignments.filter(a => a.projectId === project.id).map(a => a.workerId)).size} />
       )}
     </div>
   );
