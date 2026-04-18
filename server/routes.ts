@@ -983,7 +983,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(project);
   });
 
-  app.post("/api/projects/:id/status", async (req: Request, res: Response) => {
+  const handleProjectStatus = async (req: Request, res: Response) => {
     const { status } = req.body;
     if (!status || !["active", "completed", "cancelled", "potential"].includes(status)) {
       return res.status(400).json({ error: "Invalid status" });
@@ -1013,7 +1013,9 @@ export function registerRoutes(server: Server, app: Express) {
     const updated = await storage.updateProjectStatus(project.id, status);
     await logAudit(req.user!.id, "project.status", "project", project.id, project.name, { status: { from: project.status, to: status } });
     res.json(updated);
-  });
+  };
+  app.post("/api/projects/:id/status", handleProjectStatus);
+  app.patch("/api/projects/:id/status", handleProjectStatus);
 
   app.delete("/api/projects/:id", requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
     const project = await storage.getProject(parseInt(req.params.id));
