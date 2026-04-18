@@ -4,9 +4,13 @@
  * Called from server/index.ts every hour; only fires on Monday (UTC 07:00 = 08:00 BST).
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import { storage } from './storage';
 import { sendMail } from './email';
 import { generateWeeklyReportPdfHtml, type ReportData } from './report-generator';
+
+const UPLOAD_ROOT = process.env.UPLOAD_ROOT || '/data/uploads';
 
 const APP_URL = process.env.APP_URL || 'https://pfg-platform.onrender.com';
 
@@ -56,50 +60,42 @@ function buildEmailHtml(
   pmName: string,
   portalUrl: string,
 ): string {
-  return `
-<!DOCTYPE html>
-<html>
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="font-family:'Inter',Arial,sans-serif;background:#f4f4f5;padding:40px 0;">
-  <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.08);">
-    <div style="background:#1A1D23;padding:28px 32px;text-align:center;">
-      <img src="${APP_URL}/logo-gold.png" alt="Powerforce Global" height="36" style="display:block;margin:0 auto;" />
-    </div>
-    <div style="padding:32px;color:#1A1D23;">
-      <h2 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#1A1D23;">
-        Weekly Project Report
-      </h2>
-      <p style="margin:0 0 16px;color:#4b5563;font-size:15px;line-height:1.6;">
-        Please find attached the <strong>Weekly Project Report</strong> for
-        <strong>${projectName}</strong>, covering the week ending
-        <strong>${weekEndFormatted}</strong>.
-      </p>
-      <p style="margin:0 0 16px;color:#4b5563;font-size:14px;line-height:1.6;">
-        This report includes the delays log, comments &amp; concerns,
-        workforce deployment, and the health &amp; safety summary for the reporting period.
-        Completed tasks are available to browse on the live project portal.
-      </p>
-      <div style="text-align:center;margin:28px 0;">
-        <a href="${portalUrl}"
-           style="display:inline-block;background:#F5BD00;color:#1A1D23;font-weight:700;font-size:15px;padding:14px 32px;border-radius:8px;text-decoration:none;">
-          View Live Project Portal
-        </a>
-      </div>
-      <p style="margin:24px 0 0;font-size:13px;color:#6b7280;">
-        Prepared by <strong>${pmName}</strong> · Powerforce Global Project Management
-      </p>
-      <p style="margin:8px 0 0;font-size:12px;color:#9ca3af;">
-        If you have any questions about this report, please contact your Powerforce Global project manager.
-      </p>
-    </div>
-    <div style="text-align:center;padding:20px 32px;font-size:11px;color:#9ca3af;border-top:1px solid #f0f0f0;">
-      &copy; ${new Date().getFullYear()} Powerforce Global &middot; Confidential &middot;
-      <a href="${APP_URL}" style="color:#63758C;text-decoration:none;">pfg-platform.onrender.com</a>
-    </div>
-  </div>
-</body>
-</html>`;
+  const iconUrl = `${APP_URL}/logo-gold-mark.png`;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#F4F5F7;font-family:'Helvetica Neue',Arial,sans-serif;-webkit-font-smoothing:antialiased;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F4F5F7;"><tr><td align="center" style="padding:40px 16px;">
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;background:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 4px 24px rgba(17,24,39,0.09);">
+      <tr><td style="background:#1a2744;padding:20px 32px;border-bottom:3px solid #D4A017;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+          <td><img src="${iconUrl}" alt="Powerforce Global" height="34" style="display:block;height:34px;width:auto;"/></td>
+          <td align="right" style="vertical-align:middle;"><span style="font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.4);">Weekly Project Report</span></td>
+        </tr></table>
+      </td></tr>
+      <tr><td style="padding:28px 32px 22px;">
+        <p style="margin:0 0 20px;font-size:19px;font-weight:700;color:#111827;">Weekly Report Ready</p>
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#EEF1F7;border-radius:8px;margin-bottom:22px;overflow:hidden;"><tr>
+          <td style="padding:18px 20px;">
+            <p style="margin:0 0 2px;font-size:9px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#6B7C93;">Project</p>
+            <p style="margin:0 0 14px;font-size:16px;font-weight:700;color:#111827;">${projectName}</p>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
+              <td width="50%"><p style="margin:0 0 2px;font-size:9px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#6B7C93;">Week Ending</p><p style="margin:0;font-size:13px;font-weight:600;color:#111827;">${weekEndFormatted}</p></td>
+              <td width="50%"><p style="margin:0 0 2px;font-size:9px;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:#6B7C93;">Prepared By</p><p style="margin:0;font-size:13px;font-weight:600;color:#111827;">${pmName}</p></td>
+            </tr></table>
+          </td>
+          <td width="4" style="background:#D4A017;">&nbsp;</td>
+        </tr></table>
+        <p style="margin:0 0 20px;font-size:13px;color:#374151;line-height:1.65;">Please find attached the weekly project report for <strong>${projectName}</strong>. The report includes the H&amp;S summary, agreed delays, comments &amp; concerns, and on-site workforce. Completed tasks are viewable on the live portal.</p>
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:22px 0;"><tr><td align="center">
+          <a href="${portalUrl}" style="display:inline-block;background:#D4A017;color:#1a2744;font-family:'Helvetica Neue',Arial,sans-serif;font-weight:700;font-size:14px;padding:13px 34px;border-radius:8px;text-decoration:none;">View on Project Portal &rarr;</a>
+        </td></tr></table>
+      </td></tr>
+      <tr><td style="padding:0 32px;"><div style="height:1px;background:#E5E7EB;"></div></td></tr>
+      <tr><td style="padding:16px 32px 20px;"><p style="margin:0;font-size:11px;color:#9CA3AF;">Sent by <strong style="color:#6B7280;">Powerforce Global</strong> &mdash; ${pmName}<br>&copy; ${new Date().getFullYear()} Powerforce Global &middot; Confidential</p></td></tr>
+    </table>
+  </td></tr></table>
+</body></html>`;
 }
+
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
@@ -222,6 +218,56 @@ async function sendReportForProject(
   const filename = isFinal
     ? `${project.code}-final-report-${report.reportDate}.pdf`
     : `${project.code}-report-w-e-${weekEnd}.pdf`;
+
+  // Store PDF to disk and create/update weekly_reports record
+  if (!isFinal) {
+    try {
+      const reportDir = path.join(UPLOAD_ROOT, 'reports', project.code);
+      fs.mkdirSync(reportDir, { recursive: true });
+      const pdfPath = path.join(reportDir, filename);
+      fs.writeFileSync(pdfPath, pdfBuffer);
+
+      // Aggregate data to store in DB (for inline portal view)
+      const aggregatedData = {
+        weekStart,
+        weekEnd,
+        delays: reportDelays,
+        comments: reportComments.map((c: any) => ({
+          date: c.logDate || c.enteredAt?.slice(0, 10) || '',
+          entry: c.entry || '',
+          userName: (c as any).userName || '',
+        })),
+        tasks: weekReports.flatMap((r: any) => Array.isArray(r.completedTasks) ? r.completedTasks : []),
+        safetyStats: reportData.safetyData,
+        teamMembers,
+        daysRemaining,
+        progressPct: reportData.progressPct,
+      };
+
+      const existing = await storage.getWeeklyReportByWeek(project.id, weekStart);
+      if (existing) {
+        await storage.updateWeeklyReport(existing.id, {
+          status: 'published',
+          pdfPath,
+          aggregatedData,
+          sentAt: new Date() as any,
+        });
+      } else {
+        await storage.createWeeklyReport({
+          projectId: project.id,
+          weekCommencing: weekStart,
+          weekEnding: weekEnd,
+          status: 'published',
+          pdfPath,
+          aggregatedData,
+          sentAt: new Date() as any,
+        });
+      }
+      console.log(`[report-scheduler] Weekly report stored: ${pdfPath}`);
+    } catch (storeErr) {
+      console.error(`[report-scheduler] Failed to store weekly report PDF:`, storeErr);
+    }
+  }
 
   const subject = isFinal
     ? `Final Project Report — ${project.name}`

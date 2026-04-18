@@ -629,3 +629,19 @@ export const lessonsLearned = pgTable("lessons_learned", {
 export const insertLessonsLearnedSchema = createInsertSchema(lessonsLearned).omit({ id: true });
 export type LessonsLearned = typeof lessonsLearned.$inferSelect;
 export type InsertLessonsLearned = z.infer<typeof insertLessonsLearnedSchema>;
+
+// ─── Weekly Reports (pre-stored, published every Monday) ─────────────────────
+export const weeklyReports = pgTable("weekly_reports", {
+  id: serial("id").primaryKey(),
+  projectId: integer("project_id").notNull().references(() => projects.id, { onDelete: "cascade" }),
+  weekCommencing: text("week_commencing").notNull(),   // ISO date e.g. "2026-04-13"
+  weekEnding: text("week_ending").notNull(),            // ISO date e.g. "2026-04-19"
+  status: text("status").notNull().default("published"), // "draft" | "published"
+  pdfPath: text("pdf_path"),                             // absolute path on disk
+  aggregatedData: jsonb("aggregated_data").default({}),  // { delays, comments, safetyStats, teamMembers, tasks }
+  createdAt: timestamp("created_at").defaultNow(),
+  sentAt: timestamp("sent_at"),
+});
+export const insertWeeklyReportSchema = createInsertSchema(weeklyReports).omit({ id: true, createdAt: true });
+export type WeeklyReport = typeof weeklyReports.$inferSelect;
+export type InsertWeeklyReport = z.infer<typeof insertWeeklyReportSchema>;

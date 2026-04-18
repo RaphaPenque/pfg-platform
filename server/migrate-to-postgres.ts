@@ -961,6 +961,21 @@ async function migrate(db: ReturnType<typeof drizzle>) {
   // Reset users sequence
   await db.execute(sql.raw(`SELECT setval(pg_get_serial_sequence('users', 'id'), COALESCE((SELECT MAX(id) FROM users), 0) + 1, false)`));
 
+  // Weekly reports table
+  await db.execute(sql`CREATE TABLE IF NOT EXISTS weekly_reports (
+    id         SERIAL PRIMARY KEY,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    week_commencing TEXT NOT NULL,
+    week_ending     TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'published',
+    pdf_path        TEXT,
+    aggregated_data JSONB DEFAULT '{}',
+    created_at      TIMESTAMP DEFAULT NOW(),
+    sent_at         TIMESTAMP,
+    UNIQUE(project_id, week_commencing)
+  )`);
+  console.log("weekly_reports table ensured");
+
   console.log("Migration complete!");
 }
 

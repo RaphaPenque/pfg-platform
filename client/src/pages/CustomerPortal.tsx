@@ -342,6 +342,235 @@ function TimesheetsTab({ projectCode, color }: { projectCode: string; color: str
   );
 }
 
+
+// ─── Weekly Reports Tab ──────────────────────────────────────────────────────
+function WeeklyReportsTab({ projectCode, color, project }: { projectCode: string; color: string; project: any }) {
+  const [expanded, setExpanded] = React.useState<number | null>(null);
+
+  const { data: reports = [], isLoading } = useQuery({
+    queryKey: [`/api/portal/${projectCode}/weekly-reports`],
+    queryFn: async () => {
+      const res = await fetch(`/api/portal/${projectCode}/weekly-reports`);
+      if (!res.ok) throw new Error("Failed to load reports");
+      return res.json() as Promise<Array<{
+        id: number;
+        weekCommencing: string;
+        weekEnding: string;
+        hasPdf: boolean;
+        sentAt: string;
+        aggregatedData: {
+          delays: Array<{ description: string; duration?: string; agreedWithCustomer?: string }>;
+          comments: Array<{ date: string; entry: string; userName: string }>;
+          tasks: Array<{ description: string; percentComplete?: number; notes?: string } | string>;
+          safetyStats: { toolboxTalks: number; observations: number; nearMisses: number; incidents: number };
+          teamMembers: Array<{ name: string; role: string; shift: string }>;
+          daysRemaining: number;
+          progressPct: number;
+        };
+      }>>;
+    },
+  });
+
+  function fmtWeek(wc: string, we: string) {
+    const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" };
+    try {
+      const wcFmt = new Date(wc + "T00:00:00Z").toLocaleDateString("en-GB", opts);
+      const weFmt = new Date(we + "T00:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "long", timeZone: "UTC" });
+      return { heading: `Week commencing ${wcFmt}`, subheading: `w/c ${wc} – ${we}` };
+    } catch { return { heading: `w/c ${wc}`, subheading: "" }; }
+  }
+
+  if (isLoading) return (
+    <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 8, padding: "60px 24px", textAlign: "center" }}>
+      <div style={{ width: 28, height: 28, border: `3px solid ${color}`, borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite", margin: "0 auto 12px" }} />
+      <p style={{ fontSize: 13, color: "#6b7280" }}>Loading reports…</p>
+    </div>
+  );
+
+  if (reports.length === 0) return (
+    <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 8, padding: "60px 24px", textAlign: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+      <div style={{ fontSize: 36, marginBottom: 12, opacity: 0.25 }}>📋</div>
+      <div style={{ fontSize: 14, fontWeight: 600, color: "#374151", marginBottom: 6 }}>No reports published yet</div>
+      <p style={{ fontSize: 13, color: "#9CA3AF", maxWidth: "40ch", margin: "0 auto" }}>
+        Weekly reports are published every Monday morning and will appear here.
+      </p>
+    </div>
+  );
+
+  return (
+    <div style={{ animation: "fadeIn 180ms ease-out" }}>
+      <div style={{ marginBottom: 20 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 700, color: "#1a2744" }}>Weekly Project Reports</h2>
+        <p style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
+          Published every Monday · {reports.length} report{reports.length !== 1 ? "s" : ""} available · PDF attached to each
+        </p>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {reports.map(report => {
+          const isOpen = expanded === report.id;
+          const { heading } = fmtWeek(report.weekCommencing, report.weekEnding);
+          const d = report.aggregatedData || {};
+          const delays = d.delays || [];
+          const comments = d.comments || [];
+          const tasks = d.tasks || [];
+          const safety = d.safetyStats || { toolboxTalks: 0, observations: 0, nearMisses: 0, incidents: 0 };
+          const team = d.teamMembers || [];
+
+          return (
+            <div key={report.id} style={{ background: "#fff", border: `1px solid ${isOpen ? color + "44" : "#E5E7EB"}`, borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", transition: "border-color 0.15s" }}>
+
+              {/* Header row */}
+              <div
+                onClick={() => setExpanded(isOpen ? null : report.id)}
+                style={{ display: "flex", alignItems: "center", gap: 16, padding: "16px 20px", cursor: "pointer", userSelect: "none" }}
+              >
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#16A34A", flexShrink: 0 }} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>{heading}</div>
+                  <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
+                    {tasks.length} task{tasks.length !== 1 ? "s" : ""} · {delays.length} delay{delays.length !== 1 ? "s" : ""} · {comments.length} comment{comments.length !== 1 ? "s" : ""}
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  {report.hasPdf && (
+                    <a
+                      href={`/api/portal/${projectCode}/weekly-reports/${report.id}/pdf`}
+                      download
+                      onClick={e => e.stopPropagation()}
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6, background: color + "18", color, border: `1.5px solid ${color}44`, padding: "6px 12px", borderRadius: 6, fontSize: 11, fontWeight: 700, textDecoration: "none", whiteSpace: "nowrap" }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                      Download PDF
+                    </a>
+                  )}
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}><polyline points="6 9 12 15 18 9"/></svg>
+                </div>
+              </div>
+
+              {/* Expandable body */}
+              {isOpen && (
+                <div style={{ borderTop: `1px solid #F3F4F6`, padding: "20px 24px", display: "flex", flexDirection: "column", gap: 20 }}>
+
+                  {/* H&S summary tiles */}
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: "#6B7C93", marginBottom: 10 }}>Health & Safety Summary</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+                      {[
+                        { label: "Toolbox Talks", value: safety.toolboxTalks, ok: true },
+                        { label: "Safety Obs", value: safety.observations, ok: true },
+                        { label: "Near Misses", value: safety.nearMisses, ok: safety.nearMisses === 0 },
+                        { label: "Incidents", value: safety.incidents, ok: safety.incidents === 0 },
+                      ].map(tile => (
+                        <div key={tile.label} style={{ background: "#FAFBFC", border: "1px solid #E5E7EB", borderRadius: 6, padding: "10px 14px" }}>
+                          <div style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", color: "#6B7C93", marginBottom: 4 }}>{tile.label}</div>
+                          <div style={{ fontSize: 22, fontWeight: 800, color: !tile.ok ? "#B91C1C" : "#1a2744", lineHeight: 1 }}>{tile.value}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Delays */}
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: "#6B7C93", marginBottom: 8 }}>Agreed Delays {delays.length > 0 && <span style={{ color: "#B45309" }}>({delays.length})</span>}</div>
+                    {delays.length === 0 ? (
+                      <p style={{ fontSize: 12, color: "#9CA3AF" }}>No agreed delays recorded this week.</p>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {delays.map((d: any, i: number) => (
+                          <div key={i} style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 6, padding: "10px 14px" }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: "#92400E" }}>{d.description}</div>
+                            {d.duration && <div style={{ fontSize: 11, color: "#B45309", marginTop: 2 }}>Duration: {d.duration}{d.agreedWithCustomer ? " · Customer agreed" : ""}</div>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Comments */}
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: "#6B7C93", marginBottom: 8 }}>Comments & Concerns</div>
+                    {comments.length === 0 ? (
+                      <p style={{ fontSize: 12, color: "#9CA3AF" }}>No comments recorded this week.</p>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {comments.map((c: any, i: number) => (
+                          <div key={i} style={{ background: "#F8F9FA", border: "1px solid #E5E7EB", borderRadius: 6, padding: "10px 14px" }}>
+                            <div style={{ fontSize: 10, fontWeight: 700, color: "#6B7C93", marginBottom: 3 }}>{c.userName || "Project Manager"} · {c.date}</div>
+                            <div style={{ fontSize: 12, color: "#374151", lineHeight: 1.55 }}>{c.entry}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Tasks — accordion */}
+                  {tasks.length > 0 && (
+                    <TasksAccordion tasks={tasks} color={color} />
+                  )}
+
+                  {/* On-site workforce */}
+                  <div>
+                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: "#6B7C93", marginBottom: 8 }}>On-site Workforce ({team.length})</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 6 }}>
+                      {team.map((m: any, i: number) => (
+                        <div key={i} style={{ background: "#FAFBFC", border: "1px solid #E5E7EB", borderRadius: 6, padding: "8px 12px" }}>
+                          <div style={{ fontSize: 11, fontWeight: 600, color: "#1a2744" }}>{m.name}</div>
+                          <div style={{ fontSize: 10, color: "#6B7C93", marginTop: 1 }}>{m.role}</div>
+                          <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: m.shift === "night" ? "#3730A3" : "#B45309", marginTop: 1 }}>{m.shift}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Tasks accordion sub-component
+function TasksAccordion({ tasks, color }: { tasks: any[]; color: string }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div style={{ border: "1px solid #E5E7EB", borderRadius: 6, overflow: "hidden" }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "#FAFBFC", border: "none", cursor: "pointer", textAlign: "left" }}
+      >
+        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: "#6B7C93" }}>
+          Completed Tasks <span style={{ color }}>({tasks.length})</span>
+        </div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      {open && (
+        <div style={{ padding: "8px 14px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+          {tasks.map((t: any, i: number) => {
+            const desc = typeof t === "string" ? t : t.description || "";
+            const pct = typeof t === "object" ? (t.percentComplete ?? null) : null;
+            const notes = typeof t === "object" ? t.notes : null;
+            return (
+              <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                <div style={{ width: 16, height: 16, borderRadius: "50%", background: "#DCFCE7", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}>
+                  <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#16A34A" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                </div>
+                <div>
+                  <div style={{ fontSize: 12, color: "#374151" }}>{desc}{pct !== null ? <span style={{ marginLeft: 6, fontSize: 10, color: "#6B7C93" }}>{pct}%</span> : ""}</div>
+                  {notes && <div style={{ fontSize: 10, color: "#9CA3AF", marginTop: 1 }}>{notes}</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function CustomerPortal({ params }: { params: { projectCode: string } }) {
   const [activeTab, setActiveTab] = useState<"overview" | "reports" | "hs" | "timesheets">("overview");
   const [downloading, setDownloading] = useState(false);
@@ -912,37 +1141,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
 
         {/* ════════════════ TAB 2: PROJECT REPORTS ════════════════ */}
         {activeTab === "reports" && (
-          <div style={{ animation: "fadeIn 180ms ease-out" }}>
-            <div className="flex items-center gap-3 mb-6">
-              <h2 style={{ fontSize: 16, fontWeight: 700, letterSpacing: "-0.01em", color: "#111318" }}>Weekly Project Reports</h2>
-            </div>
-
-            {(!publishedReports || publishedReports.length === 0) ? (
-              <div className="rounded-xl p-12 text-center" style={{ background: "#fff", border: "1px solid #e2e5eb", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-3" style={{ background: "#F4F5F7", color: "#b0b8c4" }}>
-                  <Info className="w-5 h-5" />
-                </div>
-                <div style={{ fontSize: 14, fontWeight: 600, color: "#6b7280", marginBottom: 4 }}>No reports published yet</div>
-                <p style={{ fontSize: 12, color: "#b0b8c4", maxWidth: "36ch", margin: "0 auto" }}>
-                  Weekly reports will appear here every Monday morning.
-                </p>
-              </div>
-            ) : (
-              <>
-                <div className="rounded-xl p-6 mb-6" style={{ background: "#fff", border: "1px solid #e2e5eb", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: "#111318", marginBottom: 8 }}>Automated Weekly Reports</div>
-                  <p style={{ fontSize: 14, color: "#6b7280", maxWidth: "60ch" }}>
-                    Reports are published every Monday. You'll receive an email with the PDF attached.
-                  </p>
-                </div>
-                <div className="flex flex-col gap-3">
-                  {publishedReports.map((report: any) => (
-                    <ReportRow key={report.id} report={report} color={color} projectCode={params.projectCode} />
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
+          <WeeklyReportsTab projectCode={params.projectCode} color={color} project={project} />
         )}
 
         {/* ════════════════ TAB 3: HEALTH & SAFETY ════════════════ */}

@@ -479,7 +479,8 @@ export function registerRoutes(server: Server, app: Express) {
         oemColour: (project as any).oemColour || '#005E60',
       };
 
-      const pdfBuffer = await generateWeeklyReportPdf(reportData);
+      const { generateWeeklyReportPdfHtml } = await import('./report-generator');
+      const pdfBuffer = await generateWeeklyReportPdfHtml(reportData as any);
 
       const dateStr = report.reportDate.replace(/-/g, '');
       res.setHeader('Content-Type', 'application/pdf');
@@ -489,6 +490,48 @@ export function registerRoutes(server: Server, app: Express) {
     } catch (err: any) {
       console.error('[portal-pdf] Error generating report PDF:', err);
       res.status(500).json({ error: 'Failed to generate PDF', detail: err?.message });
+    }
+  });
+
+  // ── GET /api/portal/:code/weekly-reports — list published weekly reports ──
+  app.get("/api/portal/:code/weekly-reports", async (req: Request, res: Response) => {
+    try {
+      const code = req.params.code.toUpperCase();
+      const allProjects = await storage.getProjects();
+      const project = allProjects.find(p => p.code === code);
+      if (!project) return res.status(404).json({ error: "Project not found" });
+      const reports = await storage.getWeeklyReportsByProject(project.id);
+      const published = reports.filter(r => r.status === 'published');
+      res.json(published.map(r => ({
+        id: r.id,
+        weekCommencing: r.weekCommencing,
+        weekEnding: r.weekEnding,
+        hasPdf: !!r.pdfPath && fs.existsSync(r.pdfPath),
+        aggregatedData: r.aggregatedData,
+        sentAt: r.sentAt,
+      })));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── GET /api/portal/:code/weekly-reports/:id/pdf — stream pre-stored PDF ──
+  app.get("/api/portal/:code/weekly-reports/:id/pdf", async (req: Request, res: Response) => {
+    try {
+      const code = req.params.code.toUpperCase();
+      const id = parseInt(req.params.id);
+      const allProjects = await storage.getProjects();
+      const project = allProjects.find(p => p.code === code);
+      if (!project) return res.status(404).json({ error: "Project not found" });
+      const reports = await storage.getWeeklyReportsByProject(project.id);
+      const report = reports.find(r => r.id === id && r.status === 'published');
+      if (!report) return res.status(404).json({ error: "Report not found" });
+      if (!report.pdfPath || !fs.existsSync(report.pdfPath)) return res.status(404).json({ error: "PDF not yet generated" });
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${code}-report-wc-${report.weekCommencing}.pdf"`);
+      res.sendFile(report.pdfPath);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
     }
   });
 

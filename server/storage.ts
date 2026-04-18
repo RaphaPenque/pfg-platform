@@ -8,6 +8,7 @@ import {
   workPackages, dailyReports, dailyReportWpProgress, commentsLog, delayApprovals,
   supervisorReports, supervisorReportReplies, toolboxTalks, safetyObservations,
   incidentReports, milestoneCertificates,
+  weeklyReports, type WeeklyReport, type InsertWeeklyReport,
   surveyTokens, surveyResponses, surveyIndividualFeedback, lessonsLearned,
   type Worker, type InsertWorker,
   type Project, type InsertProject,
@@ -234,6 +235,12 @@ export interface IStorage {
   getSurveyResponsesByProject(projectId: number): Promise<SurveyResponse[]>;
   createSurveyIndividualFeedback(data: InsertSurveyIndividualFeedback): Promise<SurveyIndividualFeedback>;
   getSurveyFeedbackByWorker(workerId: number): Promise<SurveyIndividualFeedback[]>;
+
+  // Weekly Reports
+  createWeeklyReport(data: InsertWeeklyReport): Promise<WeeklyReport>;
+  getWeeklyReportsByProject(projectId: number): Promise<WeeklyReport[]>;
+  getWeeklyReportByWeek(projectId: number, weekCommencing: string): Promise<WeeklyReport | undefined>;
+  updateWeeklyReport(id: number, data: Partial<InsertWeeklyReport>): Promise<WeeklyReport | undefined>;
 
   // Lessons Learned
   getLessonsLearned(projectId: number): Promise<LessonsLearned | undefined>;
@@ -988,6 +995,26 @@ export class PostgresStorage implements IStorage {
   }
 
   // ── Lessons Learned ──────────────────────────────────────────
+  // ── Weekly Reports ─────────────────────────────────────────────────────────
+  async createWeeklyReport(data: InsertWeeklyReport): Promise<WeeklyReport> {
+    const [row] = await db.insert(weeklyReports).values(data as any).returning();
+    return row;
+  }
+  async getWeeklyReportsByProject(projectId: number): Promise<WeeklyReport[]> {
+    return db.select().from(weeklyReports)
+      .where(eq(weeklyReports.projectId, projectId))
+      .orderBy(desc(weeklyReports.weekCommencing));
+  }
+  async getWeeklyReportByWeek(projectId: number, weekCommencing: string): Promise<WeeklyReport | undefined> {
+    const [row] = await db.select().from(weeklyReports)
+      .where(and(eq(weeklyReports.projectId, projectId), eq(weeklyReports.weekCommencing, weekCommencing)));
+    return row;
+  }
+  async updateWeeklyReport(id: number, data: Partial<InsertWeeklyReport>): Promise<WeeklyReport | undefined> {
+    const [row] = await db.update(weeklyReports).set(data as any).where(eq(weeklyReports.id, id)).returning();
+    return row;
+  }
+
   async getLessonsLearned(projectId: number): Promise<LessonsLearned | undefined> {
     const [row] = await db.select().from(lessonsLearned)
       .where(eq(lessonsLearned.projectId, projectId));
