@@ -995,7 +995,7 @@ export function registerRoutes(server: Server, app: Express) {
     }
     // Cancel requires role check
     if (status === "cancelled") {
-      const allowed = ["admin", "resource_manager", "project_manager"];
+      const allowed = ["admin", "project_manager"];
       if (!req.user || !allowed.includes(req.user.role)) {
         return res.status(403).json({ error: "Insufficient permissions" });
       }
@@ -1367,14 +1367,14 @@ export function registerRoutes(server: Server, app: Express) {
     res.status(201).json(doc);
   });
 
-  app.patch("/api/documents/:id", requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.patch("/api/documents/:id", requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     const updated = await storage.updateDocument(id, req.body);
     if (!updated) return res.status(404).json({ error: 'Document not found' });
     res.json(updated);
   });
 
-  app.delete("/api/documents/:id", requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.delete("/api/documents/:id", requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     const doc = await storage.getDocumentById(id);
     if (doc?.filePath) {
@@ -1489,14 +1489,14 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(wps);
   });
 
-  app.post("/api/projects/:projectId/work-packages", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.post("/api/projects/:projectId/work-packages", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const projectId = parseInt(req.params.projectId);
     const wp = await storage.createWorkPackage({ ...req.body, projectId });
     await logAudit(req.user!.id, "work_package.create", "work_package", wp.id, wp.name);
     res.status(201).json(wp);
   });
 
-  app.patch("/api/work-packages/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.patch("/api/work-packages/:id", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     const wp = await storage.updateWorkPackage(id, req.body);
     if (!wp) return res.status(404).json({ error: "Work package not found" });
@@ -1504,7 +1504,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(wp);
   });
 
-  app.delete("/api/work-packages/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.delete("/api/work-packages/:id", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     await storage.deleteWorkPackage(id);
     await logAudit(req.user!.id, "work_package.delete", "work_package", id);
@@ -1526,14 +1526,14 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(report);
   });
 
-  app.post("/api/projects/:projectId/daily-reports", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.post("/api/projects/:projectId/daily-reports", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const projectId = parseInt(req.params.projectId);
     const report = await storage.createDailyReport({ ...req.body, projectId, createdBy: req.user!.id });
     await logAudit(req.user!.id, "daily_report.create", "daily_report", report.id, report.reportDate);
     res.status(201).json(report);
   });
 
-  app.patch("/api/daily-reports/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.patch("/api/daily-reports/:id", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     const report = await storage.updateDailyReport(id, req.body);
     if (!report) return res.status(404).json({ error: "Report not found" });
@@ -1547,7 +1547,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(progress);
   });
 
-  app.put("/api/daily-reports/:id/wp-progress", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.put("/api/daily-reports/:id/wp-progress", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const reportId = parseInt(req.params.id);
     const items: Array<{ wpId: number; actualStart?: string; actualFinish?: string; signOffStatus?: string; comments?: string }> = req.body;
     if (!Array.isArray(items)) return res.status(400).json({ error: "Body must be an array" });
@@ -1576,7 +1576,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(enriched);
   });
 
-  app.post("/api/projects/:projectId/comments-log", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.post("/api/projects/:projectId/comments-log", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const projectId = parseInt(req.params.projectId);
     const { entry, reportId, logDate } = req.body;
     if (!entry) return res.status(400).json({ error: "entry required" });
@@ -1590,7 +1590,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.status(201).json(logEntry);
   });
 
-  app.put("/api/comments-log/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.put("/api/comments-log/:id", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     try {
       const id = parseInt(req.params.id);
       const { entry, logDate } = req.body;
@@ -1603,7 +1603,7 @@ export function registerRoutes(server: Server, app: Express) {
     }
   });
 
-  app.delete("/api/comments-log/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.delete("/api/comments-log/:id", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     try {
       const id = parseInt(req.params.id);
       await storage.deleteCommentsLogEntry(id);
@@ -1647,7 +1647,7 @@ export function registerRoutes(server: Server, app: Express) {
   });
 
   // Authenticated: send delay approval email
-  app.post("/api/daily-reports/:id/send-delay-approval", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.post("/api/daily-reports/:id/send-delay-approval", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const reportId = parseInt(req.params.id);
     const { delayIndex, recipientEmail, recipientName } = req.body;
     if (delayIndex === undefined || !recipientEmail) {
@@ -1728,7 +1728,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(reports);
   });
 
-  app.post("/api/projects/:projectId/supervisor-reports/upload", requireAuth, requireRole("admin", "resource_manager", "project_manager"), projectUpload.single("file"), async (req: any, res: Response) => {
+  app.post("/api/projects/:projectId/supervisor-reports/upload", requireAuth, requireRole("admin", "project_manager"), projectUpload.single("file"), async (req: any, res: Response) => {
     const projectId = parseInt(req.params.projectId);
     const { date, shift, workerId } = req.body;
     if (!date) return res.status(400).json({ error: "date required" });
@@ -1771,7 +1771,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.status(201).json(report);
   });
 
-  app.delete("/api/supervisor-reports/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.delete("/api/supervisor-reports/:id", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     try {
       const id = parseInt(req.params.id);
       await storage.deleteSupervisorReport(id);
@@ -1782,7 +1782,7 @@ export function registerRoutes(server: Server, app: Express) {
     }
   });
 
-  app.patch("/api/supervisor-reports/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.patch("/api/supervisor-reports/:id", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     const { workerId, reportDate, shift } = req.body;
 
@@ -1815,7 +1815,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(replies);
   });
 
-  app.post("/api/supervisor-reports/:id/replies", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.post("/api/supervisor-reports/:id/replies", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const reportId = parseInt(req.params.id);
     const { message } = req.body;
     if (!message) return res.status(400).json({ error: "message required" });
@@ -1838,7 +1838,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(talks);
   });
 
-  app.post("/api/projects/:projectId/toolbox-talks/upload", requireAuth, requireRole("admin", "resource_manager", "project_manager"), (req: any, res: Response, next: any) => {
+  app.post("/api/projects/:projectId/toolbox-talks/upload", requireAuth, requireRole("admin", "project_manager"), (req: any, res: Response, next: any) => {
     qhseUpload.single("file")(req, res, (err: any) => {
       if (err) return res.status(500).json({ error: "File upload failed", detail: err.message });
       next();
@@ -1887,7 +1887,7 @@ export function registerRoutes(server: Server, app: Express) {
     }
   });
 
-  app.patch("/api/toolbox-talks/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.patch("/api/toolbox-talks/:id", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     const talk = await storage.updateToolboxTalk(id, req.body);
     if (!talk) return res.status(404).json({ error: "Toolbox talk not found" });
@@ -1895,7 +1895,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(talk);
   });
 
-  app.delete("/api/toolbox-talks/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.delete("/api/toolbox-talks/:id", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     await storage.deleteToolboxTalk(id);
     await logAudit(req.user!.id, "toolbox_talk.delete", "toolbox_talk", id);
@@ -1903,7 +1903,7 @@ export function registerRoutes(server: Server, app: Express) {
   });
 
   // Replace file on existing TBT (converts image → PDF)
-  app.post("/api/toolbox-talks/:id/replace-file", requireAuth, requireRole("admin", "resource_manager", "project_manager"), (req: any, res: Response, next: any) => {
+  app.post("/api/toolbox-talks/:id/replace-file", requireAuth, requireRole("admin", "project_manager"), (req: any, res: Response, next: any) => {
     qhseUpload.single("file")(req, res, (err: any) => {
       if (err) return res.status(500).json({ error: "File upload failed", detail: err.message });
       next();
@@ -1941,7 +1941,7 @@ export function registerRoutes(server: Server, app: Express) {
   });
 
   // Replace file on existing supervisor report (converts image → PDF)
-  app.post("/api/supervisor-reports/:id/replace-file", requireAuth, requireRole("admin", "resource_manager", "project_manager"), (req: any, res: Response, next: any) => {
+  app.post("/api/supervisor-reports/:id/replace-file", requireAuth, requireRole("admin", "project_manager"), (req: any, res: Response, next: any) => {
     projectUpload.single("file")(req, res, (err: any) => {
       if (err) return res.status(500).json({ error: "File upload failed", detail: err.message });
       next();
@@ -1985,7 +1985,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(obs);
   });
 
-  app.post("/api/projects/:projectId/safety-observations", requireAuth, requireRole("admin", "resource_manager", "project_manager"), (req: any, res: Response, next: any) => {
+  app.post("/api/projects/:projectId/safety-observations", requireAuth, requireRole("admin", "project_manager"), (req: any, res: Response, next: any) => {
     qhseUpload.single("file")(req, res, (err: any) => {
       if (err) {
         console.error("[safety-obs] multer error:", err);
@@ -2043,7 +2043,7 @@ export function registerRoutes(server: Server, app: Express) {
     }
   });
 
-  app.patch("/api/safety-observations/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.patch("/api/safety-observations/:id", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     const obs = await storage.updateSafetyObservation(id, req.body);
     if (!obs) return res.status(404).json({ error: "Safety observation not found" });
@@ -2051,7 +2051,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(obs);
   });
 
-  app.delete("/api/safety-observations/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.delete("/api/safety-observations/:id", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     await storage.deleteSafetyObservation(id);
     await logAudit(req.user!.id, "safety_observation.delete", "safety_observation", id);
@@ -2065,7 +2065,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(incidents);
   });
 
-  app.post("/api/projects/:projectId/incident-reports", requireAuth, requireRole("admin", "resource_manager", "project_manager"), qhseUpload.single("file"), async (req: any, res: Response) => {
+  app.post("/api/projects/:projectId/incident-reports", requireAuth, requireRole("admin", "project_manager"), qhseUpload.single("file"), async (req: any, res: Response) => {
     const projectId = parseInt(req.params.projectId);
     const filePath = req.file ? `/api/uploads/${projectId}/qhse/${req.file.filename}` : null;
     const body = req.body;
@@ -2112,7 +2112,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.status(201).json(incident);
   });
 
-  app.patch("/api/incident-reports/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.patch("/api/incident-reports/:id", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     const incident = await storage.updateIncidentReport(id, req.body);
     if (!incident) return res.status(404).json({ error: "Incident report not found" });
@@ -2120,7 +2120,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(incident);
   });
 
-  app.delete("/api/incident-reports/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.delete("/api/incident-reports/:id", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     await storage.deleteIncidentReport(id);
     await logAudit(req.user!.id, "incident_report.delete", "incident_report", id);
@@ -2134,7 +2134,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(certs);
   });
 
-  app.post("/api/projects/:projectId/milestone-certificates", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.post("/api/projects/:projectId/milestone-certificates", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const projectId = parseInt(req.params.projectId);
     const cert = await storage.createMilestoneCertificate({
       ...req.body,
@@ -2146,7 +2146,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.status(201).json(cert);
   });
 
-  app.patch("/api/milestone-certificates/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.patch("/api/milestone-certificates/:id", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     const cert = await storage.updateMilestoneCertificate(id, req.body);
     if (!cert) return res.status(404).json({ error: "Milestone certificate not found" });
@@ -2526,7 +2526,7 @@ export function registerRoutes(server: Server, app: Express) {
   });
 
   // POST /api/projects/:projectId/survey/send — send survey to project contacts
-  app.post("/api/projects/:projectId/survey/send", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.post("/api/projects/:projectId/survey/send", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const projectId = parseInt(req.params.projectId);
     if (isNaN(projectId)) return res.status(400).json({ error: "Invalid project ID" });
 
@@ -2640,7 +2640,7 @@ export function registerRoutes(server: Server, app: Express) {
   });
 
   // POST /api/projects/:projectId/lessons-learned
-  app.post("/api/projects/:projectId/lessons-learned", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.post("/api/projects/:projectId/lessons-learned", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const projectId = parseInt(req.params.projectId);
     if (isNaN(projectId)) return res.status(400).json({ error: "Invalid project ID" });
     const userId = req.user!.id;
