@@ -179,6 +179,7 @@ export interface IStorage {
   updateDelayApproval(id: number, data: Partial<DelayApproval>): Promise<DelayApproval | undefined>;
 
   // Supervisor Reports
+  getSupervisorReport(id: number): Promise<SupervisorReport | undefined>;
   getSupervisorReports(projectId: number): Promise<SupervisorReport[]>;
   deleteSupervisorReport(id: number): Promise<void>;
   getPendingSupervisorReports(): Promise<SupervisorReport[]>;
@@ -202,6 +203,7 @@ export interface IStorage {
   createSupervisorReportReply(data: { reportId: number; authorId: number; message: string }): Promise<SupervisorReportReply>;
 
   // Toolbox Talks
+  getToolboxTalk(id: number): Promise<ToolboxTalk | undefined>;
   getToolboxTalks(projectId: number): Promise<ToolboxTalk[]>;
   createToolboxTalk(data: InsertToolboxTalk): Promise<ToolboxTalk>;
   updateToolboxTalk(id: number, data: Partial<InsertToolboxTalk>): Promise<ToolboxTalk | undefined>;
@@ -755,6 +757,11 @@ export class PostgresStorage implements IStorage {
   }
 
   // ── Supervisor Reports ────────────────────────────────────────
+  async getSupervisorReport(id: number): Promise<SupervisorReport | undefined> {
+    const [row] = await db.select().from(supervisorReports).where(eq(supervisorReports.id, id));
+    return row;
+  }
+
   async deleteSupervisorReport(id: number): Promise<void> {
     await db.delete(supervisorReports).where(eq(supervisorReports.id, id));
   }
@@ -869,6 +876,11 @@ export class PostgresStorage implements IStorage {
   }
 
   // ── Toolbox Talks ─────────────────────────────────────────────
+  async getToolboxTalk(id: number): Promise<ToolboxTalk | undefined> {
+    const [row] = await db.select().from(toolboxTalks).where(eq(toolboxTalks.id, id));
+    return row;
+  }
+
   async getToolboxTalks(projectId: number): Promise<ToolboxTalk[]> {
     return db.select().from(toolboxTalks)
       .where(eq(toolboxTalks.projectId, projectId))

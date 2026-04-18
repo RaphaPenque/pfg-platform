@@ -1895,6 +1895,82 @@ export function registerRoutes(server: Server, app: Express) {
     res.status(204).send();
   });
 
+  // Replace file on existing TBT (converts image → PDF)
+  app.post("/api/toolbox-talks/:id/replace-file", requireAuth, requireRole("admin", "resource_manager", "project_manager"), (req: any, res: Response, next: any) => {
+    qhseUpload.single("file")(req, res, (err: any) => {
+      if (err) return res.status(500).json({ error: "File upload failed", detail: err.message });
+      next();
+    });
+  }, async (req: any, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      const talk = await storage.getToolboxTalk(id);
+      if (!talk) return res.status(404).json({ error: "Not found" });
+
+      let uploadedFilePath = req.file?.path || null;
+      let uploadedFileName = req.file?.originalname || null;
+      let storedFilename = req.file?.filename || null;
+
+      if (req.file && isImageFile(req.file.mimetype, req.file.originalname)) {
+        try {
+          const pdfPath = await imageToPdf(uploadedFilePath!);
+          if (fs.existsSync(uploadedFilePath!)) fs.unlinkSync(uploadedFilePath!);
+          uploadedFilePath = pdfPath;
+          storedFilename = path.basename(pdfPath);
+          uploadedFileName = (uploadedFileName?.replace(/\.[^.]+$/, "") || "tbt") + ".pdf";
+        } catch (err: any) {
+          console.error("[tbt-replace] Image-to-PDF failed:", err.message);
+        }
+      }
+
+      const projectId = talk.projectId;
+      const filePath = uploadedFilePath ? `/api/uploads/${projectId}/qhse/${storedFilename}` : talk.filePath;
+      const updated = await storage.updateToolboxTalk(id, { filePath, fileName: uploadedFileName || talk.fileName });
+      await logAudit(req.user!.id, "toolbox_talk.replace_file", "toolbox_talk", id);
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Replace file on existing supervisor report (converts image → PDF)
+  app.post("/api/supervisor-reports/:id/replace-file", requireAuth, requireRole("admin", "resource_manager", "project_manager"), (req: any, res: Response, next: any) => {
+    projectUpload.single("file")(req, res, (err: any) => {
+      if (err) return res.status(500).json({ error: "File upload failed", detail: err.message });
+      next();
+    });
+  }, async (req: any, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      const report = await storage.getSupervisorReport(id);
+      if (!report) return res.status(404).json({ error: "Not found" });
+
+      let uploadedFilePath = req.file?.path || null;
+      let uploadedFileName = req.file?.originalname || null;
+      let storedFilename = req.file?.filename || null;
+
+      if (req.file && isImageFile(req.file.mimetype, req.file.originalname)) {
+        try {
+          const pdfPath = await imageToPdf(uploadedFilePath!);
+          if (fs.existsSync(uploadedFilePath!)) fs.unlinkSync(uploadedFilePath!);
+          uploadedFilePath = pdfPath;
+          storedFilename = path.basename(pdfPath);
+          uploadedFileName = (uploadedFileName?.replace(/\.[^.]+$/, "") || "report") + ".pdf";
+        } catch (err: any) {
+          console.error("[sup-replace] Image-to-PDF failed:", err.message);
+        }
+      }
+
+      const projectId = report.projectId;
+      const filePath = uploadedFilePath ? `/api/uploads/${projectId}/supervisor/${storedFilename}` : report.filePath;
+      const updated = await storage.updateSupervisorReport(id, { filePath, fileName: uploadedFileName || report.fileName });
+      await logAudit(req.user!.id, "supervisor_report.replace_file", "supervisor_report", id);
+      res.json(updated);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // Safety Observations
   app.get("/api/projects/:projectId/safety-observations", requireAuth, async (req: Request, res: Response) => {
     const projectId = parseInt(req.params.projectId);

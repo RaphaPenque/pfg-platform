@@ -1375,9 +1375,22 @@ function SupervisorReportsTab({
   const [expandedRow, setExpandedRow] = useState<number | null>(null);
   const [editingReport, setEditingReport] = useState<number | null>(null);
   const [editReportForm, setEditReportForm] = useState<{ workerId: string; date: string; shift: string }>({ workerId: "", date: "", shift: "Day" });
+  const [editSupFile, setEditSupFile] = useState<File | null>(null);
   const [savingEditReport, setSavingEditReport] = useState(false);
 
   const handleSaveEditReport = useCallback(async (reportId: number) => {
+    // If replacing the file, upload it first
+    if (editSupFile) {
+      try {
+        const fd = new FormData();
+        fd.append("file", editSupFile);
+        const resp = await fetch(`/api/supervisor-reports/${reportId}/replace-file`, { method: "POST", credentials: "include", body: fd });
+        if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || "File upload failed");
+        setEditSupFile(null);
+      } catch (e: any) {
+        toast({ title: "File upload failed", description: e.message, variant: "destructive" });
+      }
+    }
     // Validate
     if (editReportForm.date && !/^\d{4}-\d{2}-\d{2}$/.test(editReportForm.date)) {
       toast({ title: "Invalid date", description: "Date must be YYYY-MM-DD", variant: "destructive" });
@@ -1742,6 +1755,12 @@ function SupervisorReportsTab({
                                   ))}
                                 </select>
                               </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Replace file</span>
+                                <input type="file" accept="image/*,application/pdf"
+                                  onChange={e => setEditSupFile(e.target.files?.[0] || null)}
+                                  className="text-[11px] px-1 py-0.5 border rounded" style={{ borderColor: "hsl(var(--border))" }} />
+                              </div>
                               <button onClick={() => handleSaveEditReport(r.id)} disabled={savingEditReport} className="text-[11px] font-semibold px-3 py-1 rounded disabled:opacity-50" style={{ background: "var(--pfg-navy)", color: "#fff" }}>
                                 {savingEditReport ? <Loader2 className="w-3 h-3 animate-spin" /> : "Save"}
                               </button>
@@ -1879,6 +1898,7 @@ function QHSETab({
   const [tbFile, setTBFile] = useState<File | null>(null);
   const [editingTB, setEditingTB] = useState<number | null>(null);
   const [editTBForm, setEditTBForm] = useState<{ reportDate: string; shift: string; topic: string; attendeeCount: string; notes: string }>({ reportDate: "", shift: "Day", topic: "", attendeeCount: "", notes: "" });
+  const [editTBFile, setEditTBFile] = useState<File | null>(null);
   const [savingEditTB, setSavingEditTB] = useState(false);
 
   // Safety observation inline edit state
@@ -1929,6 +1949,19 @@ function QHSETab({
   const handleSaveEditTB = async (tbId: number) => {
     setSavingEditTB(true);
     try {
+      // If replacing file, use multipart; otherwise JSON patch
+      if (editTBFile) {
+        const fd = new FormData();
+        if (editTBForm.reportDate) fd.append("date", editTBForm.reportDate);
+        if (editTBForm.shift) fd.append("shift", editTBForm.shift);
+        if (editTBForm.topic) fd.append("topic", editTBForm.topic);
+        if (editTBForm.attendeeCount) fd.append("attendeeCount", editTBForm.attendeeCount);
+        if (editTBForm.notes !== undefined) fd.append("notes", editTBForm.notes);
+        fd.append("file", editTBFile);
+        const resp = await fetch(`/api/toolbox-talks/${tbId}/replace-file`, { method: "POST", credentials: "include", body: fd });
+        if (!resp.ok) throw new Error((await resp.json().catch(() => ({}))).error || "Failed");
+        setEditTBFile(null);
+      }
       const payload: Record<string, any> = {};
       if (editTBForm.reportDate) payload.reportDate = editTBForm.reportDate;
       if (editTBForm.shift) payload.shift = editTBForm.shift;
@@ -2190,6 +2223,12 @@ function QHSETab({
                             <div className="flex items-center gap-1.5">
                               <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Notes</span>
                               <input type="text" value={editTBForm.notes} onChange={e => setEditTBForm(f => ({ ...f, notes: e.target.value }))} className="text-[11px] px-2 py-1 border rounded w-40" style={{ borderColor: "hsl(var(--border))" }} />
+                            </div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Replace file</span>
+                              <input type="file" accept="image/*,application/pdf"
+                                onChange={e => setEditTBFile(e.target.files?.[0] || null)}
+                                className="text-[11px] px-1 py-0.5 border rounded" style={{ borderColor: "hsl(var(--border))" }} />
                             </div>
                             <button onClick={() => handleSaveEditTB(t.id)} disabled={savingEditTB} className="text-[11px] font-semibold px-3 py-1 rounded disabled:opacity-50" style={{ background: "var(--pfg-navy)", color: "#fff" }}>
                               {savingEditTB ? <Loader2 className="w-3 h-3 animate-spin" /> : "Save"}
