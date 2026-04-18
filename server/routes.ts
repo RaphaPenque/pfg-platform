@@ -2655,4 +2655,4 @@ export function registerRoutes(server: Server, app: Express) {
 
   // ── Timesheet Module routes ──────────────────────────────────────────────
   registerTimesheetRoutes(app, requireAuth, requireRole);
-
+}
