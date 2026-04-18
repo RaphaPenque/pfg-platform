@@ -277,6 +277,9 @@ export function registerRoutes(server: Server, app: Express) {
     ]);
 
     // Published reports with their comments
+    // Build a set of published report IDs for comment lookup
+    const publishedReportIds = new Set(allReports.filter(r => r.publishedToPortal).map(r => r.id));
+
     const publishedReports = allReports
       .filter((r) => r.publishedToPortal)
       .sort((a, b) => (a.reportDate < b.reportDate ? 1 : -1))
@@ -285,8 +288,18 @@ export function registerRoutes(server: Server, app: Express) {
         reportDate: r.reportDate,
         completedTasks: r.completedTasks ?? [],
         delaysLog: r.delaysLog ?? [],
-        commentsLog: allComments.filter((c) => c.reportId === r.id),
+        // Include comments linked to this report OR standalone entries with matching logDate
+        commentsLog: allComments.filter((c) =>
+          c.reportId === r.id ||
+          (c.reportId === null && c.logDate === r.reportDate)
+        ),
       }));
+
+    // Standalone concern log entries not linked to any report (added via Comments & Concerns section)
+    const standaloneConcernLogs = allComments.filter(c =>
+      c.reportId === null &&
+      !publishedReports.some(r => r.reportDate === c.logDate)
+    );
 
     // Safety data
     const safetyData = {
@@ -320,7 +333,7 @@ export function registerRoutes(server: Server, app: Express) {
       safetyObsCount: allSafetyObs.length,
     };
 
-    res.json({ project, roleSlots, assignments, workers, publishedReports, safetyData, kpis });
+    res.json({ project, roleSlots, assignments, workers, publishedReports, standaloneConcernLogs, safetyData, kpis });
   });
 
   // GET /api/portal/:code/report/:reportId/pdf — public, no auth

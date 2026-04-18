@@ -343,8 +343,48 @@ function TimesheetsTab({ projectCode, color }: { projectCode: string; color: str
 }
 
 
+// ─── Delays Accordion ────────────────────────────────────────────────────────
+function DelaysAccordion({ delays }: { delays: any[] }) {
+  const [open, setOpen] = React.useState(false);
+  if (delays.length === 0) return (
+    <div style={{ fontSize: 12, color: "#9CA3AF" }}>No agreed delays recorded this week.</div>
+  );
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 16px", background: "#FAFBFC", border: "1px solid #E5E7EB", borderRadius: open ? "8px 8px 0 0" : "8px", cursor: "pointer", outline: "none", fontFamily: "inherit", borderBottom: open ? "none" : undefined }}
+      >
+        <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "#6B7C93" }}>
+          Agreed Delays <span style={{ color: "#B45309" }}>({delays.length})</span>
+        </div>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      {open && (
+        <div style={{ border: "1px solid #E5E7EB", borderRadius: "0 0 8px 8px", padding: "8px 16px 12px", maxHeight: 320, overflowY: "auto" as const }}>
+          {delays.map((d: any, i: number) => {
+            const desc = typeof d === "string" ? d : d.description || "";
+            const dur = typeof d === "object" ? d.duration : null;
+            const unit = typeof d === "object" ? d.durationUnit || "hrs" : "hrs";
+            const agreed = typeof d === "object" ? d.agreedWithCustomer : null;
+            return (
+              <div key={i} style={{ padding: "9px 0", borderBottom: "1px solid #F3F4F6" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#92400E" }}>{desc}
+                  {dur !== null && dur !== undefined && <span style={{ fontSize: 11, color: "#B45309", marginLeft: 6 }}>{dur} {unit}</span>}
+                  {agreed === "Yes" && <span style={{ background: "#DCFCE7", color: "#166534", fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 4, marginLeft: 8 }}>Customer Agreed</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
 // ─── Weekly Reports Tab ──────────────────────────────────────────────────────
-function WeeklyReportsTab({ projectCode, color, project }: { projectCode: string; color: string; project: any }) {
+function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs = [] }: { projectCode: string; color: string; project: any; standaloneConcernLogs?: any[] }) {
   const [expanded, setExpanded] = React.useState<number | null>(null);
 
   const { data: reports = [], isLoading } = useQuery({
@@ -412,7 +452,13 @@ function WeeklyReportsTab({ projectCode, color, project }: { projectCode: string
           const { heading } = fmtWeek(report.weekCommencing, report.weekEnding);
           const d = report.aggregatedData || {};
           const delays = d.delays || [];
-          const comments = d.comments || [];
+          // Merge stored comments with any standalone concern log entries for this week
+          const storedComments = d.comments || [];
+          const weekStandalones = standaloneConcernLogs.filter((c: any) => {
+            const ld = c.logDate || '';
+            return ld >= report.weekCommencing && ld <= report.weekEnding;
+          }).map((c: any) => ({ date: c.logDate || '', entry: c.entry || '', userName: c.userName || 'Project Manager' }));
+          const comments = [...storedComments, ...weekStandalones].sort((a, b) => a.date < b.date ? -1 : 1);
           const tasks = d.tasks || [];
           const safety = d.safetyStats || { toolboxTalks: 0, observations: 0, nearMisses: 0, incidents: 0 };
           const team = d.teamMembers || [];
@@ -470,28 +516,14 @@ function WeeklyReportsTab({ projectCode, color, project }: { projectCode: string
                     </div>
                   </div>
 
-                  {/* Delays */}
-                  <div>
-                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: "#6B7C93", marginBottom: 8 }}>Agreed Delays {delays.length > 0 && <span style={{ color: "#B45309" }}>({delays.length})</span>}</div>
-                    {delays.length === 0 ? (
-                      <p style={{ fontSize: 12, color: "#9CA3AF" }}>No agreed delays recorded this week.</p>
-                    ) : (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        {delays.map((d: any, i: number) => (
-                          <div key={i} style={{ background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 6, padding: "10px 14px" }}>
-                            <div style={{ fontSize: 12, fontWeight: 600, color: "#92400E" }}>{d.description}</div>
-                            {d.duration && <div style={{ fontSize: 11, color: "#B45309", marginTop: 2 }}>Duration: {d.duration}{d.agreedWithCustomer ? " · Customer agreed" : ""}</div>}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Comments */}
+                  {/* Comments first */}
                   <div>
                     <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: "#6B7C93", marginBottom: 8 }}>Comments & Concerns</div>
                     {comments.length === 0 ? (
-                      <p style={{ fontSize: 12, color: "#9CA3AF" }}>No comments recorded this week.</p>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#F0FDF4", border: "1px solid #BBF7D0", borderRadius: 6, padding: "10px 14px" }}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#16A34A" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                        <span style={{ fontSize: 12, fontWeight: 600, color: "#166534" }}>No concerns raised this week.</span>
+                      </div>
                     ) : (
                       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                         {comments.map((c: any, i: number) => (
@@ -503,6 +535,9 @@ function WeeklyReportsTab({ projectCode, color, project }: { projectCode: string
                       </div>
                     )}
                   </div>
+
+                  {/* Delays accordion */}
+                  <DelaysAccordion delays={delays} />
 
                   {/* Tasks — accordion */}
                   {tasks.length > 0 && (
@@ -583,7 +618,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
 
   const portalData = useMemo(() => {
     if (!data) return null;
-    const { project, roleSlots, assignments, workers: workersMap, publishedReports, safetyData, kpis } = data as any;
+    const { project, roleSlots, assignments, workers: workersMap, publishedReports, standaloneConcernLogs, safetyData, kpis } = data as any;
     if (!project) return null;
 
     const customer = project.customer || PROJECT_CUSTOMER[project.code] || "";
@@ -657,7 +692,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
       ? buildWeekColumns(project.startDate, project.endDate)
       : [];
 
-    return { project, customer, color, teamMembers: uniqueTeamMembers, histogramRows, weekColumns, projectRoleSlots, publishedReports: publishedReports || [], safetyData: safetyData || {}, kpis: kpis || {} };
+    return { project, customer, color, teamMembers: uniqueTeamMembers, histogramRows, weekColumns, projectRoleSlots, publishedReports: publishedReports || [], standaloneConcernLogs: standaloneConcernLogs || [], safetyData: safetyData || {}, kpis: kpis || {} };
   }, [data, params.projectCode]);
 
   if (isLoading || !data) return <LoadingSkeleton />;
@@ -679,7 +714,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
     );
   }
 
-  const { project, customer, color, teamMembers, histogramRows, weekColumns, projectRoleSlots, publishedReports, safetyData, kpis } = portalData;
+  const { project, customer, color, teamMembers, histogramRows, weekColumns, projectRoleSlots, publishedReports, standaloneConcernLogs, safetyData, kpis } = portalData;
   const today = new Date();
 
   // Progress calculation
@@ -1141,7 +1176,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
 
         {/* ════════════════ TAB 2: PROJECT REPORTS ════════════════ */}
         {activeTab === "reports" && (
-          <WeeklyReportsTab projectCode={params.projectCode} color={color} project={project} />
+          <WeeklyReportsTab projectCode={params.projectCode} color={color} project={project} standaloneConcernLogs={standaloneConcernLogs} />
         )}
 
         {/* ════════════════ TAB 3: HEALTH & SAFETY ════════════════ */}

@@ -161,8 +161,12 @@ async function sendReportForProject(
   // Delays: aggregate across all week's reports (no tasks in PDF)
   const reportDelays = weekReports.flatMap((r: any) => Array.isArray(r.delaysLog) ? r.delaysLog : []);
 
-  // Comments: all comments log entries within the week
+  // Comments: entries within the week by logDate OR linked to a week report by reportId
+  const weekReportIds = new Set(weekReports.map((r: any) => r.id));
   const reportComments = (allComments as any[]).filter((c: any) => {
+    // Linked to a report in this week
+    if (c.reportId && weekReportIds.has(c.reportId)) return true;
+    // Standalone entry with logDate in this week
     const d = c.logDate || c.enteredAt?.slice(0, 10) || '';
     return d >= weekStart && d <= weekEnd;
   });
