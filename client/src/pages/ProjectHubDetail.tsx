@@ -1170,7 +1170,8 @@ function PfgTeamCard({ project, canEdit }: { project: DashboardProject; canEdit:
   const projectLeads: Record<number, { id: number; name: string }> = data?.projectLeads || {};
   const assignedLead = projectLeads[project.id];
   const assignedUser = assignedLead ? users.find((u: any) => u.id === assignedLead.id) : undefined;
-  const pmUsers = users.filter((u: any) => u.role === 'project_manager' && u.isActive);
+  // Include admins and resource managers — not just project_manager role
+  const pmUsers = users.filter((u: any) => ['project_manager', 'admin', 'resource_manager'].includes(u.role) && u.isActive);
 
   const assignPm = async (userId: string) => {
     setSaving(true);
