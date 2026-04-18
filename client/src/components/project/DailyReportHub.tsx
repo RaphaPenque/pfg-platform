@@ -2605,7 +2605,7 @@ function QHSETab({
             <ModalField label="Reported By">
               <select value={obsForm.reportedBy} onChange={(e) => setObsForm({ ...obsForm, reportedBy: e.target.value })} className="modal-input">
                 <option value="">Select...</option>
-                {projectWorkers.map((w) => <option key={w.id} value={w.name}>{w.name}</option>)}
+                {projectWorkers.map((w) => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
               </select>
             </ModalField>
             <ModalField label="Location">
@@ -2655,7 +2655,7 @@ function QHSETab({
             <ModalField label="Worker Involved">
               <select value={incForm.workerInvolved} onChange={(e) => setIncForm({ ...incForm, workerInvolved: e.target.value })} className="modal-input">
                 <option value="">Select...</option>
-                {projectWorkers.map((w) => <option key={w.id} value={w.name}>{w.name}</option>)}
+                {projectWorkers.map((w) => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
               </select>
             </ModalField>
             <ModalField label="Lost Time Incident?">

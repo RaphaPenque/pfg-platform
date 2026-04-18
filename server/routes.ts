@@ -1996,7 +1996,7 @@ export function registerRoutes(server: Server, app: Express) {
     }
     const obs = await storage.createSafetyObservation({
       projectId,
-      reportedByWorkerId: body.reportedByWorkerId ? parseInt(body.reportedByWorkerId) : null,
+      reportedByWorkerId: body.reportedByWorkerId ? (isNaN(parseInt(body.reportedByWorkerId)) ? null : parseInt(body.reportedByWorkerId)) : null,
       relatesToWorkerIds: body.relatesToWorkerIds || [],
       shiftSupervisorId: body.shiftSupervisorId ? parseInt(body.shiftSupervisorId) : null,
       observationDate: body.observationDate,
@@ -2068,7 +2068,7 @@ export function registerRoutes(server: Server, app: Express) {
     const incident = await storage.createIncidentReport({
       projectId,
       workerInvolvedId: body.workerInvolvedId ? parseInt(body.workerInvolvedId) : null,
-      reportedByWorkerId: body.reportedByWorkerId ? parseInt(body.reportedByWorkerId) : null,
+      reportedByWorkerId: body.reportedByWorkerId ? (isNaN(parseInt(body.reportedByWorkerId)) ? null : parseInt(body.reportedByWorkerId)) : null,
       shiftSupervisorId: body.shiftSupervisorId ? parseInt(body.shiftSupervisorId) : null,
       incidentDate: body.incidentDate,
       incidentTime: body.incidentTime || null,
