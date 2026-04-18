@@ -1903,7 +1903,7 @@ function QHSETab({
 
   // Safety observation inline edit state
   const [editingObs, setEditingObs] = useState<number | null>(null);
-  const [editObsForm, setEditObsForm] = useState<{ observationDate: string; shift: string; observationType: string; locationOnSite: string; description: string; status: string }>({ observationDate: "", shift: "Day", observationType: "positive", locationOnSite: "", description: "", status: "open" });
+  const [editObsForm, setEditObsForm] = useState<{ observationDate: string; observationTime: string; shift: string; observationType: string; reportedByWorkerId: string; locationOnSite: string; description: string; status: string }>({ observationDate: "", observationTime: "", shift: "Day", observationType: "positive", reportedByWorkerId: "", locationOnSite: "", description: "", status: "open" });
   const [savingEditObs, setSavingEditObs] = useState(false);
 
   // Incident report inline edit state
@@ -1983,8 +1983,10 @@ function QHSETab({
     try {
       const payload: Record<string, any> = {};
       if (editObsForm.observationDate) payload.observationDate = editObsForm.observationDate;
+      if (editObsForm.observationTime) payload.observationTime = editObsForm.observationTime;
       if (editObsForm.shift) payload.shift = editObsForm.shift;
       if (editObsForm.observationType) payload.observationType = editObsForm.observationType;
+      if (editObsForm.reportedByWorkerId) payload.reportedByWorkerId = parseInt(editObsForm.reportedByWorkerId);
       if (editObsForm.locationOnSite !== undefined) payload.locationOnSite = editObsForm.locationOnSite;
       if (editObsForm.description !== undefined) payload.description = editObsForm.description;
       if (editObsForm.status) payload.status = editObsForm.status;
@@ -2267,6 +2269,7 @@ function QHSETab({
                   <Th>Date/Time</Th>
                   <Th>Shift</Th>
                   <Th>Type</Th>
+                  <Th>Reported By</Th>
                   <Th>Location</Th>
                   <Th>Description</Th>
                   <Th>Status</Th>
@@ -2312,8 +2315,10 @@ function QHSETab({
                                 setEditingObs(o.id);
                                 setEditObsForm({
                                   observationDate: o.observationDate || o.date || "",
+                                  observationTime: o.observationTime || o.time || "",
                                   shift: o.shift || "Day",
                                   observationType: o.observationType || o.type || "positive",
+                                  reportedByWorkerId: String(o.reportedByWorkerId || ""),
                                   locationOnSite: o.locationOnSite || o.location || "",
                                   description: o.description || "",
                                   status: o.status || "open",
@@ -2335,49 +2340,59 @@ function QHSETab({
                         </Td>
                       </tr>
                       {editingObs === o.id && (
-                        <tr style={{ borderTop: "1px solid hsl(var(--border))", background: "hsl(var(--muted))" }}>
-                          <td colSpan={7} className="px-4 py-3">
-                            <div className="flex items-center gap-3 flex-wrap">
-                              <span className="text-[11px] font-semibold" style={{ color: "var(--pfg-steel)" }}>Edit Observation</span>
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Date</span>
-                                <input type="date" value={editObsForm.observationDate} onChange={e => setEditObsForm(f => ({ ...f, observationDate: e.target.value }))} className="text-[11px] px-2 py-1 border rounded" style={{ borderColor: "hsl(var(--border))" }} />
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Shift</span>
-                                <select value={editObsForm.shift} onChange={e => setEditObsForm(f => ({ ...f, shift: e.target.value }))} className="text-[11px] px-2 py-1 border rounded" style={{ borderColor: "hsl(var(--border))" }}>
+                        <tr style={{ borderTop: "1px solid hsl(var(--border))", background: "#FFFBF0" }}>
+                          <td colSpan={8} style={{ padding: "16px 20px" }}>
+                            <div className="text-[12px] font-semibold mb-3" style={{ color: "var(--pfg-navy)" }}>Edit Safety Observation</div>
+                            <div className="grid gap-3 mb-3" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+                              <ModalField label="Date">
+                                <input type="date" value={editObsForm.observationDate} onChange={e => setEditObsForm(f => ({ ...f, observationDate: e.target.value }))} className="modal-input" />
+                              </ModalField>
+                              <ModalField label="Time">
+                                <input type="time" value={editObsForm.observationTime} onChange={e => setEditObsForm(f => ({ ...f, observationTime: e.target.value }))} className="modal-input" />
+                              </ModalField>
+                              <ModalField label="Shift">
+                                <select value={editObsForm.shift} onChange={e => setEditObsForm(f => ({ ...f, shift: e.target.value }))} className="modal-input">
                                   <option value="Day">Day</option>
                                   <option value="Night">Night</option>
                                 </select>
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Type</span>
-                                <select value={editObsForm.observationType} onChange={e => setEditObsForm(f => ({ ...f, observationType: e.target.value }))} className="text-[11px] px-2 py-1 border rounded" style={{ borderColor: "hsl(var(--border))" }}>
+                              </ModalField>
+                              <ModalField label="Type">
+                                <select value={editObsForm.observationType} onChange={e => setEditObsForm(f => ({ ...f, observationType: e.target.value }))} className="modal-input">
                                   <option value="positive">Positive</option>
                                   <option value="unsafe_condition">Unsafe Condition</option>
                                   <option value="negative">Negative</option>
+                                  <option value="near_miss">Near Miss</option>
                                   <option value="stop_work">Stop Work</option>
                                 </select>
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Location</span>
-                                <input type="text" value={editObsForm.locationOnSite} onChange={e => setEditObsForm(f => ({ ...f, locationOnSite: e.target.value }))} className="text-[11px] px-2 py-1 border rounded w-32" style={{ borderColor: "hsl(var(--border))" }} />
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Description</span>
-                                <textarea value={editObsForm.description} onChange={e => setEditObsForm(f => ({ ...f, description: e.target.value }))} className="text-[11px] px-2 py-1 border rounded w-64" style={{ borderColor: "hsl(var(--border))", minHeight: 48, resize: "vertical" }} />
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Status</span>
-                                <select value={editObsForm.status} onChange={e => setEditObsForm(f => ({ ...f, status: e.target.value }))} className="text-[11px] px-2 py-1 border rounded" style={{ borderColor: "hsl(var(--border))" }}>
+                              </ModalField>
+                              <ModalField label="Reported By">
+                                <select value={editObsForm.reportedByWorkerId} onChange={e => setEditObsForm(f => ({ ...f, reportedByWorkerId: e.target.value }))} className="modal-input">
+                                  <option value="">— Select worker —</option>
+                                  {projectWorkers.map((w: any) => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
+                                </select>
+                              </ModalField>
+                              <ModalField label="Status">
+                                <select value={editObsForm.status} onChange={e => setEditObsForm(f => ({ ...f, status: e.target.value }))} className="modal-input">
                                   <option value="open">Open</option>
                                   <option value="closed">Closed</option>
                                 </select>
-                              </div>
-                              <button onClick={() => handleSaveEditObs(o.id)} disabled={savingEditObs} className="text-[11px] font-semibold px-3 py-1 rounded disabled:opacity-50" style={{ background: "var(--pfg-navy)", color: "#fff" }}>
-                                {savingEditObs ? <Loader2 className="w-3 h-3 animate-spin" /> : "Save"}
+                              </ModalField>
+                            </div>
+                            <div className="mb-3">
+                              <ModalField label="Location">
+                                <input type="text" value={editObsForm.locationOnSite} onChange={e => setEditObsForm(f => ({ ...f, locationOnSite: e.target.value }))} className="modal-input" placeholder="Location on site" />
+                              </ModalField>
+                            </div>
+                            <div className="mb-4">
+                              <ModalField label="Description">
+                                <textarea value={editObsForm.description} onChange={e => setEditObsForm(f => ({ ...f, description: e.target.value }))} className="modal-input" rows={3} />
+                              </ModalField>
+                            </div>
+                            <div className="flex gap-2">
+                              <button onClick={() => handleSaveEditObs(o.id)} disabled={savingEditObs} className="text-[12px] font-semibold px-4 py-2 rounded-lg disabled:opacity-50" style={{ background: "var(--pfg-navy)", color: "#fff" }}>
+                                {savingEditObs ? <Loader2 className="w-3.5 h-3.5 animate-spin inline" /> : "Save Changes"}
                               </button>
-                              <button onClick={() => setEditingObs(null)} className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>Cancel</button>
+                              <button onClick={() => setEditingObs(null)} className="text-[12px] px-4 py-2 rounded-lg border" style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-steel)" }}>Cancel</button>
                             </div>
                           </td>
                         </tr>
@@ -2771,9 +2786,12 @@ function SafetyKPIsTab({ project }: { project: DashboardProject }) {
 
     const positiveRate = totalObs > 0 ? Math.round((positiveObs / totalObs) * 100) : 0;
 
-    // Safety participation: unique reporters / total (placeholder logic)
-    const uniqueReporters = new Set(observations.map((o: any) => o.reportedBy).filter(Boolean)).size;
-    const participationRate = uniqueReporters > 0 ? Math.min(100, Math.round((uniqueReporters / Math.max(1, observations.length)) * 100)) : 0;
+    // Safety participation: unique reporters / total on-site workers × 100
+    const uniqueReporters = new Set(observations.map((o: any) => o.reportedByWorkerId).filter(Boolean)).size;
+    const onSiteCount = Math.max(1, toolboxTalks.length > 0
+      ? (new Set(toolboxTalks.map((t: any) => t.workerId).filter(Boolean)).size || 1)
+      : 1);
+    const participationRate = totalObs > 0 ? Math.min(100, Math.round((uniqueReporters / onSiteCount) * 100)) : 0;
 
     // TBT compliance: days with TBT / total project days
     const totalDays = project.startDate && project.endDate
