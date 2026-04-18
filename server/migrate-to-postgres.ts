@@ -633,6 +633,16 @@ export async function runMigrationIfNeeded() {
 }
 
 async function migrate(db: ReturnType<typeof drizzle>) {
+  // PRODUCTION GUARD — this function performs a full data seed and must never run against live data.
+  // It should only ever be called on a fresh empty database.
+  // Use runSchemaUpdates() for all schema changes in production.
+  if (process.env.NODE_ENV === 'production' || process.env.DATABASE_URL?.includes('render.com')) {
+    throw new Error(
+      'BLOCKED: migrate() cannot run in production. Use runSchemaUpdates() for schema changes. ' +
+      'If you genuinely need to reseed, manually remove this guard and do it with full awareness of data loss.'
+    );
+  }
+
   // Load seed data — try file first, fall back to embedded
   let data: any;
   const exportPaths = [
@@ -870,9 +880,7 @@ async function migrate(db: ReturnType<typeof drizzle>) {
     ON CONFLICT (cost_centre) DO NOTHING
   `);
 
-  // Truncate in reverse dependency order (idempotent)
-  console.log("Clearing existing data...");
-  await db.execute(sql`TRUNCATE project_leads, audit_logs, sessions, magic_links, assignments, role_slots, documents, projects, workers, oem_types, users RESTART IDENTITY CASCADE`);
+  // TRUNCATE intentionally removed — destructive operation must never run against production data.
 
   // Insert OEM types
   console.log("Inserting OEM types...");
@@ -979,14 +987,19 @@ async function migrate(db: ReturnType<typeof drizzle>) {
   console.log("Migration complete!");
 }
 
-// Allow running directly: DATABASE_URL=... npx tsx server/migrate-to-postgres.ts
+// Direct-run block — calls runSchemaUpdates() only, never migrate()
+// DATABASE_URL=... npx tsx server/migrate-to-postgres.ts
 if (process.argv[1]?.includes('migrate-to-postgres')) {
   const url = process.env.DATABASE_URL;
   if (!url) { console.error("DATABASE_URL required"); process.exit(1); }
   const pool = createPool(url);
   const db = drizzle(pool);
-  migrate(db).then(() => pool.end()).catch(err => {
-    console.error("Migration failed:", err);
+  console.log("Running schema updates only (never migrate)...");
+  runSchemaUpdates(db).then(() => {
+    console.log("Schema updates complete.");
+    pool.end();
+  }).catch(err => {
+    console.error("Schema update failed:", err);
     process.exit(1);
   });
 }
