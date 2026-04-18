@@ -609,6 +609,11 @@ function TasksAccordion({ tasks, color }: { tasks: any[]; color: string }) {
 export default function CustomerPortal({ params }: { params: { projectCode: string } }) {
   const [activeTab, setActiveTab] = useState<"overview" | "reports" | "hs" | "timesheets">("overview");
   const [downloading, setDownloading] = useState(false);
+  const [tbSearch, setTbSearch] = useState("");
+  const [obsSearch, setObsSearch] = useState("");
+  const [obsTypeFilter, setObsTypeFilter] = useState<string>("");
+  const [incSearch, setIncSearch] = useState("");
+  const [incTypeFilter, setIncTypeFilter] = useState<string>("");
 
   const { data, isLoading } = useQuery({
     queryKey: ["/api/portal", params.projectCode],
@@ -742,6 +747,30 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
   const incNearMiss = incidentsList.filter(i => i.incidentType === "near_miss").length;
   const incFirstAid = incidentsList.filter(i => i.incidentType === "first_aid").length;
   const incLTI = incidentsList.filter(i => i.incidentType === "lost_time_injury").length;
+
+  // Filtered lists
+  const filteredToolboxTalks = toolboxTalksList.filter((t: any) => {
+    if (!tbSearch) return true;
+    const q = tbSearch.toLowerCase();
+    return (t.topic || "").toLowerCase().includes(q)
+      || (t.reportDate || "").toLowerCase().includes(q)
+      || (t.shift || "").toLowerCase().includes(q);
+  });
+  const filteredSafetyObs = safetyObsList.filter((o: any) => {
+    if (obsTypeFilter && o.observationType !== obsTypeFilter) return false;
+    if (!obsSearch) return true;
+    const q = obsSearch.toLowerCase();
+    return (o.description || "").toLowerCase().includes(q)
+      || (o.locationOnSite || "").toLowerCase().includes(q)
+      || (o.observationDate || "").toLowerCase().includes(q);
+  });
+  const filteredIncidents = incidentsList.filter((i: any) => {
+    if (incTypeFilter && i.incidentType !== incTypeFilter) return false;
+    if (!incSearch) return true;
+    const q = incSearch.toLowerCase();
+    return (i.incidentDate || "").toLowerCase().includes(q)
+      || (i.incidentType || "").toLowerCase().includes(q);
+  });
 
   // Sorted team for table (Day first, then Night; by role rank)
   const ROLE_ORDER_TABLE = ["Superintendent","Foreman","Lead Technician","Technician 2","Technician 1","Rigger","Crane Driver","HSE Officer","Welder","I&C Technician","Electrician","Apprentice"];
@@ -1219,17 +1248,30 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                     </p>
                   </div>
                 ) : (
-                  <div style={{ overflowX: "auto" }}>
+                  <>
+                    <div className="flex items-center gap-2 px-6 py-3" style={{ borderBottom: "1px solid #eaecf0", background: "#FAFBFC" }}>
+                      <input
+                        type="text"
+                        placeholder="Search by topic, date, shift..."
+                        value={tbSearch}
+                        onChange={e => setTbSearch(e.target.value)}
+                        style={{ flex: 1, fontSize: 12, padding: "6px 10px", border: "1px solid #e2e5eb", borderRadius: 6, outline: "none", background: "#fff" }}
+                      />
+                      <span style={{ fontSize: 11, color: "#6b7280", whiteSpace: "nowrap" }}>
+                        {filteredToolboxTalks.length} of {toolboxTalksList.length}
+                      </span>
+                    </div>
+                    <div style={{ maxHeight: 400, overflowY: "auto", overflowX: "auto" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <thead>
                         <tr style={{ background: "#F4F5F7" }}>
                           {["Date", "Shift", "Topic", "Attendees", ""].map(h => (
-                            <th key={h} style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", padding: "12px 20px", textAlign: "left", borderBottom: "1px solid #e2e5eb", whiteSpace: "nowrap" }}>{h}</th>
+                            <th key={h} style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", padding: "12px 20px", textAlign: "left", borderBottom: "1px solid #e2e5eb", whiteSpace: "nowrap", position: "sticky", top: 0, background: "#F4F5F7", zIndex: 1 }}>{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {toolboxTalksList.map((t: any) => (
+                        {filteredToolboxTalks.map((t: any) => (
                           <tr key={t.id} style={{ borderBottom: "1px solid #eaecf0", transition: "background 160ms" }}
                             onMouseEnter={e => (e.currentTarget.style.background = "#F4F5F7")}
                             onMouseLeave={e => (e.currentTarget.style.background = "")}>
@@ -1248,7 +1290,8 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                         ))}
                       </tbody>
                     </table>
-                  </div>
+                    </div>
+                  </>
                 )}
               </div>
 
@@ -1281,17 +1324,41 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                     </p>
                   </div>
                 ) : (
-                  <div style={{ overflowX: "auto" }}>
+                  <>
+                    <div className="flex items-center gap-2 px-6 py-3" style={{ borderBottom: "1px solid #eaecf0", background: "#FAFBFC" }}>
+                      <input
+                        type="text"
+                        placeholder="Search description, location, date..."
+                        value={obsSearch}
+                        onChange={e => setObsSearch(e.target.value)}
+                        style={{ flex: 1, fontSize: 12, padding: "6px 10px", border: "1px solid #e2e5eb", borderRadius: 6, outline: "none", background: "#fff" }}
+                      />
+                      <select
+                        value={obsTypeFilter}
+                        onChange={e => setObsTypeFilter(e.target.value)}
+                        style={{ fontSize: 12, padding: "6px 10px", border: "1px solid #e2e5eb", borderRadius: 6, background: "#fff" }}
+                      >
+                        <option value="">All types</option>
+                        <option value="positive">Positive</option>
+                        <option value="unsafe_condition">Unsafe</option>
+                        <option value="negative">Negative</option>
+                        <option value="stop_work">Stop Work</option>
+                      </select>
+                      <span style={{ fontSize: 11, color: "#6b7280", whiteSpace: "nowrap" }}>
+                        {filteredSafetyObs.length} of {safetyObsList.length}
+                      </span>
+                    </div>
+                    <div style={{ maxHeight: 400, overflowY: "auto", overflowX: "auto" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <thead>
                         <tr style={{ background: "#F4F5F7" }}>
                           {["Date", "Type", "Location", "Description", "Status"].map(h => (
-                            <th key={h} style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", padding: "12px 20px", textAlign: "left", borderBottom: "1px solid #e2e5eb", whiteSpace: "nowrap" }}>{h}</th>
+                            <th key={h} style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", padding: "12px 20px", textAlign: "left", borderBottom: "1px solid #e2e5eb", whiteSpace: "nowrap", position: "sticky", top: 0, background: "#F4F5F7", zIndex: 1 }}>{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {safetyObsList.map((o: any) => (
+                        {filteredSafetyObs.map((o: any) => (
                           <tr
                             key={o.id}
                             style={{ borderBottom: "1px solid #eaecf0", background: o.observationType === "stop_work" ? "#fff1f2" : undefined, transition: "background 160ms" }}
@@ -1309,7 +1376,8 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                         ))}
                       </tbody>
                     </table>
-                  </div>
+                    </div>
+                  </>
                 )}
               </div>
 
@@ -1353,17 +1421,40 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                     </p>
                   </div>
                 ) : (
-                  <div style={{ overflowX: "auto" }}>
+                  <>
+                    <div className="flex items-center gap-2 px-6 py-3" style={{ borderBottom: "1px solid #eaecf0", background: "#FAFBFC" }}>
+                      <input
+                        type="text"
+                        placeholder="Search date or type..."
+                        value={incSearch}
+                        onChange={e => setIncSearch(e.target.value)}
+                        style={{ flex: 1, fontSize: 12, padding: "6px 10px", border: "1px solid #e2e5eb", borderRadius: 6, outline: "none", background: "#fff" }}
+                      />
+                      <select
+                        value={incTypeFilter}
+                        onChange={e => setIncTypeFilter(e.target.value)}
+                        style={{ fontSize: 12, padding: "6px 10px", border: "1px solid #e2e5eb", borderRadius: 6, background: "#fff" }}
+                      >
+                        <option value="">All types</option>
+                        <option value="near_miss">Near Miss</option>
+                        <option value="first_aid">First Aid</option>
+                        <option value="lost_time_injury">LTI</option>
+                      </select>
+                      <span style={{ fontSize: 11, color: "#6b7280", whiteSpace: "nowrap" }}>
+                        {filteredIncidents.length} of {incidentsList.length}
+                      </span>
+                    </div>
+                    <div style={{ maxHeight: 400, overflowY: "auto", overflowX: "auto" }}>
                     <table style={{ width: "100%", borderCollapse: "collapse" }}>
                       <thead>
                         <tr style={{ background: "#F4F5F7" }}>
                           {["Date", "Type", "Worker Involved", "Status"].map(h => (
-                            <th key={h} style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", padding: "12px 20px", textAlign: "left", borderBottom: "1px solid #e2e5eb", whiteSpace: "nowrap" }}>{h}</th>
+                            <th key={h} style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", padding: "12px 20px", textAlign: "left", borderBottom: "1px solid #e2e5eb", whiteSpace: "nowrap", position: "sticky", top: 0, background: "#F4F5F7", zIndex: 1 }}>{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {incidentsList.map((inc: any) => {
+                        {filteredIncidents.map((inc: any) => {
                           const isLTI = inc.incidentType === "lost_time_injury";
                           return (
                             <tr key={inc.id} style={{ borderBottom: "1px solid #eaecf0", background: isLTI ? "#fffbeb" : undefined, transition: "background 160ms" }}
@@ -1378,7 +1469,8 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                         })}
                       </tbody>
                     </table>
-                  </div>
+                    </div>
+                  </>
                 )}
               </div>
 

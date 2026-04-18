@@ -1,18 +1,14 @@
-import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useToast } from "@/hooks/use-toast";
 import {
   useDashboardData,
   type DashboardProject,
   type DashboardWorker,
   type DashboardAssignment,
-  type DashboardRoleSlot,
 } from "@/hooks/use-dashboard-data";
 import {
   OEM_OPTIONS,
   PROJECT_CUSTOMER,
-  PROJECT_ROLES,
-  COST_CENTRES,
-  CERT_DEFS,
   sortSlots,
   cleanName,
   calcUtilisation,
@@ -23,45 +19,61 @@ import {
   X,
   Search,
   ChevronDown,
-  ChevronUp,
-  Info,
-  Undo2,
   Loader2,
   Send,
   Mail,
   PhoneCall,
+  UserRound,
+  AlertTriangle,
+  CheckCircle2,
 } from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────────────────
 
-interface RoleSlotDraft {
-  key: number;
-  role: string;
-  startDate: string;
-  endDate: string;
-  quantity: number;
-  shift: string;
+interface AssignPanelState {
+  slotId: number;
+  slotRole: string;
+  slotShift: string;
+  slotStartDate: string;
+  slotEndDate: string;
+  periodStartDate: string;
+  periodEndDate: string;
+  periodNotes?: string | null;
 }
 
-// ─── Small shared components ────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────
 
-function ShiftBadge({ shift }: { shift: string | null }) {
-  if (!shift) return null;
-  return (
-    <span
-      className={`badge ${shift === "Night" ? "badge-navy" : "badge-accent"}`}
-    >
-      {shift}
-    </span>
-  );
+function datesOverlap(
+  aStart: string,
+  aEnd: string,
+  bStart: string | null,
+  bEnd: string | null
+): boolean {
+  if (!bStart || !bEnd) return false;
+  return aStart <= bEnd && aEnd >= bStart;
+}
+
+function initials(name: string): string {
+  const cleaned = cleanName(name);
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "??";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
 
 function StatusBadge({ status }: { status: string }) {
   return (
-    <span
-      className={`badge ${status === "FTE" ? "badge-navy" : "badge-grey"}`}
-    >
+    <span className={`badge ${status === "FTE" ? "badge-navy" : "badge-grey"} text-[10px]`}>
       {status}
+    </span>
+  );
+}
+
+function ShiftBadge({ shift }: { shift: string | null }) {
+  if (!shift) return null;
+  return (
+    <span className={`badge ${shift === "Night" ? "badge-navy" : "badge-accent"} text-[10px]`}>
+      {shift}
     </span>
   );
 }
@@ -77,102 +89,328 @@ function ConfirmationBadge({ assignment }: { assignment: DashboardAssignment }) 
   if (status === "declined") {
     return <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: "var(--red-bg)", color: "var(--red)" }}>Declined</span>;
   }
-  // "active" temp with no token sent yet
   return <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ background: "hsl(var(--muted))", color: "#9ca3af" }}>Not sent</span>;
 }
 
-const inputStyle = {
-  borderColor: "hsl(var(--border))",
-  background: "hsl(var(--card))",
-};
+// ─── Worker Search Panel (slide-in from right) ──────────────────
 
-function TeamMultiSelect({
-  label, options, selected, onChange,
+function WorkerSearchPanel({
+  state,
+  onClose,
+  onAssigned,
+  project,
+  allWorkers,
+  oemMatch,
 }: {
-  label: string; options: string[]; selected: string[]; onChange: (v: string[]) => void;
+  state: AssignPanelState;
+  onClose: () => void;
+  onAssigned: () => void;
+  project: DashboardProject;
+  allWorkers: DashboardWorker[];
+  oemMatch: string | null;
 }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const { toast } = useToast();
+  const [search, setSearch] = useState("");
+  const [oemFilter, setOemFilter] = useState<string>("");
+  const [fteOnly, setFteOnly] = useState(false);
+  const [showWarningsOnly, setShowWarningsOnly] = useState(false);
+  const [saving, setSaving] = useState<number | null>(null);
 
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
+  const periodStart = state.periodStartDate;
+  const periodEnd = state.periodEndDate;
 
-  const toggle = (val: string) => {
-    onChange(selected.includes(val) ? selected.filter(s => s !== val) : [...selected, val]);
+  interface Enriched {
+    worker: DashboardWorker;
+    availability: "free" | "partial" | "busy";
+    overlapInfo: string;
+    utilPct: number;
+    hasOemMatch: boolean;
+    roleMatch: boolean;
+    warnings: string[];
+  }
+
+  const enrichedWorkers: Enriched[] = useMemo(() => {
+    const today = new Date().toISOString().split("T")[0];
+    return allWorkers.map(w => {
+      const util = calcUtilisation(w.assignments);
+      const hasOemMatch = oemMatch ? w.oemExperience.includes(oemMatch) : true;
+
+      let availability: "free" | "busy" = "free";
+      let overlapInfo = "";
+      for (const a of w.assignments) {
+        if (!(a.status === "active" || a.status === "flagged" || a.status === "confirmed" || a.status === "pending_confirmation")) continue;
+        if (a.projectId === project.id) {
+          if (datesOverlap(periodStart, periodEnd, a.startDate, a.endDate)) {
+            availability = "busy";
+            overlapInfo = `Already on this project ${a.startDate}–${a.endDate}`;
+            break;
+          }
+          continue;
+        }
+        if (datesOverlap(periodStart, periodEnd, a.startDate, a.endDate)) {
+          availability = "busy";
+          overlapInfo = `On ${a.projectCode} ${a.startDate}–${a.endDate}`;
+          break;
+        }
+      }
+
+      const roleMatch = w.role === state.slotRole;
+      const warnings: string[] = [];
+      if (!hasOemMatch && oemMatch) warnings.push(`No ${oemMatch} experience`);
+      if (!roleMatch) warnings.push(`Role mismatch (${w.role})`);
+      if (util.pct > 80) warnings.push(`${util.pct}% utilised YTD`);
+
+      return {
+        worker: w,
+        availability,
+        overlapInfo,
+        utilPct: util.pct,
+        hasOemMatch,
+        roleMatch,
+        warnings,
+      };
+    });
+  }, [allWorkers, oemMatch, periodStart, periodEnd, project.id, state.slotRole]);
+
+  const filtered = useMemo(() => {
+    let list = enrichedWorkers;
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter(e => e.worker.name.toLowerCase().includes(q) || e.worker.role.toLowerCase().includes(q));
+    }
+    if (oemFilter) {
+      list = list.filter(e => e.worker.oemExperience.some(o => o.startsWith(oemFilter)));
+    }
+    if (fteOnly) {
+      list = list.filter(e => e.worker.status === "FTE");
+    }
+    if (showWarningsOnly) {
+      list = list.filter(e => e.warnings.length === 0);
+    }
+    // Sort: availability, role match, FTE, OEM, utilisation asc
+    return [...list].sort((a, b) => {
+      const availOrder = (av: string) => av === "free" ? 0 : av === "partial" ? 1 : 2;
+      const d = availOrder(a.availability) - availOrder(b.availability);
+      if (d !== 0) return d;
+      if (a.roleMatch !== b.roleMatch) return a.roleMatch ? -1 : 1;
+      if (a.worker.status !== b.worker.status) return a.worker.status === "FTE" ? -1 : 1;
+      if (a.hasOemMatch !== b.hasOemMatch) return a.hasOemMatch ? -1 : 1;
+      return a.utilPct - b.utilPct;
+    });
+  }, [enrichedWorkers, search, oemFilter, fteOnly, showWarningsOnly]);
+
+  const handleAssign = async (workerId: number) => {
+    setSaving(workerId);
+    try {
+      const durationDays = Math.max(
+        1,
+        Math.ceil((new Date(periodEnd).getTime() - new Date(periodStart).getTime()) / 86400000) + 1
+      );
+      await apiRequest("POST", "/api/assignments", {
+        workerId,
+        projectId: project.id,
+        roleSlotId: state.slotId,
+        role: state.slotRole,
+        shift: state.slotShift,
+        startDate: periodStart,
+        endDate: periodEnd,
+        duration: durationDays,
+        status: "active",
+      });
+      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      toast({ title: "Worker assigned" });
+      onAssigned();
+      onClose();
+    } catch (e: any) {
+      toast({ title: "Error assigning worker", description: e.message || "Unknown error", variant: "destructive" });
+    }
+    setSaving(null);
   };
 
-  const display = selected.length === 0 ? label : selected.length === 1 ? selected[0] : `${selected.length} sel.`;
-
   return (
-    <div className="relative" ref={ref}>
-      <button type="button" onClick={() => setOpen(!open)}
-        className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg border truncate"
+    <div
+      className="fixed inset-0 z-[250] flex"
+      style={{ background: "rgba(0,0,0,0.45)" }}
+      onClick={onClose}
+    >
+      <div
+        className="ml-auto h-full flex flex-col"
         style={{
-          borderColor: selected.length > 0 ? "var(--pfg-yellow)" : "hsl(var(--border))",
-          background: selected.length > 0 ? "hsl(var(--accent))" : "transparent",
-          color: selected.length > 0 ? "var(--pfg-navy)" : "hsl(var(--muted-foreground))",
-          maxWidth: "130px",
-        }}>
-        <span className="truncate">{display}</span>
-        <ChevronDown className="w-3 h-3 shrink-0" />
-      </button>
-      {open && (
-        <div className="absolute top-full mt-1 left-0 z-50 min-w-[180px] max-h-48 overflow-y-auto rounded-lg border p-1"
-          style={{ background: "hsl(var(--card))", borderColor: "hsl(var(--border))", boxShadow: "var(--shadow-md, 0 4px 12px rgba(0,0,0,0.1))" }}>
-          {options.map(opt => (
-            <label key={opt} className="flex items-center gap-2 px-2.5 py-1 text-[11px] cursor-pointer rounded hover:bg-black/5">
-              <input type="checkbox" checked={selected.includes(opt)} onChange={() => toggle(opt)} className="accent-[var(--pfg-yellow)]" />
-              {opt}
-            </label>
-          ))}
+          width: 560,
+          maxWidth: "95vw",
+          background: "hsl(var(--card))",
+          boxShadow: "-8px 0 30px rgba(0,0,0,0.2)",
+          animation: "slideInRight 200ms ease-out",
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="px-5 py-4 border-b" style={{ borderColor: "hsl(var(--border))" }}>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="text-[14px] font-bold text-pfg-navy">Assign Worker</div>
+              <div className="text-[12px] mt-0.5" style={{ color: "var(--pfg-steel)" }}>
+                {state.slotRole} · {state.slotShift} · {periodStart} → {periodEnd}
+              </div>
+            </div>
+            <button onClick={onClose} className="p-1 hover:bg-black/5 rounded">
+              <X className="w-5 h-5" style={{ color: "var(--pfg-steel)" }} />
+            </button>
+          </div>
+
+          <div className="mt-3 flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: "hsl(var(--muted-foreground))" }} />
+              <input
+                type="text"
+                placeholder="Search by name or role..."
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                autoFocus
+                className="w-full pl-8 pr-3 py-1.5 text-[12px] rounded-lg border"
+                style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}
+              />
+            </div>
+          </div>
+
+          <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+            <select
+              value={oemFilter}
+              onChange={e => setOemFilter(e.target.value)}
+              className="text-[11px] px-2 py-1 rounded-lg border"
+              style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}
+            >
+              <option value="">All OEMs</option>
+              {OEM_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+            </select>
+            <button
+              onClick={() => setFteOnly(v => !v)}
+              className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border"
+              style={{
+                borderColor: fteOnly ? "var(--pfg-yellow)" : "hsl(var(--border))",
+                background: fteOnly ? "hsl(var(--accent))" : "transparent",
+                color: fteOnly ? "var(--pfg-navy)" : "var(--pfg-steel)",
+              }}
+            >
+              FTE only
+            </button>
+            <button
+              onClick={() => setShowWarningsOnly(v => !v)}
+              className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border"
+              style={{
+                borderColor: showWarningsOnly ? "var(--pfg-yellow)" : "hsl(var(--border))",
+                background: showWarningsOnly ? "hsl(var(--accent))" : "transparent",
+                color: showWarningsOnly ? "var(--pfg-navy)" : "var(--pfg-steel)",
+              }}
+            >
+              No warnings
+            </button>
+            <span className="text-[11px] ml-auto" style={{ color: "var(--pfg-steel)" }}>
+              {filtered.length} of {allWorkers.length}
+            </span>
+          </div>
         </div>
-      )}
+
+        <div className="flex-1 overflow-y-auto">
+          {filtered.length === 0 ? (
+            <div className="text-center py-12 text-[13px]" style={{ color: "hsl(var(--muted-foreground))" }}>
+              No matching workers
+            </div>
+          ) : (
+            filtered.map(e => (
+              <div
+                key={e.worker.id}
+                className="flex items-center gap-3 px-5 py-3 border-b cursor-pointer hover:bg-[hsl(var(--accent))]"
+                style={{ borderColor: "hsl(var(--border))" }}
+                onClick={() => e.availability !== "busy" && handleAssign(e.worker.id)}
+              >
+                <div
+                  className="w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0"
+                  style={{ background: "var(--pfg-navy)", color: "#fff" }}
+                >
+                  {initials(e.worker.name)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13px] font-semibold text-pfg-navy truncate">
+                    {cleanName(e.worker.name)}
+                  </div>
+                  <div className="text-[11px] mt-0.5" style={{ color: "var(--pfg-steel)" }}>
+                    {e.worker.role} · {e.worker.status === "FTE" ? (e.worker.costCentre || "FTE") : "Temp"}
+                  </div>
+                  <div className="flex items-center gap-1 mt-1 flex-wrap">
+                    <StatusBadge status={e.worker.status} />
+                    {e.hasOemMatch && oemMatch && (
+                      <span className="badge badge-green text-[10px]">OEM ✓</span>
+                    )}
+                    {e.warnings.map((w, i) => (
+                      <span
+                        key={i}
+                        className="text-[9px] font-semibold px-1.5 py-0.5 rounded"
+                        style={{ background: "var(--amber-bg, #FEF3C7)", color: "var(--amber, #92400E)" }}
+                      >
+                        {w}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <div className="flex items-center gap-1">
+                    <span
+                      style={{
+                        display: "inline-block",
+                        width: 8,
+                        height: 8,
+                        borderRadius: "50%",
+                        background: e.availability === "free" ? "var(--green)" : e.availability === "partial" ? "var(--amber, #D97706)" : "var(--red)",
+                      }}
+                    />
+                    <span
+                      className="text-[10px] font-semibold"
+                      style={{
+                        color: e.availability === "free" ? "var(--green)" : e.availability === "partial" ? "var(--amber, #D97706)" : "var(--red)",
+                      }}
+                    >
+                      {e.availability === "free" ? "Available" : e.availability === "partial" ? "Partial" : "Unavailable"}
+                    </span>
+                  </div>
+                  {e.overlapInfo && (
+                    <span className="text-[9px] text-right max-w-[160px]" style={{ color: "var(--pfg-steel)" }}>
+                      {e.overlapInfo}
+                    </span>
+                  )}
+                  <span className="text-[10px] tabular-nums" style={{ color: "var(--pfg-steel)" }}>
+                    {e.utilPct}% util
+                  </span>
+                  {e.availability !== "busy" && (
+                    <button
+                      onClick={(ev) => { ev.stopPropagation(); handleAssign(e.worker.id); }}
+                      disabled={saving === e.worker.id}
+                      className="text-[10px] font-bold px-2 py-0.5 rounded"
+                      style={{ background: "var(--pfg-yellow, #F5BD00)", color: "var(--pfg-navy)" }}
+                    >
+                      {saving === e.worker.id ? <Loader2 className="w-3 h-3 animate-spin" /> : "Assign"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+      <style>{`
+        @keyframes slideInRight {
+          from { transform: translateX(100%); }
+          to   { transform: translateX(0); }
+        }
+      `}</style>
     </div>
   );
 }
 
-function datesOverlap(
-  aStart: string,
-  aEnd: string,
-  bStart: string | null,
-  bEnd: string | null
-): boolean {
-  if (!bStart || !bEnd) return false;
-  return aStart <= bEnd && aEnd >= bStart;
-}
-
-function workerIsAvailable(
-  worker: DashboardWorker,
-  slotStart: string,
-  slotEnd: string,
-  excludeProjectId?: number
-): boolean {
-  for (const a of worker.assignments) {
-    if (a.status !== "active" && a.status !== "flagged" && a.status !== "confirmed" && a.status !== "pending_confirmation") continue;
-    // For same-project assignments: only skip if dates DON'T overlap
-    // (worker can be on multiple non-overlapping slots of the same project)
-    if (excludeProjectId && a.projectId === excludeProjectId) {
-      if (!datesOverlap(slotStart, slotEnd, a.startDate, a.endDate)) continue;
-      // Same project but overlapping dates — still unavailable
-      return false;
-    }
-    if (datesOverlap(slotStart, slotEnd, a.startDate, a.endDate)) return false;
-  }
-  return true;
-}
-
 // ─── Main Component ─────────────────────────────────────────────
-
 
 export default function ProjectTeamTab({
   project,
   onUpdate,
-  canEdit = true,
 }: {
   project: DashboardProject;
   onUpdate: () => void;
@@ -184,72 +422,53 @@ export default function ProjectTeamTab({
   const allAssignments = data?.assignments ?? [];
   const { toast } = useToast();
 
-  const customer =
-    project.customer || PROJECT_CUSTOMER[project.code] || "";
-  const editOem =
-    OEM_OPTIONS.find((o) => customer.includes(o)) || "";
+  const customer = project.customer || PROJECT_CUSTOMER[project.code] || "";
+  const editOem = OEM_OPTIONS.find(o => customer.includes(o)) || "";
   const editEquipment = project.equipmentType || "";
+  const oemMatch = editOem && editEquipment ? `${editOem} - ${editEquipment}` : null;
 
-  const TEAM_STATUSES = ["active", "flagged", "pending_confirmation", "confirmed", "declined"];
-
-  // Build members array from dashboard data
-  const members = useMemo(() => {
-    return allAssignments
-      .filter(
-        (a: DashboardAssignment) =>
-          a.projectId === project.id &&
-          TEAM_STATUSES.includes(a.status || "")
-      )
-      .map((a: DashboardAssignment) => {
-        const worker = allWorkers.find((w) => w.id === a.workerId);
-        return worker ? { worker, assignment: a } : null;
-      })
-      .filter(Boolean) as {
-      worker: DashboardWorker;
-      assignment: DashboardAssignment;
-    }[];
-  }, [allAssignments, allWorkers, project.id]);
-
-  // Build role slot drafts from existing server data
-  const existingSlots = useMemo(
-    () => allRoleSlots.filter((s) => s.projectId === project.id),
-    [allRoleSlots, project.id]
-  );
-  const roleSlotEdits: RoleSlotDraft[] = useMemo(
-    () =>
-      existingSlots.map((s) => ({
-        key: -(s.id),
-        role: s.role,
-        startDate: s.startDate,
-        endDate: s.endDate,
-        quantity: s.quantity,
-        shift: s.shift || "Day",
-      })),
-    [existingSlots]
-  );
-
-  // ── Team tab state ──
-  const [removedIds, setRemovedIds] = useState<Set<number>>(new Set());
-  const [slotAdditions, setSlotAdditions] = useState<
-    Record<number, number[]>
-  >({});
-  const [editSlotSearch, setEditSlotSearch] = useState<
-    Record<number, string>
-  >({});
-  const [editSlotFteOnly, setEditSlotFteOnly] = useState<
-    Record<number, boolean>
-  >({});
-  const [editSlotRoleFilter, setEditSlotRoleFilter] = useState<Record<number, string[]>>({});
-  const [editSlotCostCentreFilter, setEditSlotCostCentreFilter] = useState<Record<number, string[]>>({});
-  const [editSlotOemFilter, setEditSlotOemFilter] = useState<Record<number, string[]>>({});
-  const [editSlotCertFilter, setEditSlotCertFilter] = useState<Record<number, string[]>>({});
-  const [editExpandedWorkers, setEditExpandedWorkers] = useState<
-    Set<number>
-  >(new Set());
-  const [saving, setSaving] = useState(false);
+  const [activeSubTab, setActiveSubTab] = useState<"assignments" | "personnel">("assignments");
+  const [expandedSlots, setExpandedSlots] = useState<Set<number>>(new Set());
+  const [assignPanel, setAssignPanel] = useState<AssignPanelState | null>(null);
   const [sendingConfirmation, setSendingConfirmation] = useState<number | null>(null);
   const [confirmingManually, setConfirmingManually] = useState<number | null>(null);
   const [sendingAll, setSendingAll] = useState(false);
+
+  const projectSlots = useMemo(
+    () => sortSlots(allRoleSlots.filter(s => s.projectId === project.id)),
+    [allRoleSlots, project.id]
+  );
+
+  const TEAM_STATUSES = ["active", "flagged", "pending_confirmation", "confirmed", "declined"];
+  const members = useMemo(() => {
+    return allAssignments
+      .filter((a: DashboardAssignment) => a.projectId === project.id && TEAM_STATUSES.includes(a.status || ""))
+      .map((a: DashboardAssignment) => {
+        const worker = allWorkers.find(w => w.id === a.workerId);
+        return worker ? { worker, assignment: a } : null;
+      })
+      .filter(Boolean) as { worker: DashboardWorker; assignment: DashboardAssignment }[];
+  }, [allAssignments, allWorkers, project.id]);
+
+  const toggleSlot = (slotId: number) => {
+    setExpandedSlots(prev => {
+      const next = new Set(prev);
+      if (next.has(slotId)) next.delete(slotId);
+      else next.add(slotId);
+      return next;
+    });
+  };
+
+  const handleRemove = async (assignmentId: number) => {
+    try {
+      await apiRequest("DELETE", `/api/assignments/${assignmentId}`);
+      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      toast({ title: "Worker removed from project" });
+      onUpdate();
+    } catch (e: any) {
+      toast({ title: "Error removing worker", description: e.message || "Unknown error", variant: "destructive" });
+    }
+  };
 
   const handleSendConfirmation = async (assignmentId: number) => {
     setSendingConfirmation(assignmentId);
@@ -277,7 +496,7 @@ export default function ProjectTeamTab({
     setConfirmingManually(null);
   };
 
-  const handleSendAllConfirmations = async () => {
+  const handleSendAll = async () => {
     setSendingAll(true);
     try {
       const res = await apiRequest("POST", `/api/projects/${project.id}/send-all-confirmations`);
@@ -291,902 +510,665 @@ export default function ProjectTeamTab({
     setSendingAll(false);
   };
 
-  const handleRemove = async (assignmentId: number) => {
-    try {
-      await apiRequest("DELETE", `/api/assignments/${assignmentId}`);
-      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
-      toast({ title: "Worker removed from project" });
-      onUpdate();
-    } catch (e: any) {
-      toast({
-        title: "Error removing worker",
-        description: e.message || "Unknown error",
-        variant: "destructive",
-      });
-    }
-  };
+  // ── Group slots by shift ──
+  const daySlots = projectSlots.filter(s => s.shift !== "Night");
+  const nightSlots = projectSlots.filter(s => s.shift === "Night");
 
-  // Get workers assigned to a role slot (existing team members)
-  const getSlotMembers = (slotKey: number) => {
-    const slotId = slotKey < 0 ? Math.abs(slotKey) : undefined;
-    const slot = roleSlotEdits.find((s) => s.key === slotKey);
-    if (!slot) return [];
-    return members.filter((m) => {
-      if (slotId && m.assignment.roleSlotId === slotId) return true;
-      if (
-        !m.assignment.roleSlotId &&
-        slotId &&
-        m.assignment.role === slot.role
-      )
-        return true;
-      return false;
-    });
-  };
-
-  // Get unmatched members
-  const unmatchedMembers = useMemo(() => {
-    const slotIds = new Set(existingSlots.map((s) => s.id));
-    const slotRoles = new Set(roleSlotEdits.map((s) => s.role));
-    return members.filter((m) => {
-      if (m.assignment.roleSlotId && slotIds.has(m.assignment.roleSlotId))
-        return false;
-      if (
-        !m.assignment.roleSlotId &&
-        m.assignment.role &&
-        slotRoles.has(m.assignment.role)
-      )
-        return false;
-      return true;
-    });
-  }, [members, existingSlots, roleSlotEdits]);
-
-  // Available workers for a role slot
-  function getEditAvailableWorkers(
-    slotKey: number
-  ): { filtered: DashboardWorker[]; total: number } {
-    const slot = roleSlotEdits.find((s) => s.key === slotKey);
-    if (!slot) return { filtered: [], total: 0 };
-
-    // Worker IDs already on the project
-    const projectWorkerIds = new Set(members.map((m) => m.worker.id));
-    // Worker IDs added in this session across all slots
-    const allAddedIds = new Set<number>();
-    for (const ids of Object.values(slotAdditions)) {
-      for (const id of ids) allAddedIds.add(id);
-    }
-
-    const oemMatch =
-      editOem && editEquipment ? `${editOem} - ${editEquipment}` : null;
-
-    const base = allWorkers.filter((w) => {
-      if (allAddedIds.has(w.id)) return false;
-      if (!workerIsAvailable(w, slot.startDate, slot.endDate, project.id))
-        return false;
-      return true;
-    });
-    const total = base.length;
-
-    const searchTerm = (editSlotSearch[slotKey] || "").toLowerCase();
-    const fteOnly = editSlotFteOnly[slotKey] || false;
-    const roleFilter = editSlotRoleFilter[slotKey] || [];
-    const ccFilter = editSlotCostCentreFilter[slotKey] || [];
-    const oemFilterArr = editSlotOemFilter[slotKey] || [];
-    const certFilterArr = editSlotCertFilter[slotKey] || [];
-    const todayStr = new Date().toISOString().split("T")[0];
-
-    const filtered = base
-      .filter((w) => {
-        if (searchTerm && !w.name.toLowerCase().includes(searchTerm))
-          return false;
-        if (fteOnly && w.status !== "FTE") return false;
-        if (roleFilter.length > 0 && !roleFilter.includes(w.role)) return false;
-        if (ccFilter.length > 0) {
-          const wcc = w.status === "FTE" ? (w.costCentre || "") : "Temp";
-          if (!ccFilter.includes(wcc)) return false;
-        }
-        if (oemFilterArr.length > 0) {
-          const workerOems = w.oemExperience.map((o: string) => o.split(" - ")[0]);
-          if (!oemFilterArr.some(o => workerOems.includes(o))) return false;
-        }
-        if (certFilterArr.length > 0) {
-          const docs = (w as any).documents as Array<{ type: string; expiryDate: string | null }> | undefined;
-          if (!docs) return false;
-          const hasAll = certFilterArr.every(certName => {
-            const certType = "cert_" + certName.toLowerCase().replace(/[^a-z0-9]/g, "_");
-            return docs.some((d: any) => d.type === certType && (!d.expiryDate || d.expiryDate >= todayStr));
-          });
-          if (!hasAll) return false;
-        }
-        return true;
-      })
-      .sort((a, b) => {
-        const statusOrder = (s: string) => (s === "FTE" ? 0 : 1);
-        const sd = statusOrder(a.status) - statusOrder(b.status);
-        if (sd !== 0) return sd;
-        if (oemMatch) {
-          const aMatch = a.oemExperience.includes(oemMatch) ? 0 : 1;
-          const bMatch = b.oemExperience.includes(oemMatch) ? 0 : 1;
-          if (aMatch !== bMatch) return aMatch - bMatch;
-        }
-        return (
-          calcUtilisation(a.assignments).pct -
-          calcUtilisation(b.assignments).pct
-        );
-      });
-
-    return { filtered, total };
-  }
-
-  function toggleEditExpandedWorker(wid: number) {
-    setEditExpandedWorkers((prev) => {
-      const next = new Set(prev);
-      if (next.has(wid)) next.delete(wid);
-      else next.add(wid);
-      return next;
-    });
-  }
-
-  async function assignWorkerToSlot(slotKey: number, workerId: number) {
-    const slot = roleSlotEdits.find((s) => s.key === slotKey);
-    if (!slot) return;
-    const roleSlotId = slotKey < 0 ? Math.abs(slotKey) : null;
-    const durationDays =
-      slot.startDate && slot.endDate
-        ? Math.max(
-            1,
-            Math.ceil(
-              (new Date(slot.endDate).getTime() -
-                new Date(slot.startDate).getTime()) /
-                86400000
-            )
-          )
-        : null;
-    setSaving(true);
-    try {
-      await apiRequest("POST", "/api/assignments", {
-        workerId,
-        projectId: project.id,
-        roleSlotId,
-        role: slot.role,
-        shift: slot.shift,
-        startDate: slot.startDate,
-        endDate: slot.endDate,
-        duration: durationDays,
-        status: "active",
-      });
-      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
-      toast({ title: "Worker assigned" });
-      onUpdate();
-    } catch (e: any) {
-      toast({
-        title: "Error assigning worker",
-        description: e.message || "Unknown error",
-        variant: "destructive",
-      });
-    }
-    setSaving(false);
-  }
-
-  const activeCount = members.length;
-  const oemMatch =
-    editOem && editEquipment ? `${editOem} - ${editEquipment}` : null;
-
-  // Temp confirmation stats
   const tempMembers = members.filter(m => m.worker.status === "Temp");
-  const tempsAwaitingConfirmation = tempMembers.filter(
+  const tempsAwaiting = tempMembers.filter(
     m => m.assignment.status === "active" || m.assignment.status === "pending_confirmation"
   );
-  const showSendAllButton = tempsAwaitingConfirmation.length > 0;
+
+  // ── Active Personnel (today overlap) ──
+  const today = new Date().toISOString().split("T")[0];
+  const activePersonnel = members.filter(m => {
+    const a = m.assignment;
+    if (!a.startDate || !a.endDate) return false;
+    if (!(a.status === "active" || a.status === "flagged" || a.status === "confirmed")) return false;
+    return a.startDate <= today && a.endDate >= today;
+  });
+  const activeDay = activePersonnel.filter(m => m.assignment.shift !== "Night");
+  const activeNight = activePersonnel.filter(m => m.assignment.shift === "Night");
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-5">
-        <div className="text-base font-bold text-pfg-navy font-display flex items-center gap-3">
-          Team Members
-          <span
-            className="text-sm font-semibold px-2.5 py-0.5 rounded-full"
-            style={{
-              background: "hsl(var(--accent))",
-              color: "#8B6E00",
-            }}
-          >
-            {activeCount}
-          </span>
-        </div>
-        <div className="flex items-center gap-3">
-          {showSendAllButton && (
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-medium" style={{ color: "var(--amber, #D97706)" }}>
-                {tempsAwaitingConfirmation.length} Temp{tempsAwaitingConfirmation.length !== 1 ? "s" : ""} awaiting confirmation
-              </span>
-              <button
-                onClick={handleSendAllConfirmations}
-                disabled={sendingAll}
-                className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg border transition"
-                style={{ borderColor: "var(--pfg-yellow)", background: "hsl(var(--accent))", color: "var(--pfg-navy)" }}
-              >
-                {sendingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                Send to All Temps
-              </button>
-            </div>
-          )}
-        </div>
-        {project.endDate &&
-          members.some(
-            (m) =>
-              m.assignment.endDate &&
-              m.assignment.endDate < project.endDate!
-          ) && (
-            <button
-              onClick={async () => {
-                if (!confirm(`Extend all assignments to ${project.endDate}?`))
-                  return;
-                for (const m of members) {
-                  if (
-                    m.assignment.endDate &&
-                    m.assignment.endDate < project.endDate!
-                  ) {
-                    await apiRequest(
-                      "PATCH",
-                      `/api/assignments/${m.assignment.id}`,
-                      { endDate: project.endDate }
-                    );
-                  }
-                }
-                await queryClient.invalidateQueries({
-                  queryKey: ["/api/dashboard"],
-                });
-                onUpdate();
-              }}
-              className="text-[13px] font-semibold px-4 py-2 rounded-lg border"
-              style={{
-                borderColor: "var(--pfg-yellow)",
-                color: "var(--pfg-navy)",
-              }}
-            >
-              Extend All to {project.endDate}
-            </button>
-          )}
-      </div>
+      {assignPanel && (
+        <WorkerSearchPanel
+          state={assignPanel}
+          onClose={() => setAssignPanel(null)}
+          onAssigned={() => onUpdate()}
+          project={project}
+          allWorkers={allWorkers}
+          oemMatch={oemMatch}
+        />
+      )}
 
-      {roleSlotEdits.length === 0 ? (
-        <div
-          className="text-center py-12 rounded-xl border"
+      {/* Sub-tabs */}
+      <div className="flex items-center border-b mb-5" style={{ borderColor: "hsl(var(--border))" }}>
+        <button
+          onClick={() => setActiveSubTab("assignments")}
+          className="text-[12px] font-semibold px-4 py-2"
           style={{
-            borderColor: "hsl(var(--border))",
-            background: "hsl(var(--card))",
+            color: activeSubTab === "assignments" ? "var(--teal, #005E60)" : "var(--pfg-steel)",
+            borderBottom: activeSubTab === "assignments" ? "2px solid var(--teal, #005E60)" : "2px solid transparent",
+            marginBottom: -1,
           }}
         >
-          <div className="text-base font-medium text-pfg-navy mb-2">
-            No role slots defined
-          </div>
-          <div className="text-[13px]" style={{ color: "var(--pfg-steel)" }}>
-            Go to the Role Planning tab to define role slots first.
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-5">
-          {sortSlots(roleSlotEdits).map((slot) => {
-            const slotMembers = getSlotMembers(slot.key);
-            const filledCount = slotMembers.length;
-            const { filtered: available, total: totalAvailable } =
-              getEditAvailableWorkers(slot.key);
-            const isFteOnly = editSlotFteOnly[slot.key] || false;
-            const searchVal = editSlotSearch[slot.key] || "";
-
-            return (
-              <div
-                key={slot.key}
-                className="rounded-xl border"
-                style={{
-                  borderColor: "hsl(var(--border))",
-                  background: "hsl(var(--card))",
-                }}
-              >
-                {/* Slot header */}
-                <div
-                  className="px-5 py-3.5 text-[13px] font-semibold flex items-center justify-between"
-                  style={{
-                    background: "hsl(var(--muted))",
-                    borderBottom: "1px solid hsl(var(--border))",
-                  }}
-                >
-                  <div>
-                    <span className="text-pfg-navy">{slot.role}</span>
-                    <span
-                      className="mx-2"
-                      style={{ color: "var(--pfg-steel)" }}
-                    >
-                      &mdash;
-                    </span>
-                    <span style={{ color: "var(--pfg-steel)" }}>
-                      {slot.shift} shift
-                    </span>
-                    <span
-                      className="mx-2"
-                      style={{ color: "var(--pfg-steel)" }}
-                    >
-                      &mdash;
-                    </span>
-                    <span style={{ color: "var(--pfg-steel)" }}>
-                      {slot.startDate} to {slot.endDate}
-                    </span>
-                  </div>
-                  <span
-                    className="text-xs font-semibold px-2.5 py-0.5 rounded-full"
-                    style={{
-                      background:
-                        filledCount >= slot.quantity
-                          ? "var(--green-bg)"
-                          : "hsl(var(--accent))",
-                      color:
-                        filledCount >= slot.quantity
-                          ? "var(--green)"
-                          : "#8B6E00",
-                    }}
-                  >
-                    {filledCount}/{slot.quantity}
-                  </span>
-                </div>
-
-                {/* Existing members for this slot */}
-                {slotMembers.length > 0 && (
-                  <div className="px-5 py-3 space-y-1.5">
-                    {slotMembers.map((m, mIdx) => (
-                      <div
-                        key={m.assignment.id}
-                        className="flex items-center gap-3 px-4 py-2.5 rounded-lg border transition-colors"
-                        style={{ borderColor: "hsl(var(--border))" }}
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="text-[13px] font-semibold text-pfg-navy flex items-center gap-1.5">
-                            {slot.quantity > 1 && (
-                              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded tabular-nums" style={{ background: "hsl(var(--muted))", color: "var(--pfg-steel)" }}>
-                                {mIdx + 1}/{slot.quantity}
-                              </span>
-                            )}
-                            {cleanName(m.worker.name)}
-                            {m.worker.driversLicenseUploaded ? (
-                              <span
-                                className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0"
-                                style={{
-                                  background: "#1A1D23",
-                                  color: "#F5BD00",
-                                }}
-                                title="Has Driver's Licence"
-                              >
-                                D
-                              </span>
-                            ) : null}
-                          </div>
-                          <div className="flex items-center gap-2 mt-0.5">
-                            <span
-                              className="text-[11px]"
-                              style={{ color: "var(--pfg-steel)" }}
-                            >
-                              {m.assignment.role || m.worker.role} ·{" "}
-                              {m.assignment.startDate || "—"} →
-                            </span>
-                            <input
-                              type="date"
-                              value={m.assignment.endDate || ""}
-                              onChange={async (e) => {
-                                try {
-                                  await apiRequest(
-                                    "PATCH",
-                                    `/api/assignments/${m.assignment.id}`,
-                                    { endDate: e.target.value }
-                                  );
-                                  await queryClient.invalidateQueries({
-                                    queryKey: ["/api/dashboard"],
-                                  });
-                                  onUpdate();
-                                } catch {
-                                  /* silent */
-                                }
-                              }}
-                              className="text-[11px] px-1.5 py-0.5 border rounded"
-                              style={{
-                                borderColor: "hsl(var(--border))",
-                                background: "hsl(var(--background))",
-                                width: "120px",
-                              }}
-                            />
-                            {m.assignment.endDate &&
-                              project.endDate &&
-                              m.assignment.endDate < project.endDate && (
-                                <span
-                                  className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
-                                  style={{
-                                    background:
-                                      "var(--amber-bg, hsl(var(--accent)))",
-                                    color: "var(--amber, #D97706)",
-                                  }}
-                                >
-                                  ends early
-                                </span>
-                              )}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <ShiftBadge shift={m.assignment.shift} />
-                          <StatusBadge status={m.worker.status} />
-                          {m.worker.status === "Temp" && (
-                            <>
-                              <ConfirmationBadge assignment={m.assignment} />
-                              {m.assignment.status !== "confirmed" && (
-                                <div className="flex items-center gap-1">
-                                  {/* Send / Resend email confirmation request */}
-                                  <button
-                                    onClick={() => handleSendConfirmation(m.assignment.id)}
-                                    disabled={sendingConfirmation === m.assignment.id}
-                                    className="text-[10px] font-semibold px-2 py-0.5 rounded-lg border flex items-center gap-1 transition"
-                                    style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-navy)" }}
-                                    title={m.assignment.status === "pending_confirmation" ? "Resend confirmation request" : "Send confirmation request"}
-                                  >
-                                    {sendingConfirmation === m.assignment.id ? (
-                                      <Loader2 className="w-3 h-3 animate-spin" />
-                                    ) : (
-                                      <Mail className="w-3 h-3" />
-                                    )}
-                                    {m.assignment.status === "pending_confirmation" ? "Resend Request" : "Send Confirmation Request"}
-                                  </button>
-                                  {/* Manual / telephone confirm */}
-                                  <button
-                                    onClick={() => handleManualConfirm(m.assignment.id)}
-                                    disabled={confirmingManually === m.assignment.id}
-                                    className="text-[10px] font-semibold px-2 py-0.5 rounded-lg border flex items-center gap-1 transition"
-                                    style={{ borderColor: "var(--green)", color: "var(--green)" }}
-                                    title="Mark as confirmed (e.g. confirmed by telephone)"
-                                  >
-                                    {confirmingManually === m.assignment.id ? (
-                                      <Loader2 className="w-3 h-3 animate-spin" />
-                                    ) : (
-                                      <PhoneCall className="w-3 h-3" />
-                                    )}
-                                    Confirm Manually
-                                  </button>
-                                </div>
-                              )}
-                            </>
-                          )}
-                          <button
-                            onClick={() => handleRemove(m.assignment.id)}
-                            className="ml-1 p-1 rounded hover:bg-[var(--red-bg)]"
-                            title="Remove from project"
-                          >
-                            <X
-                              className="w-3.5 h-3.5"
-                              style={{ color: "var(--red)" }}
-                            />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Available workers search/filter panel */}
-                {filledCount < slot.quantity && (
-                  <div className="px-5 py-3">
-                    <div className="flex items-center gap-2 mb-2.5">
-                      <div className="relative flex-1">
-                        <Search
-                          className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5"
-                          style={{
-                            color: "hsl(var(--muted-foreground))",
-                          }}
-                        />
-                        <input
-                          type="text"
-                          placeholder="Search by name..."
-                          value={searchVal}
-                          onChange={(e) =>
-                            setEditSlotSearch((prev) => ({
-                              ...prev,
-                              [slot.key]: e.target.value,
-                            }))
-                          }
-                          className="w-full pl-8 pr-3 py-1.5 text-[12px] rounded-lg border"
-                          style={inputStyle}
-                        />
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() =>
-                            setEditSlotFteOnly((prev) => ({
-                              ...prev,
-                              [slot.key]: false,
-                            }))
-                          }
-                          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border"
-                          style={{
-                            borderColor: !isFteOnly
-                              ? "var(--pfg-yellow)"
-                              : "hsl(var(--border))",
-                            background: !isFteOnly
-                              ? "hsl(var(--accent))"
-                              : "transparent",
-                            color: !isFteOnly
-                              ? "var(--pfg-navy)"
-                              : "hsl(var(--muted-foreground))",
-                          }}
-                        >
-                          All
-                        </button>
-                        <button
-                          onClick={() =>
-                            setEditSlotFteOnly((prev) => ({
-                              ...prev,
-                              [slot.key]: true,
-                            }))
-                          }
-                          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border"
-                          style={{
-                            borderColor: isFteOnly
-                              ? "var(--pfg-yellow)"
-                              : "hsl(var(--border))",
-                            background: isFteOnly
-                              ? "hsl(var(--accent))"
-                              : "transparent",
-                            color: isFteOnly
-                              ? "var(--pfg-navy)"
-                              : "hsl(var(--muted-foreground))",
-                          }}
-                        >
-                          FTE only
-                        </button>
-                      </div>
-                      <span
-                        className="text-[11px] font-medium shrink-0"
-                        style={{ color: "var(--pfg-steel)" }}
-                      >
-                        {available.length} of {totalAvailable} workers
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5 mb-2 flex-wrap">
-                      <TeamMultiSelect
-                        label="Role"
-                        options={PROJECT_ROLES}
-                        selected={editSlotRoleFilter[slot.key] || []}
-                        onChange={(v) => setEditSlotRoleFilter(prev => ({ ...prev, [slot.key]: v }))}
-                      />
-                      <TeamMultiSelect
-                        label="Cost Centre"
-                        options={[...COST_CENTRES, "Temp"]}
-                        selected={editSlotCostCentreFilter[slot.key] || []}
-                        onChange={(v) => setEditSlotCostCentreFilter(prev => ({ ...prev, [slot.key]: v }))}
-                      />
-                      <TeamMultiSelect
-                        label="OEM"
-                        options={OEM_OPTIONS}
-                        selected={editSlotOemFilter[slot.key] || []}
-                        onChange={(v) => setEditSlotOemFilter(prev => ({ ...prev, [slot.key]: v }))}
-                      />
-                      <TeamMultiSelect
-                        label="Certificates"
-                        options={CERT_DEFS.map(c => c.name)}
-                        selected={editSlotCertFilter[slot.key] || []}
-                        onChange={(v) => setEditSlotCertFilter(prev => ({ ...prev, [slot.key]: v }))}
-                      />
-                    </div>
-                    <div className="max-h-[280px] overflow-y-auto space-y-0.5">
-                      {available.length === 0 ? (
-                        <div
-                          className="text-center py-6 text-[13px]"
-                          style={{
-                            color: "hsl(var(--muted-foreground))",
-                          }}
-                        >
-                          No available workers
-                          {searchVal || isFteOnly
-                            ? " matching filters"
-                            : " without date conflicts"}
-                        </div>
-                      ) : (
-                        available.map((w) => {
-                          const util = calcUtilisation(w.assignments);
-                          const hasOemMatch = oemMatch
-                            ? w.oemExperience.includes(oemMatch)
-                            : false;
-                          const isExpanded = editExpandedWorkers.has(w.id);
-                          const activeAssignment = w.assignments.find(
-                            (a) => a.status === "active"
-                          );
-                          return (
-                            <div key={w.id}>
-                              <div
-                                className="flex items-center gap-3 px-4 py-2.5 rounded-lg border cursor-pointer transition-colors hover:border-[var(--pfg-yellow)] hover:bg-[hsl(var(--accent))]"
-                                style={{
-                                  borderColor: "hsl(var(--border))",
-                                  background: "hsl(var(--card))",
-                                }}
-                              >
-                                <div
-                                  className="flex-1 min-w-0"
-                                  onClick={() =>
-                                    assignWorkerToSlot(slot.key, w.id)
-                                  }
-                                >
-                                  <div className="text-[13px] font-semibold text-pfg-navy">
-                                    {cleanName(w.name)}
-                                    {w.driversLicenseUploaded ? (
-                                      <span
-                                        className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0"
-                                        style={{
-                                          background: "#1A1D23",
-                                          color: "#F5BD00",
-                                        }}
-                                        title="Has Driver's Licence"
-                                      >
-                                        D
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                                    <span
-                                      className="text-[11px]"
-                                      style={{
-                                        color: "var(--pfg-steel)",
-                                      }}
-                                    >
-                                      {w.role}
-                                    </span>
-                                    {w.oemExperience
-                                      .slice(0, 3)
-                                      .map((exp) => (
-                                        <span
-                                          key={exp}
-                                          className={`badge text-[10px] ${exp === oemMatch ? "badge-green" : "badge-grey"}`}
-                                        >
-                                          {exp}
-                                        </span>
-                                      ))}
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  <span
-                                    className="text-[11px] tabular-nums font-medium"
-                                    style={{
-                                      color:
-                                        util.pct > 80
-                                          ? "var(--red)"
-                                          : "var(--pfg-steel)",
-                                    }}
-                                  >
-                                    {util.pct}%
-                                  </span>
-                                  <StatusBadge status={w.status} />
-                                  {hasOemMatch && (
-                                    <span className="badge badge-green text-[10px]">
-                                      OEM
-                                    </span>
-                                  )}
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      toggleEditExpandedWorker(w.id);
-                                    }}
-                                    className="p-0.5 rounded hover:bg-black/5"
-                                    title="Preview worker details"
-                                  >
-                                    {isExpanded ? (
-                                      <ChevronUp
-                                        className="w-3.5 h-3.5"
-                                        style={{
-                                          color: "var(--pfg-steel)",
-                                        }}
-                                      />
-                                    ) : (
-                                      <Info
-                                        className="w-3.5 h-3.5"
-                                        style={{
-                                          color: "var(--pfg-steel)",
-                                        }}
-                                      />
-                                    )}
-                                  </button>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      assignWorkerToSlot(slot.key, w.id);
-                                    }}
-                                    className="p-0.5"
-                                    disabled={saving}
-                                  >
-                                    {saving ? (
-                                      <Loader2
-                                        className="w-4 h-4 animate-spin"
-                                        style={{
-                                          color: "var(--pfg-steel)",
-                                        }}
-                                      />
-                                    ) : (
-                                      <Plus
-                                        className="w-4 h-4"
-                                        style={{
-                                          color: "var(--pfg-yellow)",
-                                        }}
-                                      />
-                                    )}
-                                  </button>
-                                </div>
-                              </div>
-                              {isExpanded && (
-                                <div
-                                  className="ml-3 mr-3 mb-1 px-4 py-2.5 rounded-b-lg border border-t-0 text-[12px]"
-                                  style={{
-                                    borderColor: "hsl(var(--border))",
-                                    background: "hsl(var(--muted))",
-                                  }}
-                                >
-                                  <div className="flex flex-wrap gap-x-4 gap-y-1.5">
-                                    <div>
-                                      <span
-                                        style={{
-                                          color: "var(--pfg-steel)",
-                                        }}
-                                      >
-                                        Status:
-                                      </span>{" "}
-                                      <StatusBadge status={w.status} />
-                                    </div>
-                                    <div>
-                                      <span
-                                        style={{
-                                          color: "var(--pfg-steel)",
-                                        }}
-                                      >
-                                        English:
-                                      </span>{" "}
-                                      <span className="font-medium">
-                                        {w.englishLevel || "\u2014"}
-                                      </span>
-                                    </div>
-                                    <div>
-                                      <span
-                                        style={{
-                                          color: "var(--pfg-steel)",
-                                        }}
-                                      >
-                                        Utilisation:
-                                      </span>{" "}
-                                      <span
-                                        className="font-medium tabular-nums"
-                                        style={{
-                                          color:
-                                            util.pct > 80
-                                              ? "var(--red)"
-                                              : undefined,
-                                        }}
-                                      >
-                                        {util.pct}%
-                                      </span>
-                                    </div>
-                                    {activeAssignment && (
-                                      <div>
-                                        <span
-                                          style={{
-                                            color: "var(--pfg-steel)",
-                                          }}
-                                        >
-                                          Current:
-                                        </span>{" "}
-                                        <span className="font-medium">
-                                          {activeAssignment.projectCode}{" "}
-                                          &mdash;{" "}
-                                          {activeAssignment.projectName}
-                                        </span>
-                                      </div>
-                                    )}
-                                  </div>
-                                  {w.oemExperience.length > 0 && (
-                                    <div className="flex flex-wrap gap-1 mt-1.5">
-                                      {w.oemExperience.map((exp) => (
-                                        <span
-                                          key={exp}
-                                          className={`badge text-[10px] ${exp === oemMatch ? "badge-green" : "badge-grey"}`}
-                                        >
-                                          {exp}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {/* Unmatched members (no role slot) */}
-          {unmatchedMembers.length > 0 && (
-            <div
-              className="rounded-xl border"
-              style={{
-                borderColor: "hsl(var(--border))",
-                background: "hsl(var(--card))",
-              }}
+          Role Assignments
+        </button>
+        <button
+          onClick={() => setActiveSubTab("personnel")}
+          className="text-[12px] font-semibold px-4 py-2"
+          style={{
+            color: activeSubTab === "personnel" ? "var(--teal, #005E60)" : "var(--pfg-steel)",
+            borderBottom: activeSubTab === "personnel" ? "2px solid var(--teal, #005E60)" : "2px solid transparent",
+            marginBottom: -1,
+          }}
+        >
+          Active Personnel {activePersonnel.length > 0 && (
+            <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: "hsl(var(--accent))", color: "#8B6E00" }}>
+              {activePersonnel.length}
+            </span>
+          )}
+        </button>
+        {tempsAwaiting.length > 0 && activeSubTab === "assignments" && (
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-[11px] font-medium" style={{ color: "var(--amber, #D97706)" }}>
+              {tempsAwaiting.length} Temp{tempsAwaiting.length !== 1 ? "s" : ""} awaiting confirmation
+            </span>
+            <button
+              onClick={handleSendAll}
+              disabled={sendingAll}
+              className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg border"
+              style={{ borderColor: "var(--pfg-yellow)", background: "hsl(var(--accent))", color: "var(--pfg-navy)" }}
             >
-              <div
-                className="px-5 py-3.5 text-[13px] font-semibold"
-                style={{
-                  background: "hsl(var(--muted))",
-                  borderBottom: "1px solid hsl(var(--border))",
-                }}
-              >
-                <span className="text-pfg-navy">Unslotted Members</span>
-                <span
-                  className="ml-2 text-xs font-semibold px-2.5 py-0.5 rounded-full"
-                  style={{
-                    background: "var(--amber-bg, hsl(var(--accent)))",
-                    color: "var(--amber, #D97706)",
-                  }}
-                >
-                  {unmatchedMembers.length}
-                </span>
+              {sendingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+              Send to All Temps
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ─── Role Assignments sub-tab ─── */}
+      {activeSubTab === "assignments" && (
+        <div>
+          {projectSlots.length === 0 ? (
+            <div className="text-center py-16 rounded-xl border" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}>
+              <div className="text-base font-medium text-pfg-navy mb-2">No role slots defined</div>
+              <div className="text-[13px]" style={{ color: "var(--pfg-steel)" }}>
+                Go to the Role Planning tab to define role slots first.
               </div>
-              <div className="px-5 py-3 space-y-1.5">
-                {unmatchedMembers.map((m) => (
-                  <div
-                    key={m.assignment.id}
-                    className="flex items-center gap-3 px-4 py-2.5 rounded-lg border transition-colors"
-                    style={{ borderColor: "hsl(var(--border))" }}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[13px] font-semibold text-pfg-navy">
-                        {cleanName(m.worker.name)}
-                        {m.worker.driversLicenseUploaded ? (
-                          <span
-                            className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold ml-1 shrink-0"
-                            style={{
-                              background: "#1A1D23",
-                              color: "#F5BD00",
-                            }}
-                            title="Has Driver's Licence"
-                          >
-                            D
-                          </span>
-                        ) : null}
-                      </div>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span
-                          className="text-[11px]"
-                          style={{ color: "var(--pfg-steel)" }}
-                        >
-                          {m.assignment.role || m.worker.role} ·{" "}
-                          {m.assignment.startDate || "—"} →{" "}
-                          {m.assignment.endDate || "—"}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      <ShiftBadge shift={m.assignment.shift} />
-                      <StatusBadge status={m.worker.status} />
-                      <button
-                        onClick={() => handleRemove(m.assignment.id)}
-                        className="ml-1 p-1 rounded hover:bg-[var(--red-bg)]"
-                        title="Remove from project"
-                      >
-                        <X
-                          className="w-3.5 h-3.5"
-                          style={{ color: "var(--red)" }}
-                        />
-                      </button>
-                    </div>
-                  </div>
-                ))}
+            </div>
+          ) : (
+            <>
+              {daySlots.length > 0 && (
+                <ShiftBlock
+                  label="Day Shift"
+                  accent="day"
+                  slots={daySlots}
+                  members={members}
+                  allWorkers={allWorkers}
+                  expandedSlots={expandedSlots}
+                  toggleSlot={toggleSlot}
+                  onAssignClick={setAssignPanel}
+                  onRemove={handleRemove}
+                  onSendConfirmation={handleSendConfirmation}
+                  onManualConfirm={handleManualConfirm}
+                  sendingConfirmation={sendingConfirmation}
+                  confirmingManually={confirmingManually}
+                  project={project}
+                />
+              )}
+              {nightSlots.length > 0 && (
+                <ShiftBlock
+                  label="Night Shift"
+                  accent="night"
+                  slots={nightSlots}
+                  members={members}
+                  allWorkers={allWorkers}
+                  expandedSlots={expandedSlots}
+                  toggleSlot={toggleSlot}
+                  onAssignClick={setAssignPanel}
+                  onRemove={handleRemove}
+                  onSendConfirmation={handleSendConfirmation}
+                  onManualConfirm={handleManualConfirm}
+                  sendingConfirmation={sendingConfirmation}
+                  confirmingManually={confirmingManually}
+                  project={project}
+                />
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ─── Active Personnel sub-tab ─── */}
+      {activeSubTab === "personnel" && (
+        <div>
+          {activePersonnel.length === 0 ? (
+            <div className="text-center py-16 rounded-xl border" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}>
+              <div className="text-[13px]" style={{ color: "var(--pfg-steel)" }}>
+                No active personnel today.
               </div>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {activeDay.length > 0 && <PersonnelTable label="Day Shift" rows={activeDay} />}
+              {activeNight.length > 0 && <PersonnelTable label="Night Shift" rows={activeNight} />}
             </div>
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Shift Block ────────────────────────────────────────────────
+
+function ShiftBlock({
+  label,
+  accent,
+  slots,
+  members,
+  allWorkers,
+  expandedSlots,
+  toggleSlot,
+  onAssignClick,
+  onRemove,
+  onSendConfirmation,
+  onManualConfirm,
+  sendingConfirmation,
+  confirmingManually,
+  project,
+}: {
+  label: string;
+  accent: "day" | "night";
+  slots: any[];
+  members: { worker: DashboardWorker; assignment: DashboardAssignment }[];
+  allWorkers: DashboardWorker[];
+  expandedSlots: Set<number>;
+  toggleSlot: (id: number) => void;
+  onAssignClick: (state: AssignPanelState) => void;
+  onRemove: (assignmentId: number) => void;
+  onSendConfirmation: (id: number) => void;
+  onManualConfirm: (id: number) => void;
+  sendingConfirmation: number | null;
+  confirmingManually: number | null;
+  project: DashboardProject;
+}) {
+  const headerBg = accent === "day" ? "#FEF3C7" : "#EDE9FE";
+  const headerColor = accent === "day" ? "#92400E" : "#4C1D95";
+  const headerBorder = accent === "day" ? "#FDE68A" : "#C4B5FD";
+  const dotColor = accent === "day" ? "#D97706" : "#6D28D9";
+
+  return (
+    <div className="mb-6">
+      <div
+        className="flex items-center gap-2 px-4 py-2 rounded-t-lg text-[11px] font-bold uppercase tracking-wider"
+        style={{ background: headerBg, color: headerColor, border: `1px solid ${headerBorder}`, borderBottom: "none" }}
+      >
+        <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", background: dotColor }} />
+        {label}
+        <span className="ml-auto text-[10px] font-semibold opacity-70">{slots.length} slot{slots.length !== 1 ? "s" : ""}</span>
+      </div>
+      <div className="border rounded-b-lg overflow-hidden" style={{ borderColor: "hsl(var(--border))", borderTop: "none" }}>
+        {slots.map(slot => (
+          <SlotCard
+            key={slot.id}
+            slot={slot}
+            members={members}
+            allWorkers={allWorkers}
+            isExpanded={expandedSlots.has(slot.id)}
+            onToggle={() => toggleSlot(slot.id)}
+            onAssignClick={onAssignClick}
+            onRemove={onRemove}
+            onSendConfirmation={onSendConfirmation}
+            onManualConfirm={onManualConfirm}
+            sendingConfirmation={sendingConfirmation}
+            confirmingManually={confirmingManually}
+            project={project}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Slot Card ──────────────────────────────────────────────────
+
+function SlotCard({
+  slot,
+  members,
+  allWorkers,
+  isExpanded,
+  onToggle,
+  onAssignClick,
+  onRemove,
+  onSendConfirmation,
+  onManualConfirm,
+  sendingConfirmation,
+  confirmingManually,
+  project,
+}: {
+  slot: any;
+  members: { worker: DashboardWorker; assignment: DashboardAssignment }[];
+  allWorkers: DashboardWorker[];
+  isExpanded: boolean;
+  onToggle: () => void;
+  onAssignClick: (state: AssignPanelState) => void;
+  onRemove: (id: number) => void;
+  onSendConfirmation: (id: number) => void;
+  onManualConfirm: (id: number) => void;
+  sendingConfirmation: number | null;
+  confirmingManually: number | null;
+  project: DashboardProject;
+}) {
+  const slotAssignments = members.filter(m =>
+    m.assignment.roleSlotId === slot.id ||
+    (!m.assignment.roleSlotId && m.assignment.role === slot.role)
+  );
+
+  // Fetch periods lazily when expanded
+  const [periods, setPeriods] = useState<any[] | null>(null);
+  const [loadingPeriods, setLoadingPeriods] = useState(false);
+  useEffect(() => {
+    if (!isExpanded || periods !== null) return;
+    setLoadingPeriods(true);
+    apiRequest("GET", `/api/role-slots/${slot.id}/periods`)
+      .then(r => r.json())
+      .then(data => setPeriods(Array.isArray(data) ? data : []))
+      .catch(() => setPeriods([]))
+      .finally(() => setLoadingPeriods(false));
+  }, [isExpanded, slot.id, periods]);
+
+  const periodsToRender: any[] = (periods && periods.length > 0)
+    ? periods
+    : [{ id: null, slotId: slot.id, startDate: slot.startDate, endDate: slot.endDate, periodType: "initial", notes: null }];
+
+  function assignmentsForPeriod(p: any) {
+    return slotAssignments.filter(m => {
+      const a = m.assignment;
+      if (!a.startDate || !a.endDate) return false;
+      return a.startDate <= p.endDate && a.endDate >= p.startDate;
+    });
+  }
+
+  const totalAssigned = slotAssignments.filter(m =>
+    m.assignment.status === "active" || m.assignment.status === "flagged"
+    || m.assignment.status === "confirmed" || m.assignment.status === "pending_confirmation"
+  ).length;
+  const openSlots = Math.max(0, slot.quantity - totalAssigned);
+  const allFilled = openSlots === 0;
+
+  // Mini-Gantt bars
+  const miniGantt = buildMiniGantt(slot, periodsToRender, slotAssignments);
+
+  return (
+    <div
+      className="border-b last:border-b-0"
+      style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}
+    >
+      <div
+        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-[hsl(var(--muted))]/50"
+        onClick={onToggle}
+      >
+        <div style={{ minWidth: 180 }}>
+          <div className="text-[13px] font-bold text-pfg-navy flex items-center gap-1.5">
+            {slot.role}
+            {slot.quantity > 1 && (
+              <span className="text-[10px] font-normal" style={{ color: "var(--pfg-steel)" }}>×{slot.quantity}</span>
+            )}
+            {openSlots > 0 && (
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: "var(--amber-bg, #FEF3C7)", color: "var(--amber, #D97706)" }}>
+                {openSlots} open
+              </span>
+            )}
+          </div>
+          <div className="text-[11px] mt-0.5" style={{ color: "var(--pfg-steel)" }}>
+            {slot.quantity} slot{slot.quantity !== 1 ? "s" : ""} · {periodsToRender.length} period{periodsToRender.length !== 1 ? "s" : ""}
+          </div>
+        </div>
+
+        {/* Mini-Gantt */}
+        <div className="flex-1 relative" style={{ height: 14 }}>
+          {miniGantt.map((b, i) => (
+            <div
+              key={i}
+              className="absolute top-0 flex items-center"
+              style={{
+                left: `${b.leftPct}%`,
+                width: `${b.widthPct}%`,
+                height: 14,
+                background: b.filled ? "var(--teal, #005E60)" : "transparent",
+                border: b.filled ? "none" : "1.5px dashed #D1D5DB",
+                borderRadius: 3,
+                padding: "0 4px",
+                overflow: "hidden",
+                color: b.filled ? "#fff" : "var(--pfg-steel)",
+                fontSize: 8,
+                fontWeight: 700,
+                whiteSpace: "nowrap",
+              }}
+              title={b.label}
+            >
+              {b.label}
+            </div>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          {allFilled ? (
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "var(--green-bg)", color: "var(--green)" }}>
+              ✓ Filled
+            </span>
+          ) : (
+            <>
+              {totalAssigned > 0 && (
+                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "var(--green-bg)", color: "var(--green)" }}>
+                  {totalAssigned} filled
+                </span>
+              )}
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{ background: "var(--amber-bg, #FEF3C7)", color: "var(--amber, #D97706)" }}>
+                {openSlots} open
+              </span>
+            </>
+          )}
+        </div>
+        <ChevronDown
+          className="w-4 h-4 transition-transform"
+          style={{ color: "var(--pfg-steel)", transform: isExpanded ? "rotate(180deg)" : undefined }}
+        />
+      </div>
+
+      {isExpanded && (
+        <div style={{ background: "hsl(var(--muted))/0.3", borderTop: "1px solid hsl(var(--border))" }}>
+          {loadingPeriods && (
+            <div className="px-4 py-3 text-[12px]" style={{ color: "var(--pfg-steel)" }}>
+              <Loader2 className="w-3 h-3 animate-spin inline mr-1" /> Loading periods…
+            </div>
+          )}
+          {periodsToRender.map((p: any, pIdx: number) => {
+            const periodAssignments = assignmentsForPeriod(p);
+            const periodFilled = periodAssignments.length;
+            const periodOpen = Math.max(0, slot.quantity - periodFilled);
+            const durationDays = Math.max(1, Math.ceil(
+              (new Date(p.endDate).getTime() - new Date(p.startDate).getTime()) / 86400000
+            ) + 1);
+            const bgColor = periodOpen > 0 ? "#FFFBEB" : undefined;
+
+            return (
+              <div
+                key={p.id ?? `synth-${pIdx}`}
+                className="grid items-start gap-4 px-4 py-3 border-b last:border-b-0"
+                style={{ gridTemplateColumns: "160px 1fr", borderColor: "#F3F4F6", background: bgColor }}
+              >
+                <div>
+                  <span
+                    className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded inline-block"
+                    style={{
+                      background: p.periodType === "initial" ? "#DBEAFE" : "#DCFCE7",
+                      color: p.periodType === "initial" ? "#1D4ED8" : "#166534",
+                    }}
+                  >
+                    {p.periodType === "initial" ? "Initial" : "Remob"}
+                  </span>
+                  <div className="text-[12px] font-semibold text-pfg-navy mt-1">
+                    {p.startDate} → {p.endDate}
+                  </div>
+                  <div className="text-[10px] mt-0.5" style={{ color: "var(--pfg-steel)" }}>
+                    {durationDays} days{p.notes ? ` · ${p.notes}` : ""}
+                  </div>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  {periodAssignments.map(m => (
+                    <AssignmentChip
+                      key={m.assignment.id}
+                      member={m}
+                      onRemove={onRemove}
+                      onSendConfirmation={onSendConfirmation}
+                      onManualConfirm={onManualConfirm}
+                      sendingConfirmation={sendingConfirmation}
+                      confirmingManually={confirmingManually}
+                    />
+                  ))}
+                  {periodOpen > 0 && (
+                    <div
+                      className="flex items-center gap-2.5 px-3 py-2 rounded-md"
+                      style={{ border: "1px dashed #D1D5DB", background: "#FAFBFC" }}
+                    >
+                      <UserRound className="w-4 h-4" style={{ color: "#9CA3AF" }} />
+                      <div className="flex-1">
+                        <div className="text-[12px] font-semibold" style={{ color: "var(--pfg-steel)" }}>
+                          {periodOpen === 1 ? "No worker assigned" : `${periodOpen} slots unassigned`}
+                        </div>
+                        <div className="text-[10px]" style={{ color: "#9CA3AF" }}>
+                          {p.startDate} – {p.endDate} available
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => onAssignClick({
+                          slotId: slot.id,
+                          slotRole: slot.role,
+                          slotShift: slot.shift || "Day",
+                          slotStartDate: slot.startDate,
+                          slotEndDate: slot.endDate,
+                          periodStartDate: p.startDate,
+                          periodEndDate: p.endDate,
+                          periodNotes: p.notes,
+                        })}
+                        className="flex items-center gap-1 text-[11px] font-semibold px-3 py-1 rounded-md"
+                        style={{ border: "1.5px solid var(--teal, #005E60)", background: "#fff", color: "var(--teal, #005E60)" }}
+                      >
+                        <Search className="w-3 h-3" />
+                        {periodOpen === 1 ? "Assign Worker" : "Assign Workers"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Mini-Gantt ─────────────────────────────────────────────────
+
+function buildMiniGantt(
+  slot: any,
+  periods: any[],
+  slotAssignments: { worker: DashboardWorker; assignment: DashboardAssignment }[]
+): { leftPct: number; widthPct: number; filled: boolean; label: string }[] {
+  if (!slot.startDate || !slot.endDate) return [];
+  const slotStart = new Date(slot.startDate).getTime();
+  const slotEnd = new Date(slot.endDate).getTime();
+  const range = slotEnd - slotStart || 1;
+
+  return periods.map(p => {
+    const pStart = new Date(p.startDate).getTime();
+    const pEnd = new Date(p.endDate).getTime();
+    const leftPct = Math.max(0, ((pStart - slotStart) / range) * 100);
+    const widthPct = Math.max(1, ((pEnd - pStart) / range) * 100);
+    const filledWorkers = slotAssignments.filter(m => {
+      const a = m.assignment;
+      if (!a.startDate || !a.endDate) return false;
+      return a.startDate <= p.endDate && a.endDate >= p.startDate
+        && (a.status === "active" || a.status === "flagged" || a.status === "confirmed" || a.status === "pending_confirmation");
+    });
+    const filled = filledWorkers.length > 0;
+    const label = filled
+      ? (filledWorkers.length === 1 ? cleanName(filledWorkers[0].worker.name) : `${filledWorkers.length} workers`)
+      : "Unassigned";
+    return { leftPct, widthPct, filled, label };
+  });
+}
+
+// ─── Assignment Chip ────────────────────────────────────────────
+
+function AssignmentChip({
+  member,
+  onRemove,
+  onSendConfirmation,
+  onManualConfirm,
+  sendingConfirmation,
+  confirmingManually,
+}: {
+  member: { worker: DashboardWorker; assignment: DashboardAssignment };
+  onRemove: (id: number) => void;
+  onSendConfirmation: (id: number) => void;
+  onManualConfirm: (id: number) => void;
+  sendingConfirmation: number | null;
+  confirmingManually: number | null;
+}) {
+  const { worker, assignment } = member;
+  const isTemp = worker.status === "Temp";
+  const isFlagged = assignment.status === "flagged";
+
+  return (
+    <div
+      className="flex items-center gap-2.5 px-3 py-2 rounded-md bg-white"
+      style={{
+        border: "1px solid hsl(var(--border))",
+        borderLeft: "3px solid var(--teal, #005E60)",
+      }}
+    >
+      <div
+        className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0"
+        style={{ background: "var(--pfg-navy)", color: "#fff" }}
+      >
+        {initials(worker.name)}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="text-[12px] font-semibold text-pfg-navy truncate flex items-center gap-1.5">
+          {cleanName(worker.name)}
+          {isFlagged && <AlertTriangle className="w-3 h-3" style={{ color: "var(--red)" }} />}
+          {worker.driversLicenseUploaded ? (
+            <span
+              className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[8px] font-bold shrink-0"
+              style={{ background: "#1A1D23", color: "#F5BD00" }}
+              title="Has Driver's Licence"
+            >
+              D
+            </span>
+          ) : null}
+        </div>
+        <div className="text-[10px]" style={{ color: "var(--pfg-steel)" }}>
+          {assignment.role || worker.role} · {worker.status}
+        </div>
+      </div>
+      <div className="flex items-center gap-1 shrink-0">
+        {isTemp && <ConfirmationBadge assignment={assignment} />}
+        {isTemp && assignment.status !== "confirmed" && (
+          <>
+            <button
+              onClick={() => onSendConfirmation(assignment.id)}
+              disabled={sendingConfirmation === assignment.id}
+              className="p-1 rounded hover:bg-black/5"
+              title={assignment.status === "pending_confirmation" ? "Resend confirmation" : "Send confirmation request"}
+            >
+              {sendingConfirmation === assignment.id ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: "var(--pfg-navy)" }} />
+              ) : (
+                <Mail className="w-3.5 h-3.5" style={{ color: "var(--pfg-navy)" }} />
+              )}
+            </button>
+            <button
+              onClick={() => onManualConfirm(assignment.id)}
+              disabled={confirmingManually === assignment.id}
+              className="p-1 rounded hover:bg-black/5"
+              title="Confirm manually (e.g. telephone)"
+            >
+              {confirmingManually === assignment.id ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" style={{ color: "var(--green)" }} />
+              ) : (
+                <PhoneCall className="w-3.5 h-3.5" style={{ color: "var(--green)" }} />
+              )}
+            </button>
+          </>
+        )}
+        <button
+          onClick={() => onRemove(assignment.id)}
+          className="p-1 rounded hover:bg-[var(--red-bg)]"
+          title="Remove from project"
+        >
+          <X className="w-3.5 h-3.5" style={{ color: "var(--pfg-steel)" }} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Personnel Table (Active Personnel sub-tab) ─────────────────
+
+function PersonnelTable({
+  label,
+  rows,
+}: {
+  label: string;
+  rows: { worker: DashboardWorker; assignment: DashboardAssignment }[];
+}) {
+  const today = new Date();
+
+  return (
+    <div>
+      <div className="text-[10px] font-bold uppercase tracking-wider mb-2 flex items-center gap-2" style={{ color: "var(--pfg-steel)" }}>
+        {label}
+        <span className="flex-1" style={{ height: 1, background: "hsl(var(--border))" }} />
+      </div>
+      <div className="rounded-lg border overflow-hidden" style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}>
+        <table className="w-full text-[12px]" style={{ borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ background: "var(--pfg-navy, #1A1D23)", color: "#fff" }}>
+              {["Name", "Role", "MOB Date", "Expected DEMOB", "Days on Site", "Status"].map(h => (
+                <th
+                  key={h}
+                  className="text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider"
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(m => {
+              const start = m.assignment.startDate ? new Date(m.assignment.startDate) : null;
+              const daysOnSite = start
+                ? Math.max(0, Math.ceil((today.getTime() - start.getTime()) / 86400000))
+                : 0;
+              const hasStarted = start ? today.getTime() >= start.getTime() : false;
+              return (
+                <tr
+                  key={m.assignment.id}
+                  className="hover:bg-[hsl(var(--muted))]/50"
+                  style={{ borderBottom: "1px solid hsl(var(--border))" }}
+                >
+                  <td className="px-3 py-2.5 font-semibold text-pfg-navy">
+                    {cleanName(m.worker.name)}
+                  </td>
+                  <td className="px-3 py-2.5">{m.assignment.role || m.worker.role}</td>
+                  <td className="px-3 py-2.5">{m.assignment.startDate || "—"}</td>
+                  <td className="px-3 py-2.5">{m.assignment.endDate || "—"}</td>
+                  <td className="px-3 py-2.5 tabular-nums">{hasStarted ? daysOnSite : "—"}</td>
+                  <td className="px-3 py-2.5">
+                    {hasStarted ? (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: "var(--green-bg)", color: "var(--green)" }}>
+                        Active
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: "#DBEAFE", color: "#1D4ED8" }}>
+                        Pending MOB
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
