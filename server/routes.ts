@@ -958,7 +958,11 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(project);
   });
 
-  app.post("/api/projects", async (req: Request, res: Response) => {
+  app.post("/api/projects", requireAuth, requireRole("admin", "project_manager", "resource_manager"), async (req: Request, res: Response) => {
+    // Resource managers can only create capacity planning projects
+    if (req.user!.role === "resource_manager" && req.body.status !== "capacity_planning") {
+      return res.status(403).json({ error: "Resource managers can only create Capacity Planning projects" });
+    }
     const parsed = insertProjectSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error });
     const project = await storage.createProject(parsed.data);
@@ -966,7 +970,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.status(201).json(project);
   });
 
-  app.patch("/api/projects/:id", async (req: Request, res: Response) => {
+  app.patch("/api/projects/:id", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     const before = await storage.getProject(id);
     const project = await storage.updateProject(id, req.body);
@@ -1018,7 +1022,7 @@ export function registerRoutes(server: Server, app: Express) {
   app.post("/api/projects/:id/status", handleProjectStatus);
   app.patch("/api/projects/:id/status", handleProjectStatus);
 
-  app.delete("/api/projects/:id", requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+  app.delete("/api/projects/:id", requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const project = await storage.getProject(parseInt(req.params.id));
     if (!project) return res.status(404).json({ error: "Project not found" });
     if (project.status !== "potential" && project.status !== "cancelled") {
@@ -1466,14 +1470,14 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(await storage.getPayrollRules());
   });
 
-  app.put("/api/payroll-rules", async (req: Request, res: Response) => {
+  app.put("/api/payroll-rules", requireAuth, requireRole("admin"), async (req: Request, res: Response) => {
     const parsed = insertPayrollRulesSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error });
     const rule = await storage.upsertPayrollRule(parsed.data);
     res.json(rule);
   });
 
-  app.delete("/api/payroll-rules/:id", async (req: Request, res: Response) => {
+  app.delete("/api/payroll-rules/:id", requireAuth, requireRole("admin"), async (req: Request, res: Response) => {
     await storage.deletePayrollRule(Number(req.params.id));
     res.json({ ok: true });
   });
