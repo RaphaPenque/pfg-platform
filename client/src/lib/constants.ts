@@ -206,13 +206,22 @@ export function workerOnSiteOnDate(
   date: string,
   slotPeriods?: Period[]
 ): boolean {
+  // Assignment dates are ground truth — always check them first.
+  // Slot periods can be stale (set to a future window that doesn't match when the
+  // worker actually mobilised). Only fall back to slot periods if the assignment
+  // itself has no start/end dates at all.
+  const s = assignment.startDate;
+  const e = assignment.endDate;
+  if (s || e) {
+    // Use assignment dates
+    if (s && date < s) return false;
+    if (e && date > e) return false;
+    return true;
+  }
+  // No assignment dates — fall back to slot periods if available
   if (slotPeriods && slotPeriods.length > 0) {
     return slotPeriods.some(p => p.startDate <= date && p.endDate >= date);
   }
-  const s = assignment.startDate;
-  const e = assignment.endDate;
-  if (s && date < s) return false;
-  if (e && date > e) return false;
   return true;
 }
 

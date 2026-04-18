@@ -330,17 +330,23 @@ function PersonRow({
   // Only show bars for assignments in visible projects
   const visibleAssignments = worker.assignments.filter((a) => visibleProjectIds.has(a.projectId));
 
-  // Build assignment bars — one bar per role slot period
+  // Build assignment bars — use assignment dates as primary source.
+  // Slot periods can be stale/incorrect (e.g. set to a future window that doesn't match
+  // when the worker actually mobilised). Assignment dates are ground truth.
   const assignmentBars = visibleAssignments.flatMap((a) => {
     const proj = projectMap[a.projectId];
     const color = proj ? getProjectColorFromProject(proj) : getProjectColor(a.projectCode);
     const isFlagged = a.status === "flagged";
-    // Find the role slot for this assignment
-    const slot = allRoleSlots.find((s: any) => s.id === a.roleSlotId);
-    const slotPeriods = slot?.periods as Array<{ startDate: string; endDate: string }> | undefined;
-    const periodsToRender = (slotPeriods && slotPeriods.length > 0)
-      ? slotPeriods
-      : [{ startDate: a.startDate, endDate: a.endDate }];
+    // Always prefer assignment dates; fall back to slot periods only if assignment has no dates
+    const periodsToRender = (a.startDate && a.endDate)
+      ? [{ startDate: a.startDate, endDate: a.endDate }]
+      : (() => {
+          const slot = allRoleSlots.find((s: any) => s.id === a.roleSlotId);
+          const slotPeriods = slot?.periods as Array<{ startDate: string; endDate: string }> | undefined;
+          return (slotPeriods && slotPeriods.length > 0)
+            ? slotPeriods
+            : [{ startDate: a.startDate, endDate: a.endDate }];
+        })();
 
     return periodsToRender.map((period: any, pIdx: number) => {
       const startMonth = dateToMonthIndex(period.startDate);
