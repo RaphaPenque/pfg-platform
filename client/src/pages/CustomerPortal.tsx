@@ -649,13 +649,21 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
       return true;
     });
 
+    // Group assignments by worker+slot so the same worker with 2 periods shows as ONE row
     const histogramRows: HistogramRow[] = projectRoleSlots.flatMap((slot) => {
       const slotAssignments = uniqueTeamMembers.filter((m) => m.assignment.roleSlotId === slot.id);
+      // Deduplicate by workerId — keep first occurrence per worker per slot
+      const seenWorkers = new Set<number>();
+      const dedupedAssignments = slotAssignments.filter((m) => {
+        if (seenWorkers.has(m.worker.id)) return false;
+        seenWorkers.add(m.worker.id);
+        return true;
+      });
       const rows: HistogramRow[] = [];
-      for (const m of slotAssignments) {
+      for (const m of dedupedAssignments) {
         rows.push({ slot, assignedWorker: m.worker, assignment: m.assignment, filled: true });
       }
-      const unfilled = Math.max(0, slot.quantity - slotAssignments.length);
+      const unfilled = Math.max(0, slot.quantity - dedupedAssignments.length);
       for (let i = 0; i < unfilled; i++) {
         rows.push({ slot, assignedWorker: null, assignment: null, filled: false });
       }
@@ -1079,17 +1087,20 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                         const personName = row.assignedWorker ? cleanName(row.assignedWorker.name) : null;
                         const roleName = row.slot.role;
                         const isFilled = row.filled;
-                        // Bars come from slot periods — same for filled and unfilled
+                        // Collect ALL assignment periods for this worker+slot (handles gaps like night shift breaks)
                         const slotPeriods = (row.slot as any).periods as Array<{ startDate: string; endDate: string }> | undefined;
-                        // Prefer assignment dates over slot periods — slot periods can be wrong (old data)
-                        // Fall back: if assignment has valid dates, use those; otherwise use slot periods
+                        const allWorkerSlotAssignments = row.assignedWorker
+                          ? teamMembers.filter((m: any) => m.worker.id === row.assignedWorker!.id && m.assignment.roleSlotId === row.slot.id)
+                          : [];
                         const assignStart = row.assignment?.startDate;
                         const assignEnd = row.assignment?.endDate;
-                        const barsToRender: Array<{ start: string; end: string }> = assignStart && assignEnd
-                          ? [{ start: assignStart, end: assignEnd }]
-                          : slotPeriods && slotPeriods.length > 0
-                            ? slotPeriods.map(p => ({ start: p.startDate, end: p.endDate }))
-                            : [{ start: row.slot.startDate, end: row.slot.endDate }];
+                        const barsToRender: Array<{ start: string; end: string }> = allWorkerSlotAssignments.length > 1
+                          ? allWorkerSlotAssignments.map((m: any) => ({ start: m.assignment.startDate!, end: m.assignment.endDate! }))
+                          : assignStart && assignEnd
+                            ? [{ start: assignStart, end: assignEnd }]
+                            : slotPeriods && slotPeriods.length > 0
+                              ? slotPeriods.map(p => ({ start: p.startDate, end: p.endDate }))
+                              : [{ start: row.slot.startDate, end: row.slot.endDate }];
                         const barStart = barsToRender[0].start;
                         const barEnd = barsToRender[barsToRender.length - 1].end;
 
