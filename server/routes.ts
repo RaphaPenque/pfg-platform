@@ -1,6 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import type { Server } from "http";
-import { storage } from "./storage";
+import { storage, db } from "./storage";
+import { sql } from "drizzle-orm";
 import { registerTimesheetRoutes, buildTimesheetEntries, checkTimesheetReminders } from "./timesheet-routes";
 import { insertWorkerSchema, insertProjectSchema, insertAssignmentSchema, insertDocumentSchema, insertOemTypeSchema, insertRoleSlotSchema, insertWorkExperienceSchema } from "@shared/schema";
 import type { User, WorkExperience } from "@shared/schema";
