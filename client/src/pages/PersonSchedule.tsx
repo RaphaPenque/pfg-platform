@@ -20,15 +20,22 @@ function LoadingSkeleton() {
 
 function dateToMonthIndex(dateStr: string | null): number | null {
   if (!dateStr) return null;
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return null;
-  return d.getMonth();
+  // Parse as UTC to avoid timezone shifting (e.g. BST turning Apr 7 into Apr 6)
+  const parts = dateStr.split("-");
+  if (parts.length < 2) return null;
+  const month = parseInt(parts[1], 10) - 1; // 0-indexed
+  return isNaN(month) ? null : month;
 }
 
 function dateToDayFraction(dateStr: string): number {
-  const d = new Date(dateStr);
-  const daysInMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
-  return (d.getDate() - 1) / daysInMonth;
+  // Parse as UTC
+  const parts = dateStr.split("-");
+  if (parts.length < 3) return 0;
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10); // 1-indexed
+  const day = parseInt(parts[2], 10);
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate(); // last day of month
+  return (day - 1) / daysInMonth;
 }
 
 const STATUS_FILTERS: { key: ProjectStatus; label: string }[] = [

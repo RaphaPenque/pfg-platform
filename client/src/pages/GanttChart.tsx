@@ -27,14 +27,16 @@ function LoadingSkeleton() {
 // Parse date to month index (0-11)
 function dateToMonthIndex(dateStr: string | null): number | null {
   if (!dateStr) return null;
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return null;
-  return d.getMonth();
+  const parts = dateStr.split("-");
+  if (parts.length < 2) return null;
+  const month = parseInt(parts[1], 10) - 1;
+  return isNaN(month) ? null : month;
 }
 
 function dateToWeekIndex(dateStr: string): number {
-  const d = new Date(dateStr);
-  const firstMonday = new Date(CURRENT_YEAR, 0, 5); // Jan 5, 2026
+  // Parse as UTC to avoid timezone shift
+  const d = new Date(dateStr + "T00:00:00Z");
+  const firstMonday = new Date(Date.UTC(CURRENT_YEAR, 0, 5)); // Jan 5, 2026 UTC
   return Math.floor((d.getTime() - firstMonday.getTime()) / (7 * 24 * 60 * 60 * 1000));
 }
 
