@@ -180,6 +180,7 @@ export interface IStorage {
 
   // Supervisor Reports
   getSupervisorReports(projectId: number): Promise<SupervisorReport[]>;
+  deleteSupervisorReport(id: number): Promise<void>;
   getPendingSupervisorReports(): Promise<SupervisorReport[]>;
   createSupervisorReport(data: InsertSupervisorReport): Promise<SupervisorReport>;
   updateSupervisorReport(id: number, data: Partial<InsertSupervisorReport>): Promise<SupervisorReport | undefined>;
@@ -754,16 +755,20 @@ export class PostgresStorage implements IStorage {
   }
 
   // ── Supervisor Reports ────────────────────────────────────────
+  async deleteSupervisorReport(id: number): Promise<void> {
+    await db.delete(supervisorReports).where(eq(supervisorReports.id, id));
+  }
+
   async getSupervisorReports(projectId: number): Promise<SupervisorReport[]> {
     return db.select().from(supervisorReports)
       .where(eq(supervisorReports.projectId, projectId))
-      .orderBy(desc(supervisorReports.createdAt));
+      .orderBy(desc(supervisorReports.reportDate), desc(supervisorReports.createdAt));
   }
 
   async getPendingSupervisorReports(): Promise<SupervisorReport[]> {
     return db.select().from(supervisorReports)
       .where(eq(supervisorReports.status, "pending_assignment"))
-      .orderBy(desc(supervisorReports.createdAt));
+      .orderBy(desc(supervisorReports.reportDate), desc(supervisorReports.createdAt));
   }
 
   async createSupervisorReport(data: InsertSupervisorReport): Promise<SupervisorReport> {

@@ -1751,6 +1751,17 @@ export function registerRoutes(server: Server, app: Express) {
     res.status(201).json(report);
   });
 
+  app.delete("/api/supervisor-reports/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteSupervisorReport(id);
+      await logAudit(req.user!.id, "supervisor_report.delete", "supervisor_report", id);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.patch("/api/supervisor-reports/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     const { workerId, reportDate, shift } = req.body;
@@ -1807,25 +1818,53 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(talks);
   });
 
-  app.post("/api/projects/:projectId/toolbox-talks/upload", requireAuth, requireRole("admin", "resource_manager", "project_manager"), qhseUpload.single("file"), async (req: any, res: Response) => {
-    const projectId = parseInt(req.params.projectId);
-    const { date, shift, workerId, topic, attendeeCount, notes } = req.body;
-    if (!date) return res.status(400).json({ error: "date required" });
-    const filePath = req.file ? `/api/uploads/${projectId}/qhse/${req.file.filename}` : null;
-    const talk = await storage.createToolboxTalk({
-      projectId,
-      workerId: workerId ? parseInt(workerId) : null,
-      reportDate: date,
-      shift: shift || null,
-      topic: topic || null,
-      attendeeCount: attendeeCount ? parseInt(attendeeCount) : null,
-      filePath,
-      fileName: req.file?.originalname || null,
-      notes: notes || null,
-      submissionMethod: "upload",
+  app.post("/api/projects/:projectId/toolbox-talks/upload", requireAuth, requireRole("admin", "resource_manager", "project_manager"), (req: any, res: Response, next: any) => {
+    qhseUpload.single("file")(req, res, (err: any) => {
+      if (err) return res.status(500).json({ error: "File upload failed", detail: err.message });
+      next();
     });
-    await logAudit(req.user!.id, "toolbox_talk.upload", "toolbox_talk", talk.id);
-    res.status(201).json(talk);
+  }, async (req: any, res: Response) => {
+    try {
+      const projectId = parseInt(req.params.projectId);
+      const { date, shift, workerId, topic, attendeeCount, notes } = req.body;
+      if (!date) return res.status(400).json({ error: "date required" });
+
+      let uploadedFilePath = req.file?.path || null;
+      let uploadedFileName = req.file?.originalname || null;
+      let storedFilename = req.file?.filename || null;
+
+      // Auto-convert image to PDF (same as supervisor reports)
+      if (req.file && isImageFile(req.file.mimetype, req.file.originalname)) {
+        try {
+          const pdfPath = await imageToPdf(uploadedFilePath!);
+          if (fs.existsSync(uploadedFilePath!)) fs.unlinkSync(uploadedFilePath!);
+          uploadedFilePath = pdfPath;
+          storedFilename = path.basename(pdfPath);
+          uploadedFileName = (uploadedFileName?.replace(/\.[^.]+$/, "") || "tbt") + ".pdf";
+        } catch (err: any) {
+          console.error("[tbt-upload] Image-to-PDF failed:", err.message);
+        }
+      }
+
+      const filePath = uploadedFilePath ? `/api/uploads/${projectId}/qhse/${storedFilename}` : null;
+      const talk = await storage.createToolboxTalk({
+        projectId,
+        workerId: workerId ? parseInt(workerId) : null,
+        reportDate: date,
+        shift: shift || null,
+        topic: topic || null,
+        attendeeCount: attendeeCount ? parseInt(attendeeCount) : null,
+        filePath,
+        fileName: uploadedFileName,
+        notes: notes || null,
+        submissionMethod: "upload",
+      });
+      await logAudit(req.user!.id, "toolbox_talk.upload", "toolbox_talk", talk.id);
+      res.status(201).json(talk);
+    } catch (e: any) {
+      console.error("[tbt-upload] error:", e);
+      res.status(500).json({ error: e.message || "Server error" });
+    }
   });
 
   app.patch("/api/toolbox-talks/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
@@ -1850,7 +1889,16 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(obs);
   });
 
-  app.post("/api/projects/:projectId/safety-observations", requireAuth, requireRole("admin", "resource_manager", "project_manager"), qhseUpload.single("file"), async (req: any, res: Response) => {
+  app.post("/api/projects/:projectId/safety-observations", requireAuth, requireRole("admin", "resource_manager", "project_manager"), (req: any, res: Response, next: any) => {
+    qhseUpload.single("file")(req, res, (err: any) => {
+      if (err) {
+        console.error("[safety-obs] multer error:", err);
+        return res.status(500).json({ error: "File upload failed", detail: err.message });
+      }
+      next();
+    });
+  }, async (req: any, res: Response) => {
+    try {
     const projectId = parseInt(req.params.projectId);
     const filePath = req.file ? `/api/uploads/${projectId}/qhse/${req.file.filename}` : null;
     const body = req.body;
@@ -1893,6 +1941,10 @@ export function registerRoutes(server: Server, app: Express) {
 
     await logAudit(req.user!.id, "safety_observation.create", "safety_observation", obs.id);
     res.status(201).json(obs);
+    } catch (e: any) {
+      console.error("[safety-obs] create error:", e);
+      res.status(500).json({ error: e.message || "Server error" });
+    }
   });
 
   app.patch("/api/safety-observations/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {

@@ -1697,6 +1697,23 @@ function SupervisorReportsTab({
                               <MessageSquare className="w-3.5 h-3.5" />
                               {r.replies?.length || 0}
                             </button>
+                            <button
+                              onClick={async () => {
+                                if (!window.confirm("Delete this supervisor report? This cannot be undone.")) return;
+                                try {
+                                  await apiRequest("DELETE", `/api/supervisor-reports/${r.id}`);
+                                  qc.invalidateQueries({ queryKey: [`/api/projects/${project.id}/supervisor-reports`] });
+                                  toast({ title: "Report deleted" });
+                                } catch (e: any) {
+                                  toast({ title: "Error", description: e.message, variant: "destructive" });
+                                }
+                              }}
+                              className="text-[11px]"
+                              style={{ color: "#B91C1C" }}
+                              title="Delete report"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </Td>
                       </tr>
@@ -2115,17 +2132,35 @@ function QHSETab({
                       </Td>
                       <Td>{t.notes || "—"}</Td>
                       <Td>
-                        <button
-                          onClick={() => {
-                            if (editingTB === t.id) { setEditingTB(null); return; }
-                            setEditingTB(t.id);
-                            setEditTBForm({ reportDate: t.reportDate || "", shift: t.shift || "Day", topic: t.topic || "", attendeeCount: String(t.attendeeCount || ""), notes: t.notes || "" });
-                          }}
-                          className="p-1 rounded hover:bg-black/5"
-                          title="Edit"
-                        >
-                          <Pencil className="w-3.5 h-3.5" style={{ color: editingTB === t.id ? "var(--pfg-navy)" : "var(--pfg-steel)" }} />
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => {
+                              if (editingTB === t.id) { setEditingTB(null); return; }
+                              setEditingTB(t.id);
+                              setEditTBForm({ reportDate: t.reportDate || "", shift: t.shift || "Day", topic: t.topic || "", attendeeCount: String(t.attendeeCount || ""), notes: t.notes || "" });
+                            }}
+                            className="p-1 rounded hover:bg-black/5"
+                            title="Edit"
+                          >
+                            <Pencil className="w-3.5 h-3.5" style={{ color: editingTB === t.id ? "var(--pfg-navy)" : "var(--pfg-steel)" }} />
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (!window.confirm("Delete this toolbox talk? This cannot be undone.")) return;
+                              try {
+                                await apiRequest("DELETE", `/api/toolbox-talks/${t.id}`);
+                                refetchTB();
+                                toast({ title: "Toolbox talk deleted" });
+                              } catch (e: any) {
+                                toast({ title: "Error", description: e.message, variant: "destructive" });
+                              }
+                            }}
+                            className="p-1 rounded hover:bg-black/5"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" style={{ color: "#B91C1C" }} />
+                          </button>
+                        </div>
                       </Td>
                     </tr>
                     {editingTB === t.id && (
@@ -2486,8 +2521,11 @@ function QHSETab({
             <ModalField label="Notes">
               <textarea value={tbForm.notes} onChange={(e) => setTBForm({ ...tbForm, notes: e.target.value })} className="modal-input" rows={3} />
             </ModalField>
-            <ModalField label="File (optional)">
-              <input type="file" accept="application/pdf,image/*" onChange={(e) => setTBFile(e.target.files?.[0] || null)} className="text-[12px]" />
+            <ModalField label="Attach Signed TBT (optional)">
+              <input type="file" accept="image/*,application/pdf"
+                onChange={(e) => setTBFile(e.target.files?.[0] || null)}
+                className="modal-input text-[11px]" />
+              {tbFile && <p className="text-[11px] mt-1" style={{ color: "var(--pfg-steel)" }}>{tbFile.name}</p>}
             </ModalField>
             <div className="flex justify-end gap-2 pt-2">
               <button onClick={() => setShowTBModal(false)} className="text-[12px] px-4 py-2 rounded-lg border" style={{ borderColor: "hsl(var(--border))" }}>Cancel</button>
