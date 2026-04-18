@@ -233,3 +233,15 @@ export function isCurrentlyActive(
   const today = new Date().toISOString().split('T')[0];
   return workerOnSiteOnDate(assignment, today, slotPeriods);
 }
+
+/**
+ * Returns a numbered display label for a slot when multiple slots share the same role.
+ * e.g. 3 x "Technician 2" slots → "Technician 2 (1)", "Technician 2 (2)", "Technician 2 (3)"
+ * Single slot of a role → just "Technician 2"
+ */
+export function slotLabel(slot: { id: number; role: string; shift?: string | null }, allSlots: { id: number; role: string; shift?: string | null }[]): string {
+  const sameRole = allSlots.filter(s => s.role === slot.role && s.shift === slot.shift);
+  if (sameRole.length <= 1) return slot.role;
+  const idx = sameRole.findIndex(s => s.id === slot.id);
+  return `${slot.role} (${idx + 1})`;
+}

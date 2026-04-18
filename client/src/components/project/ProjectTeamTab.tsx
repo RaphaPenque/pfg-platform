@@ -12,6 +12,7 @@ import {
   sortSlots,
   cleanName,
   calcUtilisation,
+  slotLabel,
 } from "@/lib/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
@@ -606,6 +607,7 @@ export default function ProjectTeamTab({
                   label="Day Shift"
                   accent="day"
                   slots={daySlots}
+                  allSlots={projectSlots}
                   members={members}
                   allWorkers={allWorkers}
                   expandedSlots={expandedSlots}
@@ -624,6 +626,7 @@ export default function ProjectTeamTab({
                   label="Night Shift"
                   accent="night"
                   slots={nightSlots}
+                  allSlots={projectSlots}
                   members={members}
                   allWorkers={allWorkers}
                   expandedSlots={expandedSlots}
@@ -669,6 +672,7 @@ function ShiftBlock({
   label,
   accent,
   slots,
+  allSlots,
   members,
   allWorkers,
   expandedSlots,
@@ -684,6 +688,7 @@ function ShiftBlock({
   label: string;
   accent: "day" | "night";
   slots: any[];
+  allSlots: any[];
   members: { worker: DashboardWorker; assignment: DashboardAssignment }[];
   allWorkers: DashboardWorker[];
   expandedSlots: Set<number>;
@@ -716,6 +721,7 @@ function ShiftBlock({
           <SlotCard
             key={slot.id}
             slot={slot}
+            allSlots={allSlots}
             members={members}
             allWorkers={allWorkers}
             isExpanded={expandedSlots.has(slot.id)}
@@ -738,6 +744,7 @@ function ShiftBlock({
 
 function SlotCard({
   slot,
+  allSlots,
   members,
   allWorkers,
   isExpanded,
@@ -751,6 +758,7 @@ function SlotCard({
   project,
 }: {
   slot: any;
+  allSlots: any[];
   members: { worker: DashboardWorker; assignment: DashboardAssignment }[];
   allWorkers: DashboardWorker[];
   isExpanded: boolean;
@@ -814,10 +822,7 @@ function SlotCard({
       >
         <div style={{ minWidth: 180 }}>
           <div className="text-[13px] font-bold text-pfg-navy flex items-center gap-1.5">
-            {slot.role}
-            {slot.quantity > 1 && (
-              <span className="text-[10px] font-normal" style={{ color: "var(--pfg-steel)" }}>×{slot.quantity}</span>
-            )}
+            {slotLabel(slot, allSlots)}
             {openSlots > 0 && (
               <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: "var(--amber-bg, #FEF3C7)", color: "var(--amber, #D97706)" }}>
                 {openSlots} open

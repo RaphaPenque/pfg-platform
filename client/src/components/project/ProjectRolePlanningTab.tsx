@@ -6,7 +6,7 @@ import {
   type DashboardProject,
   type DashboardAssignment,
 } from "@/hooks/use-dashboard-data";
-import { PROJECT_ROLES, sortSlots, cleanName } from "@/lib/constants";
+import { PROJECT_ROLES, sortSlots, cleanName, slotLabel } from "@/lib/constants";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Plus, Trash2, Loader2, X, CalendarDays } from "lucide-react";
 
@@ -507,6 +507,7 @@ export default function ProjectRolePlanningTab({
                 <SlotGanttRow
                   key={slot.id}
                   slot={slot}
+                  allSlots={projectSlots}
                   weekColumns={weekColumns}
                   assignments={allAssignments.filter((a: DashboardAssignment) => a.roleSlotId === slot.id)}
                   workers={allWorkers}
@@ -527,6 +528,7 @@ export default function ProjectRolePlanningTab({
 
 function SlotGanttRow({
   slot,
+  allSlots,
   weekColumns,
   assignments,
   workers,
@@ -535,6 +537,7 @@ function SlotGanttRow({
   deletingSlotId,
 }: {
   slot: any;
+  allSlots: any[];
   weekColumns: { start: Date; label: string }[];
   assignments: DashboardAssignment[];
   workers: any[];
@@ -585,10 +588,7 @@ function SlotGanttRow({
         style={{ width: 260, borderRight: "1px solid hsl(var(--border))" }}
       >
         <div className="text-[13px] font-semibold text-pfg-navy">
-          {slot.role}
-          {slot.quantity > 1 && (
-            <span className="text-[11px] font-normal ml-1" style={{ color: "var(--pfg-steel)" }}>×{slot.quantity}</span>
-          )}
+          {slotLabel(slot, allSlots)}
         </div>
         <div className="text-[11px] flex items-center gap-1.5 mt-0.5" style={{ color: "var(--pfg-steel)" }}>
           <span className={`badge ${slot.shift === "Night" ? "badge-navy" : "badge-accent"} text-[9px]`}>{slot.shift}</span>
