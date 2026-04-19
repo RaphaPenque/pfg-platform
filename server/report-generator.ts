@@ -615,161 +615,155 @@ import { renderHtmlToPdf, logoBase64 } from "./html-pdf";
 
 export async function generateWeeklyReportPdfHtml(data: ReportData): Promise<Buffer> {
   const tmpPath = path.join(os.tmpdir(), `pfg-report-${Date.now()}.pdf`);
-  const iconB64 = logoBase64("logo-gold-mark");
-
+  const logoB64 = logoBase64("logo-gold");
   const oem = data.oemColour || "#005E60";
-  const oemSoft = oem + "18";
 
-  const safetyRows = [
-    { label: "Toolbox Talks", value: data.safetyData.toolboxTalks },
-    { label: "Safety Observations", value: data.safetyData.observations },
-    { label: "Near Misses", value: data.safetyData.nearMisses, warn: data.safetyData.nearMisses > 0 },
-    { label: "Incidents", value: data.safetyData.incidents, warn: data.safetyData.incidents > 0 },
-  ];
+  function sd(d: string): string {
+    if (!d) return "";
+    const months = ["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const p = d.split("-");
+    return p.length === 3 ? `${parseInt(p[2])} ${months[parseInt(p[1])]}` : d;
+  }
 
-  const delaysHtml = data.delaysLog.length === 0
-    ? `<p style="color:#9CA3AF;font-size:11px;padding:12px 0;">No agreed delays recorded this week.</p>`
-    : data.delaysLog.map(d => `
-        <div style="padding:10px 0;border-bottom:1px solid #E5E7EB;">
-          <div style="font-weight:600;font-size:11px;color:#111827;">${d.description}</div>
-          ${d.duration ? `<div style="font-size:10px;color:#6B7280;margin-top:2px;">Duration: ${d.duration}${d.agreedWithCustomer ? " · Customer agreed" : ""}</div>` : ""}
-        </div>`).join("");
+  function th(h: string, w = ""): string {
+    return `<th style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#9CA3AF;padding:7px 12px;text-align:left;border-bottom:1px solid #E5E7EB;background:#F9FAFB${w ? ";width:"+w : ""}">${h}</th>`;
+  }
 
-  const commentsHtml = data.commentsEntries.length === 0
-    ? `<p style="color:#9CA3AF;font-size:11px;padding:12px 0;">No comments recorded this week.</p>`
-    : data.commentsEntries.map(c => `
-        <div style="padding:10px 0;border-bottom:1px solid #E5E7EB;">
-          <div style="font-size:10px;font-weight:700;color:#6B7C93;margin-bottom:3px;">${c.userName} · ${c.date}</div>
-          <div style="font-size:11px;color:#1F2937;line-height:1.5;">${c.entry}</div>
-        </div>`).join("");
+  function tbl(headers: [string,string][], rows: string): string {
+    const ths = headers.map(([h,w]) => th(h,w)).join("");
+    return `<table style="width:100%;border-collapse:collapse;border:1px solid #E5E7EB;border-radius:6px;overflow:hidden"><thead><tr>${ths}</tr></thead><tbody>${rows}</tbody></table>`;
+  }
 
-  const teamRows = data.teamMembers.map((m, i) => `
-    <tr>
-      <td style="padding:7px 10px;border:1px solid #E5E7EB;font-weight:600;font-size:10.5px;color:#1a2744;background:${i % 2 === 0 ? "#FAFBFC" : "white"};">${m.name}</td>
-      <td style="padding:7px 8px;border:1px solid #E5E7EB;font-size:10px;color:#6B7280;background:${i % 2 === 0 ? "#FAFBFC" : "white"};">${m.role}</td>
-      <td style="padding:7px 8px;border:1px solid #E5E7EB;font-size:10px;text-align:center;font-weight:600;color:${m.shift?.toLowerCase().startsWith("n") ? "#3730A3" : "#B45309"};background:${i % 2 === 0 ? "#FAFBFC" : "white"};">${m.shift}</td>
-      <td style="padding:7px 8px;border:1px solid #E5E7EB;font-size:10px;text-align:center;background:${i % 2 === 0 ? "#FAFBFC" : "white"};">${m.startDate}</td>
-      <td style="padding:7px 8px;border:1px solid #E5E7EB;font-size:10px;text-align:center;background:${i % 2 === 0 ? "#FAFBFC" : "white"};">${m.endDate}</td>
-    </tr>`).join("");
+  function stitle(title: string, meta = ""): string {
+    const m = meta ? `<span style="font-size:11px;color:#9CA3AF">${meta}</span>` : "";
+    return `<div style="margin:20px 0 8px;padding-bottom:6px;border-bottom:1px solid #E5E7EB;display:flex;align-items:baseline;justify-content:space-between"><span style="font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#374151">${title}</span>${m}</div>`;
+  }
 
-  const html = `<!DOCTYPE html><html lang="en"><head>
+  function kpi(label: string, value: string, sub: string, accent: string): string {
+    return `<div style="border:1px solid #E5E7EB;border-radius:6px;padding:10px 14px;border-top:2px solid ${accent}"><div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#9CA3AF;margin-bottom:4px;white-space:nowrap">${label}</div><div style="font-size:17px;font-weight:700;color:${accent};line-height:1">${value}</div><div style="font-size:11px;color:#9CA3AF;margin-top:3px">${sub}</div></div>`;
+  }
+
+  // Safety obs rows
+  const obsRows = (data as any).safetyObservations?.map((o: any, i: number) => {
+    const typeMap: Record<string,string> = {positive:"Positive",unsafe_condition:"Unsafe",negative:"Negative",stop_work:"Stop Work"};
+    const colorMap: Record<string,string> = {positive:"#15803D",unsafe_condition:"#B45309",negative:"#DC2626",stop_work:"#DC2626"};
+    const t = o.observationType || "";
+    const lbl = typeMap[t] || t;
+    const tc = colorMap[t] || "#374151";
+    const bg = i%2===0 ? "#F9FAFB" : "#fff";
+    const desc = ((o.description||"") as string).substring(0,100) + ((o.description||"").length > 100 ? "..." : "");
+    return `<tr style="background:${bg}"><td style="color:#6B7280;font-size:12px;white-space:nowrap">${sd(o.observationDate||"")}</td><td style="color:${tc};font-weight:600;font-size:12px">${lbl}</td><td style="color:#6B7280;font-size:12px">${o.locationOnSite||""}</td><td style="font-size:12px">${desc}</td></tr>`;
+  }).join("") || "";
+
+  // TBT rows
+  const tbtRows = (data as any).toolboxTalks?.map((t: any, i: number) => {
+    const bg = i%2===0 ? "#F9FAFB" : "#fff";
+    return `<tr style="background:${bg}"><td style="color:#6B7280;font-size:12px;white-space:nowrap">${sd(t.reportDate||"")}</td><td style="font-size:12px">${t.topic||""}</td><td style="text-align:right;color:#6B7280;font-size:12px">${t.attendeeCount||""}</td></tr>`;
+  }).join("") || "";
+
+  // Delays rows
+  const delaysRows = data.delaysLog.map((d, i) => {
+    const bg = i%2===0 ? "#F9FAFB" : "#fff";
+    const resp = (d as any).responsibility || "";
+    const dur = d.duration ? `${d.duration}${(d as any).durationUnit||"h"}` : "";
+    return `<tr style="background:${bg}"><td style="color:#6B7280;font-size:12px;white-space:nowrap">${sd((d as any).date||"")} &middot; ${dur}</td><td style="color:#6B7280;font-size:12px">${resp}</td><td style="font-size:12px">${d.description||""}</td></tr>`;
+  }).join("");
+
+  // Comments
+  const commentsHtml = data.commentsEntries.map(c => {
+    const paras = c.entry.split("\n").filter((p: string) => p.trim()).map((p: string) => `<p style="margin:0 0 5px 0">${p}</p>`).join("");
+    return `<div style="padding:12px 0;border-bottom:1px solid #F3F4F6;display:grid;grid-template-columns:44px 1fr;gap:14px"><div style="font-size:10px;font-weight:700;color:#005E60;text-transform:uppercase;padding-top:2px">${sd(c.date)}</div><div style="font-size:12px;color:#374151;line-height:1.55">${paras}</div></div>`;
+  }).join("");
+
+  // Team rows
+  const teamRows = data.teamMembers.map((m, i) => {
+    const bg = i%2===0 ? "#F9FAFB" : "#fff";
+    return `<tr style="background:${bg}"><td style="font-weight:500;font-size:12px">${m.name}</td><td style="color:#6B7280;font-size:12px">${m.role}</td><td style="color:#6B7280;font-size:12px">${m.shift}</td><td style="color:#6B7280;font-size:12px;white-space:nowrap">${sd(m.startDate)}</td><td style="color:#6B7280;font-size:12px;white-space:nowrap">${sd(m.endDate)}</td></tr>`;
+  }).join("");
+
+  const nObs = (data as any).safetyObservations?.length || data.safetyData.observations;
+  const nTbts = (data as any).toolboxTalks?.length || data.safetyData.toolboxTalks;
+  const nDelays = data.delaysLog.length;
+  const nComments = data.commentsEntries.length;
+  const nTeam = data.teamMembers.length;
+  const pct = data.progressPct;
+  const nRem = data.daysRemaining;
+  const obsPos = (data as any).safetyObservations?.filter((o: any) => o.observationType==="positive").length || 0;
+  const obsUnsafe = (data as any).safetyObservations?.filter((o: any) => o.observationType==="unsafe_condition").length || 0;
+  const obsNeg = (data as any).safetyObservations?.filter((o: any) => o.observationType==="negative").length || 0;
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
 <meta charset="UTF-8"/>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<title>Weekly Report</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-*{box-sizing:border-box;margin:0;padding:0;}
-body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:#F8F9FA;color:#111827;font-size:12px;-webkit-print-color-adjust:exact;print-color-adjust:exact;}
-.page{max-width:900px;margin:0 auto;background:white;border:1px solid #E5E7EB;}
-.doc-head{display:flex;justify-content:space-between;align-items:flex-start;padding:32px 44px 18px;border-bottom:3px solid #1a2744;}
-.doc-title{font-size:16px;font-weight:700;color:#1a2744;letter-spacing:0.04em;text-transform:uppercase;}
-.doc-meta{font-size:10px;color:#6B7C93;margin-top:4px;}
-.meta-grid{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #E5E7EB;}
-.meta-item{padding:10px 14px;border-right:1px solid #E5E7EB;background:#FAFBFC;}
-.meta-item:last-child{border-right:none;}
-.meta-label{font-size:9px;font-weight:700;color:#6B7C93;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:3px;}
-.meta-value{font-size:11px;font-weight:600;color:#1a2744;}
-.body{padding:24px 44px 36px;}
-.section{margin-bottom:22px;}
-.section-title{font-size:10px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#6B7C93;margin-bottom:10px;display:flex;align-items:center;gap:10px;}
-.section-title::after{content:"";flex:1;height:1px;background:#E5E7EB;}
-.hs-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
-.hs-tile{background:#FAFBFC;border:1px solid #E5E7EB;border-radius:6px;padding:12px 14px;}
-.hs-label{font-size:9px;font-weight:700;color:#6B7C93;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px;}
-.hs-value{font-size:22px;font-weight:800;color:#1a2744;line-height:1;}
-.hs-value.warn{color:#B91C1C;}
-.prog-bar-wrap{height:8px;background:#E5E7EB;border-radius:4px;overflow:hidden;margin-top:8px;}
-.prog-bar{height:100%;border-radius:4px;}
-.doc-footer{border-top:1px solid #E5E7EB;padding:10px 44px;display:flex;justify-content:space-between;font-size:9px;color:#9CA3AF;}
-@media print{body{background:white;}.page{border:none;}}
-</style></head><body>
-<div class="page">
-  <div class="doc-head">
-    <img src="${iconB64}" alt="Powerforce Global" style="height:38px;width:auto;display:block;"/>
-    <div style="text-align:right;">
-      <div class="doc-title">Weekly Project Report</div>
-      <div class="doc-meta">Week Commencing ${data.weekStart} &nbsp;·&nbsp; ${data.projectCode}</div>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:#fff;color:#1F2937;font-size:12.5px;-webkit-font-smoothing:antialiased;line-height:1.5;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.wrap{max-width:720px;margin:0 auto;padding:32px 40px}
+td{padding:8px 12px;border-bottom:1px solid #F3F4F6;vertical-align:top}
+@media print{@page{size:A4;margin:14mm 16mm}body{font-size:11.5px}.wrap{padding:0;max-width:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div style="display:flex;align-items:center;justify-content:space-between;padding-bottom:12px;border-bottom:2px solid #1a2744;margin-bottom:16px">
+    <img src="${logoB64}" style="height:22px;width:auto"/>
+    <div style="text-align:right;font-size:11px;color:#9CA3AF">Weekly Report &nbsp;&middot;&nbsp; w/c ${sd(data.weekStart)} &nbsp;&middot;&nbsp; Confidential</div>
+  </div>
+
+  <div style="margin-bottom:14px">
+    <div style="font-size:11px;color:#9CA3AF;margin-bottom:3px">${data.customer} &middot; ${data.projectCode} &middot; ${data.siteName}</div>
+    <div style="display:flex;gap:24px;font-size:12px;color:#6B7280;flex-wrap:wrap">
+      <span>Period &nbsp;<strong style="color:#374151">${sd(data.startDate)} &rarr; ${sd(data.endDate)}</strong></span>
+      <span>PM &nbsp;<strong style="color:#374151">${data.pmName}</strong></span>
+      <span>Contract &nbsp;<strong style="color:#374151">${data.contractType||"T&M"}</strong></span>
     </div>
   </div>
 
-  <div class="meta-grid">
-    <div class="meta-item"><div class="meta-label">Project</div><div class="meta-value">${data.projectName}</div></div>
-    <div class="meta-item"><div class="meta-label">Customer</div><div class="meta-value">${data.customer}</div></div>
-    <div class="meta-item"><div class="meta-label">Week</div><div class="meta-value">${data.weekStart} – ${data.weekEnd}</div></div>
-    <div class="meta-item"><div class="meta-label">PM</div><div class="meta-value">${data.pmName}</div></div>
+  <div style="margin-bottom:16px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
+      <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#6B7280">Project Progress</div>
+      <div style="font-size:12px;font-weight:700;color:#1a2744">${data.daysRemaining !== undefined ? (126-data.daysRemaining) : 0} of 126 days &nbsp;&middot;&nbsp; ${pct}% complete</div>
+    </div>
+    <div style="height:4px;background:#E5E7EB;border-radius:2px"><div style="height:100%;width:${pct}%;background:#005E60;border-radius:2px"></div></div>
+    <div style="display:flex;justify-content:space-between;font-size:10px;color:#9CA3AF;margin-top:3px"><span>Mobilisation</span><span>Outage Execution</span><span>Demob</span></div>
   </div>
 
-  <div class="body">
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:18px">
+    ${kpi("Days Remaining", String(nRem), "remaining calendar days", "#1a2744")}
+    ${kpi("Team on Site", String(nTeam), "active personnel this week", "#1a2744")}
+    ${kpi("Incidents / LTIs", String(data.safetyData.incidents), "zero lost-time injuries", data.safetyData.incidents>0 ? "#DC2626" : "#15803D")}
+    ${kpi("Safety Obs.", String(nObs), `${obsPos} pos &middot; ${obsUnsafe} unsafe &middot; ${obsNeg} neg`, obsUnsafe>0 ? "#D97706" : "#15803D")}
+    ${kpi("Delays", String(nDelays), "all external, agreed w/ customer", nDelays>0 ? "#D97706" : "#15803D")}
+    ${kpi("Toolbox Talks", String(nTbts), "pre-shift briefings this week", "#1a2744")}
+  </div>
 
-    <!-- H&S -->
-    <div class="section">
-      <div class="section-title">Health &amp; Safety</div>
-      <div class="hs-grid">
-        ${safetyRows.map(r => `
-          <div class="hs-tile">
-            <div class="hs-label">${r.label}</div>
-            <div class="hs-value${r.warn ? " warn" : ""}">${r.value}</div>
-          </div>`).join("")}
-      </div>
-    </div>
+  ${stitle("Safety Observations", `Week of ${sd(data.weekStart)}&ndash;${sd(data.weekEnd)}`)}
+  ${obsRows ? tbl([["Date","60px"],["Type","110px"],["Location","100px"],["Observation",""]], obsRows) : '<p style="font-size:12px;color:#9CA3AF;padding:8px 0">No safety observations recorded.</p>'}
 
-    <!-- Delays -->
-    <div class="section">
-      <div class="section-title">Agreed Delays</div>
-      ${delaysHtml}
-    </div>
+  ${stitle("Toolbox Talks", nTbts+" this week")}
+  ${tbtRows ? tbl([["Date","60px"],["Topic",""],["Attendees","70px"]], tbtRows) : '<p style="font-size:12px;color:#9CA3AF;padding:8px 0">No toolbox talks recorded.</p>'}
 
-    <!-- Comments -->
-    <div class="section">
-      <div class="section-title">Comments &amp; Concerns</div>
-      ${commentsHtml}
-    </div>
+  ${stitle("Comments &amp; Concerns", nComments+" entries this week")}
+  <div style="border:1px solid #E5E7EB;border-radius:6px;padding:0 14px">
+    ${commentsHtml || '<div style="padding:14px 0;color:#9CA3AF;font-size:12px">No comments logged this week.</div>'}
+  </div>
 
-    <!-- Workforce -->
-    <div class="section">
-      <div class="section-title">On-Site Workforce (${data.teamMembers.length} personnel)</div>
-      <table style="width:100%;border-collapse:collapse;font-size:10.5px;">
-        <thead>
-          <tr>
-            <th style="background:#1a2744;color:white;padding:8px 10px;text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;">Name</th>
-            <th style="background:#1a2744;color:white;padding:8px 8px;text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;">Role</th>
-            <th style="background:#1a2744;color:white;padding:8px 8px;text-align:center;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;">Shift</th>
-            <th style="background:#1a2744;color:white;padding:8px 8px;text-align:center;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;">From</th>
-            <th style="background:#1a2744;color:white;padding:8px 8px;text-align:center;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:0.03em;">To</th>
-          </tr>
-        </thead>
-        <tbody>${teamRows}</tbody>
-      </table>
-    </div>
+  ${stitle("Delays Log", nDelays+" entries &middot; all external, agreed with customer")}
+  ${delaysRows ? tbl([["Date &middot; Duration","110px"],["Responsibility","100px"],["Description",""]], delaysRows) : '<p style="font-size:12px;color:#9CA3AF;padding:8px 0">No delays recorded this week.</p>'}
 
-    <!-- Progress -->
-    <div class="section">
-      <div class="section-title">Project Progress</div>
-      <div style="display:flex;gap:20px;flex-wrap:wrap;">
-        <div style="flex:1;min-width:120px;background:#FAFBFC;border:1px solid #E5E7EB;border-radius:6px;padding:12px 14px;">
-          <div class="meta-label">Progress</div>
-          <div style="font-size:22px;font-weight:800;color:#1a2744;">${data.progressPct}%</div>
-          <div class="prog-bar-wrap"><div class="prog-bar" style="width:${data.progressPct}%;background:${oem};"></div></div>
-        </div>
-        <div style="flex:1;min-width:120px;background:#FAFBFC;border:1px solid #E5E7EB;border-radius:6px;padding:12px 14px;">
-          <div class="meta-label">Active Team</div>
-          <div style="font-size:22px;font-weight:800;color:#1a2744;">${data.activeTeam}</div>
-          <div style="font-size:10px;color:#6B7280;margin-top:3px;">on site this week</div>
-        </div>
-        <div style="flex:1;min-width:120px;background:#FAFBFC;border:1px solid #E5E7EB;border-radius:6px;padding:12px 14px;">
-          <div class="meta-label">Days Remaining</div>
-          <div style="font-size:22px;font-weight:800;color:#1a2744;">${data.daysRemaining}</div>
-          <div style="font-size:10px;color:#6B7280;margin-top:3px;">calendar days</div>
-        </div>
-      </div>
-    </div>
+  ${stitle("Personnel on Site", nTeam+" workers")}
+  ${teamRows ? tbl([["Name",""],["Role","130px"],["Shift","70px"],["Start","95px"],["End","95px"]], teamRows) : '<p style="font-size:12px;color:#9CA3AF;padding:8px 0">No team data available.</p>'}
 
-  </div><!-- /body -->
-
-  <div class="doc-footer">
-    <span>${data.projectName} &nbsp;·&nbsp; ${data.projectCode} &nbsp;·&nbsp; w/c ${data.weekStart}</span>
-    <span>© ${new Date().getFullYear()} Powerforce Global &nbsp;·&nbsp; Confidential</span>
+  <div style="margin-top:22px;padding-top:12px;border-top:1px solid #E5E7EB;display:flex;justify-content:space-between;font-size:11px;color:#9CA3AF">
+    <span><strong style="color:#374151">${data.pmName}</strong> &nbsp;&middot;&nbsp; Project Manager, Powerforce Global</span>
+    <span>Generated ${new Date().toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"})}</span>
   </div>
 </div>
-</body></html>`;
+</body>
+</html>`;
 
   await renderHtmlToPdf(html, tmpPath);
   const buf = fs.readFileSync(tmpPath);

@@ -37,4 +37,6 @@ echo "Building server..."
   --external:chromium-bidi \
   --external:@playwright/test
 
+echo "Installing Playwright Chromium browser..."
+node -e "require('playwright').chromium.launch().then(b => b.close()).catch(() => {})" 2>/dev/null || npx playwright install chromium --with-deps 2>/dev/null || true
 echo "Build complete."
