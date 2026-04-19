@@ -1,6 +1,6 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import type { Server } from "http";
-import { storage, db } from "./storage";
+import { storage, db, pool } from "./storage";
 import { sql } from "drizzle-orm";
 import { registerTimesheetRoutes, buildTimesheetEntries, checkTimesheetReminders } from "./timesheet-routes";
 import { insertWorkerSchema, insertProjectSchema, insertAssignmentSchema, insertDocumentSchema, insertOemTypeSchema, insertRoleSlotSchema, insertWorkExperienceSchema } from "@shared/schema";
@@ -2712,37 +2712,33 @@ export function registerRoutes(server: Server, app: Express) {
     if (apiKey !== process.env.RENDER_API_KEY && apiKey !== 'pfg-internal-2026') {
       return res.status(401).json({ error: 'Unauthorized' });
     }
-    const { projectId, projectCode, weekCommencing } = req.body;
+    const { projectId, weekCommencing } = req.body;
     if (!projectId || !weekCommencing) return res.status(400).json({ error: 'projectId and weekCommencing required' });
+    if (!(req as any).file) return res.status(400).json({ error: 'pdf file required' });
+    const pdfBase64 = (req as any).file.buffer.toString('base64');
+    const wc = weekCommencing as string;
+    const we = new Date(new Date(wc).getTime() + 6 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10);
+    const pid = parseInt(projectId);
     try {
-      let pdfBuffer: Buffer;
-      if ((req as any).file) {
-        pdfBuffer = (req as any).file.buffer;
+      // Use raw pool query to avoid any ORM connection issues
+      const existing = await pool.query(
+        `SELECT id, aggregated_data FROM weekly_reports WHERE project_id = $1 ORDER BY week_commencing DESC LIMIT 1`,
+        [pid]
+      );
+      if (existing.rows.length > 0) {
+        const row = existing.rows[0];
+        const currentAgg = (typeof row.aggregated_data === 'string' ? JSON.parse(row.aggregated_data) : row.aggregated_data) || {};
+        await pool.query(
+          `UPDATE weekly_reports SET aggregated_data = $1, status = 'published' WHERE id = $2`,
+          [JSON.stringify({ ...currentAgg, pdfBase64 }), row.id]
+        );
+        return res.json({ ok: true, reportId: row.id, weekCommencing: wc, bytes: (req as any).file.buffer.length });
       } else {
-        return res.status(400).json({ error: 'pdf file required' });
-      }
-      const pdfBase64 = pdfBuffer.toString('base64');
-      const wc = weekCommencing as string;
-      const we = new Date(new Date(wc).getTime() + 6 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10);
-      // Find existing report or create one
-      const existing = await storage.getWeeklyReportsByProject(parseInt(projectId));
-      const report = existing.find((r: any) => r.weekCommencing === wc) || existing[0];
-      if (report) {
-        const currentAgg = (report.aggregatedData as any) || {};
-        await storage.updateWeeklyReport(report.id, {
-          aggregatedData: { ...currentAgg, pdfBase64 },
-          status: 'published',
-        });
-        return res.json({ ok: true, reportId: report.id, weekCommencing: wc, bytes: pdfBuffer.length });
-      } else {
-        const created = await storage.createWeeklyReport({
-          projectId: parseInt(projectId),
-          weekCommencing: wc,
-          weekEnding: we,
-          status: 'published',
-          aggregatedData: { pdfBase64 },
-        } as any);
-        return res.json({ ok: true, reportId: created?.id, weekCommencing: wc, bytes: pdfBuffer.length });
+        const ins = await pool.query(
+          `INSERT INTO weekly_reports (project_id, week_commencing, week_ending, status, aggregated_data) VALUES ($1,$2,$3,'published',$4) RETURNING id`,
+          [pid, wc, we, JSON.stringify({ pdfBase64 })]
+        );
+        return res.json({ ok: true, reportId: ins.rows[0]?.id, weekCommencing: wc, bytes: (req as any).file.buffer.length });
       }
     } catch (e: any) {
       console.error('[upload-report-pdf] Error:', e?.message || e?.constructor?.name || String(e));

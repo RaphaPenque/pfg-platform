@@ -54,6 +54,7 @@ pool.on('error', (err) => {
 });
 
 export const db = drizzle(pool);
+export { pool };
 
 /** Warm up the DB connection pool at server start — prevents cold-start delays on first user request */
 export async function warmupDb(): Promise<void> {
