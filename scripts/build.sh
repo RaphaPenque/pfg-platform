@@ -37,4 +37,6 @@ echo "Building server..."
   --external:chromium-bidi \
   --external:@playwright/test
 
+echo "Installing system Chromium for PDF generation..."
+apt-get install -y chromium 2>/dev/null || apt-get install -y chromium-browser 2>/dev/null || true
 echo "Build complete."

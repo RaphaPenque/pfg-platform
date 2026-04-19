@@ -13,7 +13,18 @@ export async function renderHtmlToPdf(
   outPath: string,
   opts: { landscape?: boolean; format?: "A4" | "Letter" } = {}
 ): Promise<void> {
+  // Use system Chromium if available (more reliable on Render than Playwright-managed binary)
+  const executablePath = (() => {
+    const { execSync } = require('child_process');
+    const candidates = ['/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome'];
+    for (const p of candidates) {
+      try { execSync(`test -f ${p}`, { stdio: 'pipe' }); return p; } catch { /* try next */ }
+    }
+    return undefined; // fall back to Playwright-managed
+  })();
+
   const browser = await chromium.launch({
+    executablePath,
     args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
   });
   try {
