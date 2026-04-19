@@ -1930,7 +1930,18 @@ export function registerRoutes(server: Server, app: Express) {
         }
       }
 
+      // Move file to correct project folder (multer may have used talk ID as folder)
       const projectId = talk.projectId;
+      const correctDir = path.join(UPLOAD_BASE, String(projectId), "qhse");
+      if (!fs.existsSync(correctDir)) fs.mkdirSync(correctDir, { recursive: true });
+      if (uploadedFilePath && fs.existsSync(uploadedFilePath)) {
+        const correctPath = path.join(correctDir, storedFilename!);
+        if (uploadedFilePath !== correctPath) {
+          fs.renameSync(uploadedFilePath, correctPath);
+          uploadedFilePath = correctPath;
+        }
+      }
+
       const filePath = uploadedFilePath ? `/api/uploads/${projectId}/qhse/${storedFilename}` : talk.filePath;
       const updated = await storage.updateToolboxTalk(id, { filePath, fileName: uploadedFileName || talk.fileName });
       await logAudit(req.user!.id, "toolbox_talk.replace_file", "toolbox_talk", id);

@@ -884,7 +884,7 @@ export class PostgresStorage implements IStorage {
   async getToolboxTalks(projectId: number): Promise<ToolboxTalk[]> {
     return db.select().from(toolboxTalks)
       .where(eq(toolboxTalks.projectId, projectId))
-      .orderBy(desc(toolboxTalks.createdAt));
+      .orderBy(desc(toolboxTalks.reportDate), desc(toolboxTalks.createdAt));
   }
 
   async createToolboxTalk(data: InsertToolboxTalk): Promise<ToolboxTalk> {
@@ -1054,3 +1054,4 @@ export class PostgresStorage implements IStorage {
 }
 
 export const storage: IStorage = new PostgresStorage();
+Storage();
