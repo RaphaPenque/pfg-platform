@@ -2717,21 +2717,22 @@ export function registerRoutes(server: Server, app: Express) {
       const filename = `${code}-report-w-e-${weekCommencing}.pdf`;
       const pdfPath = path.join(reportDir, filename);
       fs.writeFileSync(pdfPath, pdfBuffer);
-      // Update weekly_reports record (match by weekCommencing or projectId)
+      // Update weekly_reports record (match by weekCommencing)
       const existing = await storage.getWeeklyReportsByProject(parseInt(projectId));
       const report = existing.find((r: any) => r.weekCommencing === weekCommencing) || existing[0];
       if (report) {
-        await db.execute(sql`UPDATE weekly_reports SET pdf_path = ${pdfPath} WHERE id = ${report.id}`);
+        await storage.updateWeeklyReport(report.id, { pdfPath });
+        return res.json({ ok: true, pdfPath, filename, bytes: pdfBuffer.length, reportId: report.id });
       } else {
         // Create a new record if none exists
         const wc = weekCommencing as string;
         const we = new Date(new Date(wc).getTime() + 6 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10);
-        await db.execute(sql`INSERT INTO weekly_reports (project_id, week_commencing, week_ending, status, pdf_path, aggregated_data) VALUES (${parseInt(projectId)}, ${wc}, ${we}, 'published', ${pdfPath}, '{}')`);
+        const created = await storage.createWeeklyReport({ projectId: parseInt(projectId), weekCommencing: wc, weekEnding: we, status: 'published', pdfPath, aggregatedData: {} } as any);
+        return res.json({ ok: true, pdfPath, filename, bytes: pdfBuffer.length, reportId: created?.id });
       }
-      return res.json({ ok: true, pdfPath, filename, bytes: pdfBuffer.length, reportId: report?.id });
     } catch (e: any) {
-      console.error('[upload-report-pdf] Error:', e);
-      return res.status(500).json({ error: e?.message || String(e) });
+      console.error('[upload-report-pdf] Error:', e?.message || e?.constructor?.name || String(e), e?.stack?.split('\n')[0]);
+      return res.status(500).json({ error: e?.message || e?.constructor?.name || String(e) });
     }
   });
 
