@@ -2064,6 +2064,7 @@ function QHSETab({
       }
       setShowObsModal(false);
       setObsFile(null);
+      setObsForm({ date: todayStr(), time: "08:00", shift: "Day", type: "positive", reportedBy: "", location: "", description: "", status: "Open" });
       refetchObs();
       toast({ title: "Observation logged" });
     } catch (e: any) {
@@ -2596,7 +2597,7 @@ function QHSETab({
 
       {/* Observation Modal */}
       {showObsModal && (
-        <Modal title="Log Safety Observation" onClose={() => setShowObsModal(false)}>
+        <Modal title="Log Safety Observation" onClose={() => { setShowObsModal(false); setObsForm({ date: todayStr(), time: "08:00", shift: "Day", type: "positive", reportedBy: "", location: "", description: "", status: "Open" }); setObsFile(null); }}>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <ModalField label="Date">
@@ -2640,7 +2641,7 @@ function QHSETab({
               </select>
             </ModalField>
             <div className="flex justify-end gap-2 pt-2">
-              <button onClick={() => setShowObsModal(false)} className="text-[12px] px-4 py-2 rounded-lg border" style={{ borderColor: "hsl(var(--border))" }}>Cancel</button>
+              <button onClick={() => { setShowObsModal(false); setObsForm({ date: todayStr(), time: "08:00", shift: "Day", type: "positive", reportedBy: "", location: "", description: "", status: "Open" }); setObsFile(null); }} className="text-[12px] px-4 py-2 rounded-lg border" style={{ borderColor: "hsl(var(--border))" }}>Cancel</button>
               <div>
                 <label className="text-[11px] font-semibold uppercase tracking-wide block mb-1" style={{ color: "var(--pfg-steel)" }}>Attachment (optional)</label>
                 <input type="file" accept="image/*,.pdf" onChange={e => setObsFile(e.target.files?.[0] || null)} className="text-[11px]" />
