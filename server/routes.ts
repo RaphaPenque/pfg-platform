@@ -2802,3 +2802,33 @@ export function registerRoutes(server: Server, app: Express) {
     }
   });
 }
+
+  // ONE-TIME patch: fix weekly_reports ID=1 aggregated_data (nearMisses + teamMembers)
+  app.post("/api/internal/patch-report-agg", async (req: Request, res: Response) => {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== 'pfg-internal-2026') return res.status(401).json({ error: 'Unauthorized' });
+    try {
+      const existing = await pool.query('SELECT id, aggregated_data FROM weekly_reports WHERE id = 1');
+      if (!existing.rows.length) return res.status(404).json({ error: 'Report not found' });
+      const agg = existing.rows[0].aggregated_data || {};
+      // Fix nearMisses
+      if (agg.safetyStats) agg.safetyStats.nearMisses = 0;
+      // Fix teamMembers — filter to w/c 13 Apr only
+      const weekStart = '2026-04-13', weekEnd = '2026-04-19';
+      if (Array.isArray(agg.teamMembers)) {
+        const seen = new Set<string>();
+        agg.teamMembers = agg.teamMembers.filter((m: any) => {
+          const s = m.startDate || '';
+          const e = m.endDate || '9999';
+          const inWeek = s <= weekEnd && e >= weekStart;
+          const key = `${m.name}|${m.role}|${m.shift}`;
+          if (inWeek && !seen.has(key)) { seen.add(key); return true; }
+          return false;
+        });
+      }
+      await pool.query('UPDATE weekly_reports SET aggregated_data = $1 WHERE id = 1', [JSON.stringify(agg)]);
+      return res.json({ ok: true, nearMisses: agg.safetyStats?.nearMisses, teamCount: agg.teamMembers?.length });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || String(e) });
+    }
+  });
