@@ -217,8 +217,16 @@ export async function sendReportForProject(
     isFinalReport: isFinal,
   };
 
-  const pdfBuffer = await generateWeeklyReportPdfHtml(reportData as any);
-  const base64Pdf = pdfBuffer.toString('base64');
+  // Generate PDF — gracefully skip if Playwright not available (e.g. production)
+  let pdfBuffer: Buffer | null = null;
+  let base64Pdf: string | null = null;
+  try {
+    pdfBuffer = await generateWeeklyReportPdfHtml(reportData as any);
+    base64Pdf = pdfBuffer.toString('base64');
+  } catch (pdfErr: any) {
+    console.warn(`[report-scheduler] PDF generation skipped (${pdfErr.message?.slice(0, 80)}) — storing data record only`);
+  }
+
   const filename = isFinal
     ? `${project.code}-final-report-${report.reportDate}.pdf`
     : `${project.code}-report-w-e-${weekEnd}.pdf`;
@@ -226,10 +234,13 @@ export async function sendReportForProject(
   // Store PDF to disk and create/update weekly_reports record
   if (!isFinal) {
     try {
-      const reportDir = path.join(UPLOAD_ROOT, 'reports', project.code);
-      fs.mkdirSync(reportDir, { recursive: true });
-      const pdfPath = path.join(reportDir, filename);
-      fs.writeFileSync(pdfPath, pdfBuffer);
+      let pdfPath: string | null = null;
+      if (pdfBuffer) {
+        const reportDir = path.join(UPLOAD_ROOT, 'reports', project.code);
+        fs.mkdirSync(reportDir, { recursive: true });
+        pdfPath = path.join(reportDir, filename);
+        fs.writeFileSync(pdfPath, pdfBuffer);
+      }
 
       // Aggregate data to store in DB (for inline portal view)
       const aggregatedData = {
@@ -288,7 +299,7 @@ export async function sendReportForProject(
     subject,
     html: emailHtml,
     text: `${isFinal ? 'Final project report' : 'Weekly report'} for ${project.name} attached.\n\nPortal: ${portalUrl}`,
-    attachments: [{ name: filename, contentType: 'application/pdf', contentBytes: base64Pdf }],
+    ...(base64Pdf ? { attachments: [{ name: filename, contentType: 'application/pdf', contentBytes: base64Pdf }] } : {}),
   });
 
   console.log(`[report-scheduler] ${isFinal ? 'FINAL' : 'Weekly'} report sent for ${project.code} to ${toAddresses.join(', ')}`);
