@@ -1918,6 +1918,7 @@ function QHSETab({
     reportedBy: "", location: "", description: "", status: "Open",
   });
   const [obsFile, setObsFile] = useState<File | null>(null);
+  const [editObsFile, setEditObsFile] = useState<File | null>(null);
 
   // Incident modal state
   const [showIncModal, setShowIncModal] = useState(false);
@@ -1990,8 +1991,19 @@ function QHSETab({
       if (editObsForm.locationOnSite !== undefined) payload.locationOnSite = editObsForm.locationOnSite;
       if (editObsForm.description !== undefined) payload.description = editObsForm.description;
       if (editObsForm.status) payload.status = editObsForm.status;
-      await apiRequest("PATCH", `/api/safety-observations/${obsId}`, payload);
+      if (editObsFile) {
+        // Upload replacement file
+        const fd = new FormData();
+        fd.append("file", editObsFile);
+        Object.entries(payload).forEach(([k, v]) => fd.append(k, String(v)));
+        await fetch(`/api/safety-observations/${obsId}/replace-file`, {
+          method: "POST", credentials: "include", body: fd,
+        });
+      } else {
+        await apiRequest("PATCH", `/api/safety-observations/${obsId}`, payload);
+      }
       setEditingObs(null);
+      setEditObsFile(null);
       refetchObs();
       toast({ title: "Observation updated" });
     } catch (e: any) {
@@ -2277,6 +2289,7 @@ function QHSETab({
                   <Th>Reported By</Th>
                   <Th>Location</Th>
                   <Th>Description</Th>
+                  <Th>File</Th>
                   <Th>Status</Th>
                   <Th></Th>
                 </tr>
@@ -2306,7 +2319,12 @@ function QHSETab({
                         </Td>
                         <Td>{o.reportedByWorkerId ? (workers.find((w: any) => String(w.id) === String(o.reportedByWorkerId))?.name || `Worker #${o.reportedByWorkerId}`) : "—"}</Td>
                         <Td>{o.locationOnSite || o.location || "—"}</Td>
-                        <Td>{o.description ? o.description.substring(0, 60) + (o.description.length > 60 ? "…" : "") : "—"}</Td>
+                        <Td><span title={o.description || ""} className="block max-w-[200px] truncate">{o.description ? o.description.substring(0, 60) + (o.description.length > 60 ? "…" : "") : "—"}</span></Td>
+                        <Td>
+                          {o.filePath ? (
+                            <a href={o.filePath} target="_blank" rel="noreferrer" className="text-[11px] font-semibold" style={{ color: "var(--pfg-navy)" }}>View</a>
+                          ) : "—"}
+                        </Td>
                         <Td>
                           <StatusBadge
                             label={o.status ? o.status.charAt(0).toUpperCase() + o.status.slice(1) : "Open"}
@@ -2392,6 +2410,17 @@ function QHSETab({
                             <div className="mb-4">
                               <ModalField label="Description">
                                 <textarea value={editObsForm.description} onChange={e => setEditObsForm(f => ({ ...f, description: e.target.value }))} className="modal-input" rows={3} />
+                              </ModalField>
+                            </div>
+                            <div className="mb-3">
+                              <ModalField label="Attachment">
+                                <div className="flex items-center gap-3 flex-wrap">
+                                  {o.filePath && (
+                                    <a href={o.filePath} target="_blank" rel="noreferrer" className="text-[11px] font-semibold underline" style={{ color: "var(--pfg-navy)" }}>View current file</a>
+                                  )}
+                                  <input type="file" accept="image/*,.pdf" onChange={e => setEditObsFile && setEditObsFile(e.target.files?.[0] || null)} className="text-[11px]" />
+                                  {!o.filePath && <span className="text-[11px]" style={{ color: "var(--pfg-steel)" }}>No file attached</span>}
+                                </div>
                               </ModalField>
                             </div>
                             <div className="flex gap-2">
