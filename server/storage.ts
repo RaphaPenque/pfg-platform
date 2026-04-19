@@ -905,7 +905,7 @@ export class PostgresStorage implements IStorage {
   async getSafetyObservations(projectId: number): Promise<SafetyObservation[]> {
     return db.select().from(safetyObservations)
       .where(eq(safetyObservations.projectId, projectId))
-      .orderBy(desc(safetyObservations.createdAt));
+      .orderBy(desc(safetyObservations.observationDate), desc(safetyObservations.createdAt));
   }
 
   async createSafetyObservation(data: InsertSafetyObservation): Promise<SafetyObservation> {
