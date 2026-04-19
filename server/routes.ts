@@ -520,7 +520,7 @@ export function registerRoutes(server: Server, app: Express) {
         id: r.id,
         weekCommencing: r.weekCommencing,
         weekEnding: r.weekEnding,
-        hasPdf: !!r.pdfPath && fs.existsSync(r.pdfPath),
+        hasPdf: !!(((r.aggregatedData as any) || {}).pdfBase64) || (!!r.pdfPath && fs.existsSync(r.pdfPath)),
         aggregatedData: r.aggregatedData,
         sentAt: r.sentAt,
       })));
@@ -538,12 +538,25 @@ export function registerRoutes(server: Server, app: Express) {
       const project = allProjects.find(p => p.code === code);
       if (!project) return res.status(404).json({ error: "Project not found" });
       const reports = await storage.getWeeklyReportsByProject(project.id);
-      const report = reports.find(r => r.id === id && r.status === 'published');
+      // Match by id, or fall back to most recent published report for this project
+      const report = (id > 0 ? reports.find(r => r.id === id) : null) || reports.find(r => r.status === 'published') || reports[0];
       if (!report) return res.status(404).json({ error: "Report not found" });
-      if (!report.pdfPath || !fs.existsSync(report.pdfPath)) return res.status(404).json({ error: "PDF not yet generated" });
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${code}-report-wc-${report.weekCommencing}.pdf"`);
-      res.sendFile(report.pdfPath);
+      // Try base64 from aggregated_data first (no filesystem needed)
+      const agg = (report.aggregatedData as any) || {};
+      if (agg.pdfBase64) {
+        const buf = Buffer.from(agg.pdfBase64, 'base64');
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${code}-weekly-report-wc-${report.weekCommencing}.pdf"`);
+        res.setHeader('Content-Length', buf.length);
+        return res.end(buf);
+      }
+      // Fallback: serve from disk if pdfPath exists
+      if (report.pdfPath && fs.existsSync(report.pdfPath)) {
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', `attachment; filename="${code}-weekly-report-wc-${report.weekCommencing}.pdf"`);
+        return res.sendFile(report.pdfPath);
+      }
+      return res.status(404).json({ error: "PDF not yet generated" });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -2692,46 +2705,47 @@ export function registerRoutes(server: Server, app: Express) {
   });
 
   // Upload a pre-generated PDF for a weekly report (internal API key auth)
-  // Accepts multipart/form-data with fields: weekId, projectId, projectCode, weekCommencing, pdf (file)
-  // Also accepts application/json with pdfBase64 field (for small PDFs)
+  // Stores PDF as base64 in aggregated_data — no filesystem dependency
   const multerUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
   app.post("/api/internal/upload-report-pdf", multerUpload.single('pdf'), async (req: Request, res: Response) => {
     const apiKey = req.headers['x-api-key'];
     if (apiKey !== process.env.RENDER_API_KEY && apiKey !== 'pfg-internal-2026') {
       return res.status(401).json({ error: 'Unauthorized' });
     }
-    const { weekId, projectId, projectCode, weekCommencing } = req.body;
-    if (!weekId || !projectId || !weekCommencing) return res.status(400).json({ error: 'weekId, projectId, weekCommencing required' });
-    const code = ((projectCode as string) || 'PROJECT').toUpperCase();
+    const { projectId, projectCode, weekCommencing } = req.body;
+    if (!projectId || !weekCommencing) return res.status(400).json({ error: 'projectId and weekCommencing required' });
     try {
       let pdfBuffer: Buffer;
       if ((req as any).file) {
         pdfBuffer = (req as any).file.buffer;
-      } else if (req.body.pdfBase64) {
-        pdfBuffer = Buffer.from(req.body.pdfBase64, 'base64');
       } else {
-        return res.status(400).json({ error: 'pdf file or pdfBase64 required' });
+        return res.status(400).json({ error: 'pdf file required' });
       }
-      const reportDir = path.join(UPLOAD_BASE, 'reports', code);
-      fs.mkdirSync(reportDir, { recursive: true });
-      const filename = `${code}-report-w-e-${weekCommencing}.pdf`;
-      const pdfPath = path.join(reportDir, filename);
-      fs.writeFileSync(pdfPath, pdfBuffer);
-      // Update weekly_reports record (match by weekCommencing)
+      const pdfBase64 = pdfBuffer.toString('base64');
+      const wc = weekCommencing as string;
+      const we = new Date(new Date(wc).getTime() + 6 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10);
+      // Find existing report or create one
       const existing = await storage.getWeeklyReportsByProject(parseInt(projectId));
-      const report = existing.find((r: any) => r.weekCommencing === weekCommencing) || existing[0];
+      const report = existing.find((r: any) => r.weekCommencing === wc) || existing[0];
       if (report) {
-        await storage.updateWeeklyReport(report.id, { pdfPath });
-        return res.json({ ok: true, pdfPath, filename, bytes: pdfBuffer.length, reportId: report.id });
+        const currentAgg = (report.aggregatedData as any) || {};
+        await storage.updateWeeklyReport(report.id, {
+          aggregatedData: { ...currentAgg, pdfBase64 },
+          status: 'published',
+        });
+        return res.json({ ok: true, reportId: report.id, weekCommencing: wc, bytes: pdfBuffer.length });
       } else {
-        // Create a new record if none exists
-        const wc = weekCommencing as string;
-        const we = new Date(new Date(wc).getTime() + 6 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10);
-        const created = await storage.createWeeklyReport({ projectId: parseInt(projectId), weekCommencing: wc, weekEnding: we, status: 'published', pdfPath, aggregatedData: {} } as any);
-        return res.json({ ok: true, pdfPath, filename, bytes: pdfBuffer.length, reportId: created?.id });
+        const created = await storage.createWeeklyReport({
+          projectId: parseInt(projectId),
+          weekCommencing: wc,
+          weekEnding: we,
+          status: 'published',
+          aggregatedData: { pdfBase64 },
+        } as any);
+        return res.json({ ok: true, reportId: created?.id, weekCommencing: wc, bytes: pdfBuffer.length });
       }
     } catch (e: any) {
-      console.error('[upload-report-pdf] Error:', e?.message || e?.constructor?.name || String(e), e?.stack?.split('\n')[0]);
+      console.error('[upload-report-pdf] Error:', e?.message || e?.constructor?.name || String(e));
       return res.status(500).json({ error: e?.message || e?.constructor?.name || String(e) });
     }
   });
