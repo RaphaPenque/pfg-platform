@@ -144,16 +144,24 @@ export async function sendReportForProject(
   const activeAssignments = (assignments as any[]).filter((a: any) =>
     ['active', 'confirmed', 'pending_confirmation', 'flagged'].includes(a.status || '')
   );
-  const teamMembers = activeAssignments.map((a: any) => {
-    const w = (workerMap as any)[a.workerId];
-    return {
-      name: (w?.name || `Worker ${a.workerId}`).replace(/\s*\([^)]*\)/g, '').trim(),
-      role: a.role || '',
-      shift: a.shift || '',
-      startDate: a.startDate || '',
-      endDate: a.endDate || '',
-    };
-  });
+  // Only include workers who are actually on site during this week
+  const teamMembers = activeAssignments
+    .filter((a: any) => {
+      const aStart = a.startDate || '';
+      const aEnd = a.endDate || '9999-12-31';
+      // Assignment overlaps with the report week
+      return aStart <= weekEnd && aEnd >= weekStart;
+    })
+    .map((a: any) => {
+      const w = (workerMap as any)[a.workerId];
+      return {
+        name: (w?.name || `Worker ${a.workerId}`).replace(/\s*\([^)]*\)/g, '').trim(),
+        role: a.role || '',
+        shift: a.shift || '',
+        startDate: a.startDate || '',
+        endDate: a.endDate || '',
+      };
+    });
 
   // Aggregate full week: all published reports within the week window
   const weekReports = published.filter((r: any) => r.reportDate >= weekStart && r.reportDate <= weekEnd);
@@ -205,10 +213,10 @@ export async function sendReportForProject(
     })),
     teamMembers,
     safetyData: {
-      toolboxTalks: (allToolboxTalks as any[]).length,
-      observations: (allSafetyObs as any[]).length,
-      nearMisses: (allSafetyObs as any[]).filter((o: any) => o.observationType === 'unsafe_condition').length,
-      incidents: (allIncidents as any[]).length,
+      toolboxTalks: (allToolboxTalks as any[]).filter((t: any) => (t.reportDate || '') >= weekStart && (t.reportDate || '') <= weekEnd).length,
+      observations: (allSafetyObs as any[]).filter((o: any) => (o.observationDate || '') >= weekStart && (o.observationDate || '') <= weekEnd).length,
+      nearMisses: (allIncidents as any[]).filter((i: any) => i.incidentType === 'near_miss' && (i.incidentDate || '') >= weekStart && (i.incidentDate || '') <= weekEnd).length,
+      incidents: (allIncidents as any[]).filter((i: any) => i.incidentType !== 'near_miss' && (i.incidentDate || '') >= weekStart && (i.incidentDate || '') <= weekEnd).length,
     },
     daysRemaining,
     activeTeam: teamMembers.length,
