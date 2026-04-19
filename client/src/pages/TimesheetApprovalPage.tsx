@@ -314,7 +314,7 @@ export default function TimesheetApprovalPage({ params }: { params: { token: str
             <div style={{ fontSize:11, color:"#6B7280", lineHeight:1.65, marginBottom:16, paddingBottom:16, borderBottom:"1px solid #E5E7EB" }}>
               Please review the timesheet above. If the hours and attendance are correct, click <strong style={{ color:"#1a2744" }}>Approve Timesheet</strong>.
               If you have any concerns, click <strong style={{ color:"#1a2744" }}>Raise a Challenge</strong> — the project manager will be notified and will re-submit once corrected.<br /><br />
-              Your approval will be cryptographically recorded against <strong style={{ color:"#1a2744" }}>{week.approval_email || "your account"}</strong> with your IP address and timestamp.
+              Your approval will be recorded with your IP address and timestamp as confirmation of this sign-off.
             </div>
 
             {error && <div style={{ background:"#FEE2E2", border:"1px solid #FCA5A5", borderRadius:6, padding:"10px 14px", color:"#B91C1C", fontSize:12, marginBottom:14 }}>{error}</div>}

@@ -1343,6 +1343,42 @@ async function generateBillingSummaryPdf(tw: any, entries: any[], outPath: strin
 
 export async function checkTimesheetReminders() {
   try {
+    const now = new Date();
+    const isMonday8am = now.getUTCDay() === 1 && now.getUTCHours() === 7; // 07:00 UTC = 08:00 BST
+
+    // ── AUTO-SEND TO CUSTOMER RULE 1: Monday 8am — send all pm_approved timesheets ──
+    if (isMonday8am) {
+      const mondayReadyRes = await db.execute(sql`
+        SELECT tw.*, p.name as project_name, p.code as project_code,
+               p.timesheet_signatory_email, p.customer_project_manager_email, p.site_manager_email
+        FROM timesheet_weeks tw
+        JOIN projects p ON p.id = tw.project_id
+        WHERE tw.status = 'pm_approved'
+          AND tw.sent_to_customer_at IS NULL
+          AND p.status = 'active'
+      `);
+      for (const tw of mondayReadyRes.rows as any[]) {
+        await autoSendToCustomer(tw);
+      }
+    }
+
+    // ── AUTO-SEND TO CUSTOMER RULE 2: 24h after PM approval (if missed Monday window) ──
+    const lateApprovalRes = await db.execute(sql`
+      SELECT tw.*, p.name as project_name, p.code as project_code,
+             p.timesheet_signatory_email, p.customer_project_manager_email, p.site_manager_email
+      FROM timesheet_weeks tw
+      JOIN projects p ON p.id = tw.project_id
+      WHERE tw.status = 'pm_approved'
+        AND tw.sent_to_customer_at IS NULL
+        AND tw.pm_approved_at IS NOT NULL
+        AND tw.pm_approved_at < NOW() - INTERVAL '24 hours'
+        AND tw.pm_approved_at > NOW() - INTERVAL '25 hours'
+        AND p.status = 'active'
+    `);
+    for (const tw of lateApprovalRes.rows as any[]) {
+      await autoSendToCustomer(tw);
+    }
+
     // 24h reminder for sent_to_customer (no action yet)
     const remind24Res = await db.execute(sql`
       SELECT tw.*, p.name as project_name, p.timesheet_signatory_email,
