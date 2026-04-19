@@ -13,7 +13,9 @@ export async function renderHtmlToPdf(
   outPath: string,
   opts: { landscape?: boolean; format?: "A4" | "Letter" } = {}
 ): Promise<void> {
-  const browser = await chromium.launch({ args: ["--no-sandbox", "--disable-setuid-sandbox"] });
+  const browser = await chromium.launch({
+    args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+  });
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle" });
