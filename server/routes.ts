@@ -2679,11 +2679,22 @@ export function registerRoutes(server: Server, app: Express) {
     const { projectId } = req.body;
     if (!projectId) return res.status(400).json({ error: "projectId required" });
     try {
+      // Test Playwright directly first
+      let playwrightError: string | null = null;
+      try {
+        const { chromium } = await import('playwright');
+        const browser = await chromium.launch({ args: ['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage','--disable-gpu'] });
+        await browser.close();
+      } catch (pe: any) {
+        playwrightError = pe.message?.slice(0, 200);
+      }
       const { sendReportForProject } = await import('./report-scheduler');
       const project = await storage.getProject(parseInt(projectId));
       if (!project) return res.status(404).json({ error: "Project not found" });
       await sendReportForProject(project, false);
-      return res.json({ ok: true });
+      const wr = await storage.getWeeklyReportsByProject(parseInt(projectId));
+      const latest = wr[0];
+      return res.json({ ok: true, hasPdf: latest?.pdfPath ? true : false, pdfPath: latest?.pdfPath, playwrightError });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
     }
