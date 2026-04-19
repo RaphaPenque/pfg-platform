@@ -2712,7 +2712,7 @@ export function registerRoutes(server: Server, app: Express) {
       } else {
         return res.status(400).json({ error: 'pdf file or pdfBase64 required' });
       }
-      const reportDir = path.join('/data/uploads', 'reports', code);
+      const reportDir = path.join(UPLOAD_BASE, 'reports', code);
       fs.mkdirSync(reportDir, { recursive: true });
       const filename = `${code}-report-w-e-${weekCommencing}.pdf`;
       const pdfPath = path.join(reportDir, filename);
@@ -2730,7 +2730,8 @@ export function registerRoutes(server: Server, app: Express) {
       }
       return res.json({ ok: true, pdfPath, filename, bytes: pdfBuffer.length, reportId: report?.id });
     } catch (e: any) {
-      return res.status(500).json({ error: e.message });
+      console.error('[upload-report-pdf] Error:', e);
+      return res.status(500).json({ error: e?.message || String(e) });
     }
   });
 
