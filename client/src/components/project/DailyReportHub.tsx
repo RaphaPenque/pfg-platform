@@ -2168,16 +2168,18 @@ function QHSETab({
                           <a href={t.filePath} target="_blank" rel="noreferrer" className="text-[11px] font-semibold" style={{ color: "var(--pfg-navy)" }}>View</a>
                         ) : "—"}
                       </Td>
-                      <Td>{t.notes || "—"}</Td>
                       <Td>
-                        <div className="flex items-center gap-1.5">
+                        <span title={t.notes || ""} className="block max-w-[260px] truncate">{t.notes || "—"}</span>
+                      </Td>
+                      <Td>
+                        <div className="flex items-center gap-2">
                           <button
                             onClick={() => {
                               if (editingTB === t.id) { setEditingTB(null); return; }
                               setEditingTB(t.id);
                               setEditTBForm({ reportDate: t.reportDate || "", shift: t.shift || "Day", topic: t.topic || "", attendeeCount: String(t.attendeeCount || ""), notes: t.notes || "" });
                             }}
-                            className="p-1 rounded hover:bg-black/5"
+                            className="p-1.5 rounded hover:bg-black/5 flex items-center gap-1"
                             title="Edit"
                           >
                             <Pencil className="w-3.5 h-3.5" style={{ color: editingTB === t.id ? "var(--pfg-navy)" : "var(--pfg-steel)" }} />
@@ -2193,7 +2195,7 @@ function QHSETab({
                                 toast({ title: "Error", description: e.message, variant: "destructive" });
                               }
                             }}
-                            className="p-1 rounded hover:bg-black/5"
+                            className="p-1.5 rounded hover:bg-black/5"
                             title="Delete"
                           >
                             <Trash2 className="w-3.5 h-3.5" style={{ color: "#B91C1C" }} />
