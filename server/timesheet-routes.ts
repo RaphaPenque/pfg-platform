@@ -995,21 +995,23 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
         ? (daySubmitted && nightSubmitted)
         : daySubmitted;
 
+      // Fetch PM for notifications
+      const pmRes = await db.execute(sql`
+        SELECT u.email, u.name FROM project_leads pl
+        JOIN users u ON u.id = pl.user_id
+        WHERE pl.project_id = ${week.project_id}
+        LIMIT 1
+      `);
+      const pm = pmRes.rows[0] as any;
+      const weekStr = updatedWeek.week_commencing?.toString().substring(0, 10) || "";
+
       if (allSubmitted && updatedWeek.status === "draft") {
         await db.execute(sql`
           UPDATE timesheet_weeks SET status = 'submitted', submitted_at = NOW()
           WHERE id = ${week.id}
         `);
-        // Notify PM
-        const pmRes = await db.execute(sql`
-          SELECT u.email, u.name FROM project_leads pl
-          JOIN users u ON u.id = pl.user_id
-          WHERE pl.project_id = ${week.project_id}
-          LIMIT 1
-        `);
-        const pm = pmRes.rows[0] as any;
+        // Notify PM — all shifts submitted
         if (pm?.email) {
-          const weekStr = updatedWeek.week_commencing?.toString().substring(0, 10) || "";
           await sendMail({
             to: pm.email,
             subject: `Timesheet ready for review — ${week.project_name} w/c ${weekStr}`,
@@ -1022,6 +1024,21 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
             text: `All shifts for ${week.project_name} w/c ${weekStr} have been submitted. Please review and approve.`,
           });
         }
+      } else if (!allSubmitted && hasNightSup && pm?.email) {
+        // Partial submission — notify PM that day shift is in but night is pending
+        const submittedShift = shift === "day" ? "Day" : "Night";
+        const pendingShift = shift === "day" ? "Night" : "Day";
+        await sendMail({
+          to: pm.email,
+          subject: `${submittedShift} shift submitted — ${week.project_name} w/c ${weekStr} (awaiting ${pendingShift})`,
+          html: buildNotificationEmail(
+            `${submittedShift} Shift Submitted`,
+            `The <strong>${submittedShift} shift</strong> timesheet for <strong>${week.project_name}</strong> (w/c ${weekStr}) has been submitted. The <strong>${pendingShift} shift</strong> is still pending supervisor sign-off.`,
+            `${APP_URL}/#/projects/${week.project_code}`,
+            "View Timesheet"
+          ),
+          text: `${submittedShift} shift submitted for ${week.project_name} w/c ${weekStr}. Awaiting ${pendingShift} shift.`,
+        });
       }
 
       const finalRes = await db.execute(sql`SELECT * FROM timesheet_weeks WHERE id = ${week.id}`);
