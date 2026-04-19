@@ -2717,15 +2717,18 @@ export function registerRoutes(server: Server, app: Express) {
       const filename = `${code}-report-w-e-${weekCommencing}.pdf`;
       const pdfPath = path.join(reportDir, filename);
       fs.writeFileSync(pdfPath, pdfBuffer);
-      // Update weekly_reports record
+      // Update weekly_reports record (match by weekCommencing or projectId)
       const existing = await storage.getWeeklyReportsByProject(parseInt(projectId));
-      const report = existing.find((r: any) => r.weekId === parseInt(weekId));
+      const report = existing.find((r: any) => r.weekCommencing === weekCommencing) || existing[0];
       if (report) {
-        await db.execute(sql`UPDATE weekly_reports SET pdf_path = ${pdfPath}, has_pdf = true WHERE id = ${report.id}`);
+        await db.execute(sql`UPDATE weekly_reports SET pdf_path = ${pdfPath} WHERE id = ${report.id}`);
       } else {
-        await db.execute(sql`UPDATE weekly_reports SET pdf_path = ${pdfPath}, has_pdf = true WHERE project_id = ${parseInt(projectId)}`);
+        // Create a new record if none exists
+        const wc = weekCommencing as string;
+        const we = new Date(new Date(wc).getTime() + 6 * 24 * 60 * 60 * 1000).toISOString().substring(0, 10);
+        await db.execute(sql`INSERT INTO weekly_reports (project_id, week_commencing, week_ending, status, pdf_path, aggregated_data) VALUES (${parseInt(projectId)}, ${wc}, ${we}, 'published', ${pdfPath}, '{}')`);
       }
-      return res.json({ ok: true, pdfPath, filename, bytes: pdfBuffer.length });
+      return res.json({ ok: true, pdfPath, filename, bytes: pdfBuffer.length, reportId: report?.id });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
     }
