@@ -2679,28 +2679,44 @@ export function registerRoutes(server: Server, app: Express) {
     const { projectId } = req.body;
     if (!projectId) return res.status(400).json({ error: "projectId required" });
     try {
-      // Diagnose Chromium availability
-      let playwrightError: string | null = null;
-      let chromiumPaths: string[] = [];
-      try {
-        const { execSync } = require('child_process');
-        const pathCheck = execSync('which chromium chromium-browser google-chrome 2>/dev/null || find /usr /opt -name "chrom*" -type f 2>/dev/null | head -5 || echo NONE', { encoding: 'utf8', stdio: 'pipe' });
-        chromiumPaths = pathCheck.trim().split('\n').filter(Boolean);
-      } catch { chromiumPaths = ['lookup failed']; }
-      try {
-        const { chromium } = await import('playwright');
-        const browser = await chromium.launch({ args: ['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage','--disable-gpu'] });
-        await browser.close();
-      } catch (pe: any) {
-        playwrightError = pe.message?.slice(0, 200);
-      }
       const { sendReportForProject } = await import('./report-scheduler');
       const project = await storage.getProject(parseInt(projectId));
       if (!project) return res.status(404).json({ error: "Project not found" });
       await sendReportForProject(project, false);
       const wr = await storage.getWeeklyReportsByProject(parseInt(projectId));
       const latest = wr[0];
-      return res.json({ ok: true, hasPdf: latest?.pdfPath ? true : false, pdfPath: latest?.pdfPath, playwrightError, chromiumPaths });
+      return res.json({ ok: true, hasPdf: latest?.pdfPath ? true : false, pdfPath: latest?.pdfPath });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Upload a pre-generated PDF for a weekly report (internal API key auth)
+  app.post("/api/internal/upload-report-pdf", async (req: Request, res: Response) => {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== process.env.RENDER_API_KEY && apiKey !== 'pfg-internal-2026') {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    const { weekId, projectId, projectCode, weekCommencing } = req.body;
+    if (!weekId || !projectId || !weekCommencing) return res.status(400).json({ error: 'weekId, projectId, weekCommencing required' });
+    const pdfBase64 = req.body.pdfBase64;
+    if (!pdfBase64) return res.status(400).json({ error: 'pdfBase64 required' });
+    const code = (projectCode || 'PROJECT').toUpperCase();
+    try {
+      const reportDir = path.join('/data/uploads', 'reports', code);
+      fs.mkdirSync(reportDir, { recursive: true });
+      const filename = `${code}-report-w-e-${weekCommencing}.pdf`;
+      const pdfPath = path.join(reportDir, filename);
+      fs.writeFileSync(pdfPath, Buffer.from(pdfBase64, 'base64'));
+      // Update weekly_reports record by weekId or projectId
+      const existing = await storage.getWeeklyReportsByProject(parseInt(projectId));
+      const report = existing.find((r: any) => r.weekId === parseInt(weekId));
+      if (report) {
+        await db.execute(sql`UPDATE weekly_reports SET pdf_path = ${pdfPath}, has_pdf = true WHERE id = ${report.id}`);
+      } else {
+        await db.execute(sql`UPDATE weekly_reports SET pdf_path = ${pdfPath}, has_pdf = true WHERE project_id = ${parseInt(projectId)}`);
+      }
+      return res.json({ ok: true, pdfPath, filename });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
     }
