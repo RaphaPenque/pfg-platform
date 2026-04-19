@@ -63,8 +63,8 @@ export function isImageFile(mimeType?: string, filename?: string): boolean {
  */
 export async function isImageByContent(filePath: string): Promise<boolean> {
   try {
-    const { readFileSync } = await import("fs");
-    const buf = readFileSync(filePath);
+    const fs = await import("fs");
+    const buf = fs.readFileSync(filePath);
     // JPEG: FF D8 FF
     if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return true;
     // PNG: 89 50 4E 47
