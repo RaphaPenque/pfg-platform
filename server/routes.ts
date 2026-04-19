@@ -2679,8 +2679,14 @@ export function registerRoutes(server: Server, app: Express) {
     const { projectId } = req.body;
     if (!projectId) return res.status(400).json({ error: "projectId required" });
     try {
-      // Test Playwright directly first
+      // Diagnose Chromium availability
       let playwrightError: string | null = null;
+      let chromiumPaths: string[] = [];
+      try {
+        const { execSync } = require('child_process');
+        const pathCheck = execSync('which chromium chromium-browser google-chrome 2>/dev/null || find /usr /opt -name "chrom*" -type f 2>/dev/null | head -5 || echo NONE', { encoding: 'utf8', stdio: 'pipe' });
+        chromiumPaths = pathCheck.trim().split('\n').filter(Boolean);
+      } catch { chromiumPaths = ['lookup failed']; }
       try {
         const { chromium } = await import('playwright');
         const browser = await chromium.launch({ args: ['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage','--disable-gpu'] });
@@ -2694,7 +2700,7 @@ export function registerRoutes(server: Server, app: Express) {
       await sendReportForProject(project, false);
       const wr = await storage.getWeeklyReportsByProject(parseInt(projectId));
       const latest = wr[0];
-      return res.json({ ok: true, hasPdf: latest?.pdfPath ? true : false, pdfPath: latest?.pdfPath, playwrightError });
+      return res.json({ ok: true, hasPdf: latest?.pdfPath ? true : false, pdfPath: latest?.pdfPath, playwrightError, chromiumPaths });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
     }
