@@ -56,3 +56,27 @@ export function isImageFile(mimeType?: string, filename?: string): boolean {
   }
   return false;
 }
+
+/**
+ * Checks the actual file bytes to detect if a file is an image even if named .pdf
+ * Returns true if the file magic bytes indicate JPEG, PNG, WEBP, GIF, BMP, TIFF
+ */
+export async function isImageByContent(filePath: string): Promise<boolean> {
+  try {
+    const { readFileSync } = await import("fs");
+    const buf = readFileSync(filePath);
+    // JPEG: FF D8 FF
+    if (buf[0] === 0xFF && buf[1] === 0xD8 && buf[2] === 0xFF) return true;
+    // PNG: 89 50 4E 47
+    if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return true;
+    // WEBP: 52 49 46 46 ... 57 45 42 50
+    if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46) return true;
+    // BMP: 42 4D
+    if (buf[0] === 0x42 && buf[1] === 0x4D) return true;
+    // TIFF: 49 49 or 4D 4D
+    if ((buf[0] === 0x49 && buf[1] === 0x49) || (buf[0] === 0x4D && buf[1] === 0x4D)) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}

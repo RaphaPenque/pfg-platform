@@ -12,7 +12,7 @@ import path from "path";
 import fs from "fs";
 import crypto from "crypto";
 import { generateWeeklyReportPdf } from "./report-generator";
-import { imageToPdf, isImageFile } from "./image-to-pdf";
+import { imageToPdf, isImageFile, isImageByContent } from "./image-to-pdf";
 
 // Extend Express Request with user
 declare global {
@@ -1738,7 +1738,7 @@ export function registerRoutes(server: Server, app: Express) {
     let storedFilename = req.file?.filename || null;
 
     // If an image was uploaded, convert it to PDF automatically
-    if (req.file && isImageFile(req.file.mimetype, req.file.originalname)) {
+    if (req.file && (isImageFile(req.file.mimetype, req.file.originalname) || await isImageByContent(req.file.path))) {
       try {
         const pdfPath = await imageToPdf(uploadedFilePath!);
         // Remove the original image file
@@ -1854,7 +1854,7 @@ export function registerRoutes(server: Server, app: Express) {
       let storedFilename = req.file?.filename || null;
 
       // Auto-convert image to PDF (same as supervisor reports)
-      if (req.file && isImageFile(req.file.mimetype, req.file.originalname)) {
+      if (req.file && (isImageFile(req.file.mimetype, req.file.originalname) || await isImageByContent(req.file.path))) {
         try {
           const pdfPath = await imageToPdf(uploadedFilePath!);
           if (fs.existsSync(uploadedFilePath!)) fs.unlinkSync(uploadedFilePath!);
@@ -1918,7 +1918,7 @@ export function registerRoutes(server: Server, app: Express) {
       let uploadedFileName = req.file?.originalname || null;
       let storedFilename = req.file?.filename || null;
 
-      if (req.file && isImageFile(req.file.mimetype, req.file.originalname)) {
+      if (req.file && (isImageFile(req.file.mimetype, req.file.originalname) || await isImageByContent(req.file.path))) {
         try {
           const pdfPath = await imageToPdf(uploadedFilePath!);
           if (fs.existsSync(uploadedFilePath!)) fs.unlinkSync(uploadedFilePath!);
@@ -1956,7 +1956,7 @@ export function registerRoutes(server: Server, app: Express) {
       let uploadedFileName = req.file?.originalname || null;
       let storedFilename = req.file?.filename || null;
 
-      if (req.file && isImageFile(req.file.mimetype, req.file.originalname)) {
+      if (req.file && (isImageFile(req.file.mimetype, req.file.originalname) || await isImageByContent(req.file.path))) {
         try {
           const pdfPath = await imageToPdf(uploadedFilePath!);
           if (fs.existsSync(uploadedFilePath!)) fs.unlinkSync(uploadedFilePath!);
