@@ -2692,23 +2692,32 @@ export function registerRoutes(server: Server, app: Express) {
   });
 
   // Upload a pre-generated PDF for a weekly report (internal API key auth)
-  app.post("/api/internal/upload-report-pdf", async (req: Request, res: Response) => {
+  // Accepts multipart/form-data with fields: weekId, projectId, projectCode, weekCommencing, pdf (file)
+  // Also accepts application/json with pdfBase64 field (for small PDFs)
+  const multerUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+  app.post("/api/internal/upload-report-pdf", multerUpload.single('pdf'), async (req: Request, res: Response) => {
     const apiKey = req.headers['x-api-key'];
     if (apiKey !== process.env.RENDER_API_KEY && apiKey !== 'pfg-internal-2026') {
       return res.status(401).json({ error: 'Unauthorized' });
     }
     const { weekId, projectId, projectCode, weekCommencing } = req.body;
     if (!weekId || !projectId || !weekCommencing) return res.status(400).json({ error: 'weekId, projectId, weekCommencing required' });
-    const pdfBase64 = req.body.pdfBase64;
-    if (!pdfBase64) return res.status(400).json({ error: 'pdfBase64 required' });
-    const code = (projectCode || 'PROJECT').toUpperCase();
+    const code = ((projectCode as string) || 'PROJECT').toUpperCase();
     try {
+      let pdfBuffer: Buffer;
+      if ((req as any).file) {
+        pdfBuffer = (req as any).file.buffer;
+      } else if (req.body.pdfBase64) {
+        pdfBuffer = Buffer.from(req.body.pdfBase64, 'base64');
+      } else {
+        return res.status(400).json({ error: 'pdf file or pdfBase64 required' });
+      }
       const reportDir = path.join('/data/uploads', 'reports', code);
       fs.mkdirSync(reportDir, { recursive: true });
       const filename = `${code}-report-w-e-${weekCommencing}.pdf`;
       const pdfPath = path.join(reportDir, filename);
-      fs.writeFileSync(pdfPath, Buffer.from(pdfBase64, 'base64'));
-      // Update weekly_reports record by weekId or projectId
+      fs.writeFileSync(pdfPath, pdfBuffer);
+      // Update weekly_reports record
       const existing = await storage.getWeeklyReportsByProject(parseInt(projectId));
       const report = existing.find((r: any) => r.weekId === parseInt(weekId));
       if (report) {
@@ -2716,7 +2725,7 @@ export function registerRoutes(server: Server, app: Express) {
       } else {
         await db.execute(sql`UPDATE weekly_reports SET pdf_path = ${pdfPath}, has_pdf = true WHERE project_id = ${parseInt(projectId)}`);
       }
-      return res.json({ ok: true, pdfPath, filename });
+      return res.json({ ok: true, pdfPath, filename, bytes: pdfBuffer.length });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
     }
