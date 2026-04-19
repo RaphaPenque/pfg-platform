@@ -2689,6 +2689,21 @@ export function registerRoutes(server: Server, app: Express) {
     }
   });
 
+  // Generate a preview customer token for a timesheet week (for internal review only)
+  app.post("/api/internal/preview-customer-token", requireAuth, requireRole("admin"), async (req: Request, res: Response) => {
+    const { weekId } = req.body;
+    if (!weekId) return res.status(400).json({ error: "weekId required" });
+    try {
+      const rawToken = crypto.randomBytes(32).toString("hex");
+      const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
+      const expiry = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      await db.execute(sql`UPDATE timesheet_weeks SET customer_token = ${hashedToken}, token_expires_at = ${expiry.toISOString()} WHERE id = ${weekId}`);
+      return res.json({ ok: true, token: rawToken });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
   // Manually trigger auto-publish of all daily reports
   app.post("/api/internal/auto-publish-reports", requireAuth, requireRole("admin"), async (_req: Request, res: Response) => {
     try {
