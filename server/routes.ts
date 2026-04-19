@@ -2674,6 +2674,21 @@ export function registerRoutes(server: Server, app: Express) {
   // ── Timesheet Module routes ──────────────────────────────────────────────
   registerTimesheetRoutes(app, requireAuth, requireRole);
 
+  // Manually trigger weekly report generation for a specific project
+  app.post("/api/internal/generate-weekly-report", requireAuth, requireRole("admin"), async (req: Request, res: Response) => {
+    const { projectId } = req.body;
+    if (!projectId) return res.status(400).json({ error: "projectId required" });
+    try {
+      const { sendReportForProject } = await import('./report-scheduler');
+      const project = await storage.getProject(parseInt(projectId));
+      if (!project) return res.status(404).json({ error: "Project not found" });
+      await sendReportForProject(project, false);
+      return res.json({ ok: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
   // Manually trigger auto-publish of all daily reports
   app.post("/api/internal/auto-publish-reports", requireAuth, requireRole("admin"), async (_req: Request, res: Response) => {
     try {

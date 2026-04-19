@@ -100,7 +100,7 @@ function buildEmailHtml(
 // ── Main export ───────────────────────────────────────────────────────────────
 
 // ── Core send function — shared by weekly and final sends ──
-async function sendReportForProject(
+export async function sendReportForProject(
   project: any,
   isFinal: boolean = false
 ): Promise<void> {
