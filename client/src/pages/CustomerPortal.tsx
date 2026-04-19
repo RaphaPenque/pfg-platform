@@ -501,7 +501,7 @@ function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs =
       <div style={{ marginBottom: 20 }}>
         <h2 style={{ fontSize: 16, fontWeight: 700, color: "#1a2744" }}>Weekly Project Reports</h2>
         <p style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
-          Published every Monday · {reports.length} report{reports.length !== 1 ? "s" : ""} available · PDF attached to each
+          Published every Sunday · {displayReports.length} week{displayReports.length !== 1 ? "s" : ""} available · PDF download on each report
         </p>
       </div>
 
@@ -538,7 +538,28 @@ function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs =
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  {report.hasPdf && (
+                  {/* Download PDF — show for real reports with PDF, or offer print for fallback */}
+                  {report.hasPdf ? (
+                    <a
+                      href={`/api/portal/${projectCode}/weekly-reports/${report.id}/pdf`}
+                      download
+                      onClick={e => e.stopPropagation()}
+                      style={{ fontSize: 11, fontWeight: 600, color: color, background: color + "15", padding: "4px 10px", borderRadius: 5, textDecoration: "none", display: "flex", alignItems: "center", gap: 4 }}
+                    >
+                      &#8659; PDF
+                    </a>
+                  ) : (
+                    <a
+                      href={`/api/portal/${projectCode}/weekly-reports/print?wc=${report.weekCommencing}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      onClick={e => e.stopPropagation()}
+                      style={{ fontSize: 11, fontWeight: 600, color: color, background: color + "15", padding: "4px 10px", borderRadius: 5, textDecoration: "none", display: "flex", alignItems: "center", gap: 4 }}
+                    >
+                      &#8659; PDF
+                    </a>
+                  )}
+                  {report.hasPdf && false && (
                     <a
                       href={`/api/portal/${projectCode}/weekly-reports/${report.id}/pdf`}
                       download
