@@ -2104,8 +2104,9 @@ function QHSETab({
   const projectWorkers = assignments
     .filter((a) => a.projectId === project.id)
     .map((a) => workers.find((w) => w.id === a.workerId))
-    .filter(Boolean) as DashboardWorker[];
-  const projectWorkerCount = new Set(projectWorkers.map(w => w.id)).size;
+    .filter(Boolean)
+    .filter((w, i, arr) => arr.findIndex((x) => x!.id === w!.id) === i) as DashboardWorker[]; // dedupe by worker ID
+  const projectWorkerCount = projectWorkers.length;
 
   return (
     <div className="space-y-4">
