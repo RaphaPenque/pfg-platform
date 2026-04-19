@@ -481,9 +481,9 @@ function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs =
       const incList: any[] = (portalSafetyData?.incidentReports?.list || []).filter((i: any) => (i.incidentDate || '') >= wc && (i.incidentDate || '') <= we);
       // Active team members for this week
       const activeTeam = portalTeamMembers
-        .filter((m: any) => (m.assignment?.startDate || '') <= we && (m.assignment?.endDate || '9999') >= wc)
+        .filter((m: any) => { const today = new Date().toISOString().split('T')[0]; return (m.assignment?.startDate || '') <= today && (m.assignment?.endDate || '9999') >= today; })
         .map((m: any) => ({ name: m.worker?.name || '', role: m.assignment?.role || m.worker?.role || '', shift: m.assignment?.shift || 'Day' }));
-      return { id: -(i+1), weekCommencing: wc, weekEnding: we, hasPdf: false, sentAt: '', aggregatedData: { delays, comments, tasks, safetyStats: { toolboxTalks: tbtList.length, observations: obsList.length, nearMisses: incList.filter((i: any) => i.type === 'near_miss').length, incidents: incList.filter((i: any) => i.type !== 'near_miss').length }, teamMembers: activeTeam, daysRemaining: 0, progressPct: 0 } };
+      return { id: -(i+1), weekCommencing: wc, weekEnding: we, hasPdf: false, sentAt: '', aggregatedData: { delays, comments, tasks, safetyStats: { toolboxTalks: tbtList.length, observations: obsList.length, nearMisses: 0, incidents: incList.filter((i: any) => i.type !== 'near_miss').length }, teamMembers: activeTeam, daysRemaining: 0, progressPct: 0 } };
     });
   })();
 
@@ -517,7 +517,7 @@ function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs =
             const ld = c.logDate || '';
             return ld >= report.weekCommencing && ld <= report.weekEnding;
           }).map((c: any) => ({ date: c.logDate || '', entry: c.entry || '', userName: c.userName || 'Project Manager' }));
-          const comments = [...storedComments, ...weekStandalones].sort((a, b) => a.date < b.date ? -1 : 1);
+          const comments = [...storedComments, ...weekStandalones].sort((a, b) => a.date < b.date ? 1 : -1);
           const tasks = d.tasks || [];
           const safety = d.safetyStats || { toolboxTalks: 0, observations: 0, nearMisses: 0, incidents: 0 };
           const team = d.teamMembers || [];
