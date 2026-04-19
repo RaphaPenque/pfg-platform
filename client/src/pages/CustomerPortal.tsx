@@ -384,7 +384,7 @@ function DelaysAccordion({ delays }: { delays: any[] }) {
 
 
 // ─── Weekly Reports Tab ──────────────────────────────────────────────────────
-function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs = [] }: { projectCode: string; color: string; project: any; standaloneConcernLogs?: any[] }) {
+function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs = [], publishedReports: portalReports = [] }: { projectCode: string; color: string; project: any; standaloneConcernLogs?: any[]; publishedReports?: any[] }) {
   const [expanded, setExpanded] = React.useState<number | null>(null);
 
   const { data: reports = [], isLoading } = useQuery({
@@ -427,12 +427,35 @@ function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs =
     </div>
   );
 
-  if (reports.length === 0) return (
+  // If no weekly_reports yet, build week cards from published daily reports
+  const displayReports = reports.length > 0 ? reports : (() => {
+    if (!portalReports || portalReports.length === 0) return [];
+    // Group by week commencing (Monday)
+    const weekMap: Record<string, any[]> = {};
+    portalReports.forEach((r: any) => {
+      const d = new Date(r.reportDate + 'T00:00:00Z');
+      const dow = d.getUTCDay();
+      const diff = dow === 0 ? 6 : dow - 1;
+      const mon = new Date(d); mon.setUTCDate(d.getUTCDate() - diff);
+      const wc = mon.toISOString().split('T')[0];
+      if (!weekMap[wc]) weekMap[wc] = [];
+      weekMap[wc].push(r);
+    });
+    return Object.entries(weekMap).sort(([a],[b]) => b.localeCompare(a)).map(([wc, reps], i) => {
+      const sun = new Date(wc + 'T00:00:00Z'); sun.setUTCDate(sun.getUTCDate() + 6);
+      const we = sun.toISOString().split('T')[0];
+      const delays = reps.flatMap((r: any) => Array.isArray(r.delaysLog) ? r.delaysLog.map((d: any) => ({ ...d, date: r.reportDate })) : []);
+      const comments = reps.flatMap((r: any) => Array.isArray(r.commentsLog) ? r.commentsLog : []).map((c: any) => ({ date: c.logDate || '', entry: c.entry || '', userName: 'Project Manager' }));
+      const tasks = reps.flatMap((r: any) => Array.isArray(r.completedTasks) ? r.completedTasks : []);
+      return { id: -(i+1), weekCommencing: wc, weekEnding: we, hasPdf: false, sentAt: '', aggregatedData: { delays, comments, tasks, safetyStats: { toolboxTalks: 0, observations: 0, nearMisses: 0, incidents: 0 }, teamMembers: [], daysRemaining: 0, progressPct: 0 } };
+    });
+  })();
+
+  if (displayReports.length === 0) return (
     <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 8, padding: "60px 24px", textAlign: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
-      <div style={{ fontSize: 36, marginBottom: 12, opacity: 0.25 }}>📋</div>
       <div style={{ fontSize: 14, fontWeight: 600, color: "#374151", marginBottom: 6 }}>No reports published yet</div>
       <p style={{ fontSize: 13, color: "#9CA3AF", maxWidth: "40ch", margin: "0 auto" }}>
-        Weekly reports are published every Monday morning and will appear here.
+        Weekly reports are published every Sunday at 18:00 and will appear here.
       </p>
     </div>
   );
@@ -447,7 +470,7 @@ function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs =
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        {reports.map(report => {
+        {displayReports.map(report => {
           const isOpen = expanded === report.id;
           const { heading } = fmtWeek(report.weekCommencing, report.weekEnding);
           const d = report.aggregatedData || {};
@@ -1216,7 +1239,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
 
         {/* ════════════════ TAB 2: PROJECT REPORTS ════════════════ */}
         {activeTab === "reports" && (
-          <WeeklyReportsTab projectCode={params.projectCode} color={color} project={project} standaloneConcernLogs={standaloneConcernLogs} />
+          <WeeklyReportsTab projectCode={params.projectCode} color={color} project={project} standaloneConcernLogs={standaloneConcernLogs} publishedReports={publishedReports} />
         )}
 
         {/* ════════════════ TAB 3: HEALTH & SAFETY ════════════════ */}
