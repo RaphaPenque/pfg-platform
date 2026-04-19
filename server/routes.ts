@@ -2662,4 +2662,22 @@ export function registerRoutes(server: Server, app: Express) {
 
   // ── Timesheet Module routes ──────────────────────────────────────────────
   registerTimesheetRoutes(app, requireAuth, requireRole);
+
+  // Force-resend supervisor timesheet link for a specific week (clears existing token so it regenerates)
+  app.post("/api/internal/resend-supervisor-link", requireAuth, requireRole("admin"), async (req: Request, res: Response) => {
+    const { weekId, shift } = req.body; // shift = 'day' | 'night'
+    if (!weekId || !shift) return res.status(400).json({ error: "weekId and shift required" });
+    try {
+      if (shift === 'day') {
+        await db.execute(sql`UPDATE timesheet_weeks SET day_sup_token = NULL, day_sup_name = NULL WHERE id = ${weekId}`);
+      } else {
+        await db.execute(sql`UPDATE timesheet_weeks SET night_sup_token = NULL, night_sup_name = NULL WHERE id = ${weekId}`);
+      }
+      const { sendWeeklySupervisorLinks } = await import('./timesheet-routes');
+      const result = await sendWeeklySupervisorLinks();
+      return res.json({ ok: true, processed: result.processed });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
 }
