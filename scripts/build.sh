@@ -37,6 +37,6 @@ echo "Building server..."
   --external:chromium-bidi \
   --external:@playwright/test
 
-echo "Installing system Chromium for PDF generation..."
-apt-get install -y chromium 2>/dev/null || apt-get install -y chromium-browser 2>/dev/null || true
+echo "Installing Playwright Chromium to persistent location..."
+PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/src/.playwright-browsers npx playwright install chromium 2>&1 | tail -3 || true
 echo "Build complete."
