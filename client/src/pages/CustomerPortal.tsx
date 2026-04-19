@@ -346,6 +346,7 @@ function TimesheetsTab({ projectCode, color }: { projectCode: string; color: str
 // ─── Delays Accordion ────────────────────────────────────────────────────────
 function DelaysAccordion({ delays }: { delays: any[] }) {
   const [open, setOpen] = React.useState(false);
+  const totalHrs = delays.reduce((sum: number, d: any) => sum + (typeof d === 'object' ? Number(d.duration) || 0 : 0), 0);
   if (delays.length === 0) return (
     <div style={{ fontSize: 12, color: "#9CA3AF" }}>No agreed delays recorded this week.</div>
   );
@@ -357,25 +358,52 @@ function DelaysAccordion({ delays }: { delays: any[] }) {
       >
         <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.1em", color: "#6B7C93" }}>
           Agreed Delays <span style={{ color: "#B45309" }}>({delays.length})</span>
+          <span style={{ marginLeft: 10, fontWeight: 500, color: "#9CA3AF", textTransform: "none" as const }}>{totalHrs} hrs total</span>
         </div>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9CA3AF" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       {open && (
-        <div style={{ border: "1px solid #E5E7EB", borderRadius: "0 0 8px 8px", padding: "8px 16px 12px", maxHeight: 320, overflowY: "auto" as const }}>
-          {delays.map((d: any, i: number) => {
-            const desc = typeof d === "string" ? d : d.description || "";
-            const dur = typeof d === "object" ? d.duration : null;
-            const unit = typeof d === "object" ? d.durationUnit || "hrs" : "hrs";
-            const agreed = typeof d === "object" ? d.agreedWithCustomer : null;
-            return (
-              <div key={i} style={{ padding: "9px 0", borderBottom: "1px solid #F3F4F6" }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: "#92400E" }}>{desc}
-                  {dur !== null && dur !== undefined && <span style={{ fontSize: 11, color: "#B45309", marginLeft: 6 }}>{dur} {unit}</span>}
-                  {agreed === "Yes" && <span style={{ background: "#DCFCE7", color: "#166534", fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 4, marginLeft: 8 }}>Customer Agreed</span>}
-                </div>
-              </div>
-            );
-          })}
+        <div style={{ border: "1px solid #E5E7EB", borderRadius: "0 0 8px 8px", overflowX: "auto" as const }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: "#F9FAFB" }}>
+                <th style={{ padding: "8px 12px", textAlign: "left" as const, fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.06em", color: "#9CA3AF", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap" as const }}>Date</th>
+                <th style={{ padding: "8px 12px", textAlign: "left" as const, fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.06em", color: "#9CA3AF", borderBottom: "1px solid #E5E7EB" }}>Description</th>
+                <th style={{ padding: "8px 12px", textAlign: "right" as const, fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.06em", color: "#9CA3AF", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap" as const }}>Duration</th>
+                <th style={{ padding: "8px 12px", textAlign: "left" as const, fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.06em", color: "#9CA3AF", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap" as const }}>Responsibility</th>
+                <th style={{ padding: "8px 12px", textAlign: "left" as const, fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.06em", color: "#9CA3AF", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap" as const }}>Critical Path</th>
+                <th style={{ padding: "8px 12px", textAlign: "left" as const, fontSize: 10, fontWeight: 700, textTransform: "uppercase" as const, letterSpacing: "0.06em", color: "#9CA3AF", borderBottom: "1px solid #E5E7EB", whiteSpace: "nowrap" as const }}>Agreed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {delays.map((d: any, i: number) => {
+                const desc = typeof d === "string" ? d : d.description || "";
+                const dur = typeof d === "object" ? d.duration : null;
+                const unit = typeof d === "object" ? (d.durationUnit || "hrs") : "hrs";
+                const resp = typeof d === "object" ? d.responsibility || "—" : "—";
+                const cp = typeof d === "object" ? d.criticalPath : null;
+                const agreed = typeof d === "object" ? d.agreedWithCustomer : null;
+                const date = typeof d === "object" ? d.date || "" : "";
+                const bg = i % 2 === 0 ? "#fff" : "#FAFAFA";
+                return (
+                  <tr key={i} style={{ background: bg, borderBottom: "1px solid #F3F4F6" }}>
+                    <td style={{ padding: "9px 12px", color: "#6B7280", whiteSpace: "nowrap" as const }}>{date}</td>
+                    <td style={{ padding: "9px 12px", color: "#1F2937", fontWeight: 500 }}>{desc}</td>
+                    <td style={{ padding: "9px 12px", color: "#B45309", fontWeight: 600, textAlign: "right" as const, whiteSpace: "nowrap" as const }}>{dur !== null && dur !== undefined ? `${dur} ${unit}` : "—"}</td>
+                    <td style={{ padding: "9px 12px", color: "#6B7280" }}>{resp}</td>
+                    <td style={{ padding: "9px 12px" }}>
+                      {cp === "Yes" ? <span style={{ background: "#FEE2E2", color: "#991B1B", fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 4 }}>On Critical Path</span>
+                        : cp === "No" ? <span style={{ background: "#F3F4F6", color: "#6B7280", fontSize: 9, fontWeight: 600, padding: "2px 7px", borderRadius: 4 }}>Not Critical</span>
+                        : "—"}
+                    </td>
+                    <td style={{ padding: "9px 12px" }}>
+                      {agreed === "Yes" ? <span style={{ background: "#DCFCE7", color: "#166534", fontSize: 9, fontWeight: 700, padding: "2px 7px", borderRadius: 4 }}>Agreed</span> : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
@@ -384,7 +412,7 @@ function DelaysAccordion({ delays }: { delays: any[] }) {
 
 
 // ─── Weekly Reports Tab ──────────────────────────────────────────────────────
-function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs = [], publishedReports: portalReports = [] }: { projectCode: string; color: string; project: any; standaloneConcernLogs?: any[]; publishedReports?: any[] }) {
+function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs = [], publishedReports: portalReports = [], safetyData: portalSafetyData = {}, teamMembers: portalTeamMembers = [] }: { projectCode: string; color: string; project: any; standaloneConcernLogs?: any[]; publishedReports?: any[]; safetyData?: any; teamMembers?: any[] }) {
   const [expanded, setExpanded] = React.useState<number | null>(null);
 
   const { data: reports = [], isLoading } = useQuery({
@@ -447,7 +475,15 @@ function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs =
       const delays = reps.flatMap((r: any) => Array.isArray(r.delaysLog) ? r.delaysLog.map((d: any) => ({ ...d, date: r.reportDate })) : []);
       const comments = reps.flatMap((r: any) => Array.isArray(r.commentsLog) ? r.commentsLog : []).map((c: any) => ({ date: c.logDate || '', entry: c.entry || '', userName: 'Project Manager' }));
       const tasks = reps.flatMap((r: any) => Array.isArray(r.completedTasks) ? r.completedTasks : []);
-      return { id: -(i+1), weekCommencing: wc, weekEnding: we, hasPdf: false, sentAt: '', aggregatedData: { delays, comments, tasks, safetyStats: { toolboxTalks: 0, observations: 0, nearMisses: 0, incidents: 0 }, teamMembers: [], daysRemaining: 0, progressPct: 0 } };
+      // Build safety stats from portal safetyData for this week
+      const tbtList: any[] = (portalSafetyData?.toolboxTalks?.list || []).filter((t: any) => (t.reportDate || '') >= wc && (t.reportDate || '') <= we);
+      const obsList: any[] = (portalSafetyData?.safetyObservations?.list || []).filter((o: any) => (o.observationDate || '') >= wc && (o.observationDate || '') <= we);
+      const incList: any[] = (portalSafetyData?.incidentReports?.list || []).filter((i: any) => (i.incidentDate || '') >= wc && (i.incidentDate || '') <= we);
+      // Active team members for this week
+      const activeTeam = portalTeamMembers
+        .filter((m: any) => (m.assignment?.startDate || '') <= we && (m.assignment?.endDate || '9999') >= wc)
+        .map((m: any) => ({ name: m.worker?.name || '', role: m.assignment?.role || m.worker?.role || '', shift: m.assignment?.shift || 'Day' }));
+      return { id: -(i+1), weekCommencing: wc, weekEnding: we, hasPdf: false, sentAt: '', aggregatedData: { delays, comments, tasks, safetyStats: { toolboxTalks: tbtList.length, observations: obsList.length, nearMisses: incList.filter((i: any) => i.type === 'near_miss').length, incidents: incList.filter((i: any) => i.type !== 'near_miss').length }, teamMembers: activeTeam, daysRemaining: 0, progressPct: 0 } };
     });
   })();
 
@@ -1239,7 +1275,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
 
         {/* ════════════════ TAB 2: PROJECT REPORTS ════════════════ */}
         {activeTab === "reports" && (
-          <WeeklyReportsTab projectCode={params.projectCode} color={color} project={project} standaloneConcernLogs={standaloneConcernLogs} publishedReports={publishedReports} />
+          <WeeklyReportsTab projectCode={params.projectCode} color={color} project={project} standaloneConcernLogs={standaloneConcernLogs} publishedReports={publishedReports} safetyData={safetyData} teamMembers={teamMembers} />
         )}
 
         {/* ════════════════ TAB 3: HEALTH & SAFETY ════════════════ */}
