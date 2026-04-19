@@ -2746,6 +2746,18 @@ export function registerRoutes(server: Server, app: Express) {
     }
   });
 
+  // DB diagnostic endpoint — internal only
+  app.get("/api/internal/db-check", async (req: Request, res: Response) => {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== 'pfg-internal-2026') return res.status(401).json({ error: 'Unauthorized' });
+    try {
+      const result = await pool.query('SELECT NOW() as now, current_database() as db');
+      return res.json({ ok: true, row: result.rows[0], dbUrl: (process.env.DATABASE_URL || '').substring(0, 30) + '...' });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || e?.constructor?.name, code: e?.code, detail: e?.detail });
+    }
+  });
+
   // Generate a preview customer token for a timesheet week (for internal review only)
   app.post("/api/internal/preview-customer-token", requireAuth, requireRole("admin"), async (req: Request, res: Response) => {
     const { weekId } = req.body;
