@@ -1054,4 +1054,3 @@ export class PostgresStorage implements IStorage {
 }
 
 export const storage: IStorage = new PostgresStorage();
-Storage();
