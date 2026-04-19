@@ -5,7 +5,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { warmupDb } from "./storage";
 import { checkSurveyReminders } from "./survey-scheduler";
-import { checkAndSendWeeklyReports } from "./report-scheduler";
+import { checkAndSendWeeklyReports, autoPublishDailyReports } from "./report-scheduler";
 import { checkTimesheetReminders } from "./timesheet-routes";
 import { pollInboxes } from "./email-poller";
 
@@ -117,10 +117,18 @@ app.use((req, res, next) => {
     checkSurveyReminders().catch(err => console.error("[survey-scheduler] interval error:", err));
   }, 6 * 60 * 60 * 1000);
 
-  // Weekly report send — check every hour, fires on Monday 8am server time
+  // Auto-publish daily reports every Sunday at 17:00 UTC (18:00 BST)
   setInterval(async () => {
     const now = new Date();
-    if (now.getDay() === 1 && now.getUTCHours() === 7) { // 7 UTC = 8 BST
+    if (now.getDay() === 0 && now.getUTCHours() === 17) {
+      autoPublishDailyReports().catch(err => console.error('[auto-publish]', err));
+    }
+  }, 60 * 60 * 1000);
+
+  // Weekly report send — check every hour, fires on Monday 8am BST (7 UTC)
+  setInterval(async () => {
+    const now = new Date();
+    if (now.getDay() === 1 && now.getUTCHours() === 7) {
       checkAndSendWeeklyReports().catch(err => console.error('[report-scheduler]', err));
     }
   }, 60 * 60 * 1000);

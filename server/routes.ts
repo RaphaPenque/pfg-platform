@@ -2674,6 +2674,17 @@ export function registerRoutes(server: Server, app: Express) {
   // ── Timesheet Module routes ──────────────────────────────────────────────
   registerTimesheetRoutes(app, requireAuth, requireRole);
 
+  // Manually trigger auto-publish of all daily reports
+  app.post("/api/internal/auto-publish-reports", requireAuth, requireRole("admin"), async (_req: Request, res: Response) => {
+    try {
+      const { autoPublishDailyReports } = await import('./report-scheduler');
+      await autoPublishDailyReports();
+      return res.json({ ok: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
   // Force-resend supervisor timesheet link for a specific week (clears existing token so it regenerates)
   app.post("/api/internal/resend-supervisor-link", requireAuth, requireRole("admin"), async (req: Request, res: Response) => {
     const { weekId, shift } = req.body; // shift = 'day' | 'night'

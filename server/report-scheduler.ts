@@ -381,3 +381,33 @@ export async function checkAndSendWeeklyReports(): Promise<void> {
     }
   }
 }
+
+// ── Auto-publish all daily reports for active projects ────────────────────────
+// Called every Sunday at 17:00 UTC (18:00 BST) — publishes all unpublished reports
+export async function autoPublishDailyReports(): Promise<void> {
+  console.log('[report-scheduler] Auto-publishing daily reports for all active projects');
+  try {
+    const allProjects = await storage.getProjects();
+    const today = new Date().toISOString().split('T')[0];
+    const activeProjects = allProjects.filter(p =>
+      p.status === 'active' && (!p.endDate || p.endDate >= today)
+    );
+    for (const project of activeProjects) {
+      try {
+        const reports = await storage.getDailyReports(project.id);
+        const unpublished = reports.filter((r: any) => !r.publishedToPortal);
+        for (const report of unpublished) {
+          await storage.updateDailyReport(report.id, { publishedToPortal: true });
+          console.log(`[report-scheduler] Auto-published report ${report.id} (${report.reportDate}) for ${project.code}`);
+        }
+        if (unpublished.length > 0) {
+          console.log(`[report-scheduler] ${project.code}: published ${unpublished.length} report(s)`);
+        }
+      } catch (err) {
+        console.error(`[report-scheduler] Auto-publish error for ${project.code}:`, err);
+      }
+    }
+  } catch (err) {
+    console.error('[report-scheduler] Auto-publish failed:', err);
+  }
+}
