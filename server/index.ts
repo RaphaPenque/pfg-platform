@@ -68,6 +68,15 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Install Playwright Chromium if not already present (needed for PDF generation)
+  try {
+    const { execSync } = await import('child_process');
+    execSync('npx playwright install chromium --with-deps', { stdio: 'pipe', timeout: 120000 });
+    console.log('[startup] Playwright Chromium installed');
+  } catch (e: any) {
+    console.warn('[startup] Playwright install failed (PDF generation may not work):', e.message?.slice(0, 100));
+  }
+
   // Warm up DB connection pool immediately so first user request isn't slow
   await warmupDb();
 

@@ -37,6 +37,4 @@ echo "Building server..."
   --external:chromium-bidi \
   --external:@playwright/test
 
-echo "Installing Playwright Chromium browser and system dependencies..."
-npx playwright install chromium --with-deps 2>&1 | tail -5 || true
 echo "Build complete."
