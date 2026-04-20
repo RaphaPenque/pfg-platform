@@ -112,33 +112,17 @@ app.use((req, res, next) => {
     }
   }, 5000);
 
-  // Start survey reminder scheduler — runs every 6 hours
-  setInterval(() => {
-    checkSurveyReminders().catch(err => console.error("[survey-scheduler] interval error:", err));
-  }, 6 * 60 * 60 * 1000);
+  // ── ALL AUTO-SENDS DISABLED — manual only ──────────────────────────────────
+  // Weekly reports, timesheets, and survey reminders must be triggered manually
+  // from the platform. Re-enable individually when ready.
+  //
+  // setInterval(() => checkSurveyReminders(), 6 * 60 * 60 * 1000);
+  // setInterval(() => autoPublishDailyReports(), 60 * 60 * 1000);     // Sundays 18:00 BST
+  // setInterval(() => checkAndSendWeeklyReports(), 60 * 60 * 1000);   // Mondays 08:00 BST
+  // setInterval(() => checkTimesheetReminders(), 60 * 60 * 1000);     // hourly
+  // ────────────────────────────────────────────────────────────────────────────
 
-  // Auto-publish daily reports every Sunday at 17:00 UTC (18:00 BST)
-  setInterval(async () => {
-    const now = new Date();
-    if (now.getDay() === 0 && now.getUTCHours() === 17) {
-      autoPublishDailyReports().catch(err => console.error('[auto-publish]', err));
-    }
-  }, 60 * 60 * 1000);
-
-  // Weekly report send — check every hour, fires on Monday 8am BST (7 UTC)
-  setInterval(async () => {
-    const now = new Date();
-    if (now.getDay() === 1 && now.getUTCHours() === 7) {
-      checkAndSendWeeklyReports().catch(err => console.error('[report-scheduler]', err));
-    }
-  }, 60 * 60 * 1000);
-
-  // Timesheet reminder check — every hour
-  setInterval(() => {
-    checkTimesheetReminders().catch(err => console.error('[timesheet-reminders] error:', err));
-  }, 60 * 60 * 1000);
-
-  // Poll email inboxes every 15 minutes
+  // Poll email inboxes every 15 minutes (kept active — receive-only, no sends)
   setInterval(() => {
     pollInboxes().catch(err => console.error('[email-poller] Error:', err));
   }, 15 * 60 * 1000);
