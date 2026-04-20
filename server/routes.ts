@@ -2751,8 +2751,7 @@ export function registerRoutes(server: Server, app: Express) {
     const apiKey = req.headers['x-api-key'];
     if (apiKey !== 'pfg-internal-2026') return res.status(401).json({ error: 'Unauthorized' });
     try {
-      const { checkTimesheetReminders } = await import('./timesheet-routes');
-      // Temporarily override the time check by calling autoSendToCustomer directly
+      const { autoSendToCustomer } = await import('./timesheet-routes');
       const pendingRes = await pool.query(`
         SELECT tw.*, p.name as project_name, p.code as project_code,
                p.timesheet_signatory_email, p.customer_project_manager_email, p.site_manager_email
@@ -2762,7 +2761,12 @@ export function registerRoutes(server: Server, app: Express) {
           AND tw.sent_to_customer_at IS NULL
           AND p.status = 'active'
       `);
-      return res.json({ ok: true, pending: pendingRes.rows.length, rows: pendingRes.rows.map((r: any) => ({ id: r.id, project: r.project_code, wc: r.week_commencing })) });
+      const sent: any[] = [];
+      for (const tw of pendingRes.rows) {
+        await autoSendToCustomer(tw);
+        sent.push({ id: tw.id, project: tw.project_code, wc: tw.week_commencing });
+      }
+      return res.json({ ok: true, sent });
     } catch (e: any) {
       return res.status(500).json({ error: e?.message || String(e) });
     }

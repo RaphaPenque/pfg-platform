@@ -1341,6 +1341,45 @@ async function generateBillingSummaryPdf(tw: any, entries: any[], outPath: strin
 
 // ─── Timesheet reminder scheduler ────────────────────────────────────────────
 
+/** Send a pm_approved timesheet to the customer signatory. Exported for manual triggers. */
+export async function autoSendToCustomer(tw: any): Promise<void> {
+  const entriesRes = await db.execute(sql`SELECT * FROM timesheet_entries WHERE timesheet_week_id = ${tw.id} ORDER BY worker_id, entry_date`);
+  const entries = entriesRes.rows as any[];
+  const { hash: realHash, preimage: realPreimage } = buildApprovalHash(entries);
+
+  const rawToken = crypto.randomBytes(32).toString('hex');
+  const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+  const tokenExpiry = new Date(Date.now() + 48 * 60 * 60 * 1000);
+
+  await db.execute(sql`
+    UPDATE timesheet_weeks SET
+      status = 'sent_to_customer',
+      sent_to_customer_at = NOW(),
+      approval_hash = ${realHash},
+      approval_preimage = ${JSON.stringify(realPreimage) as any},
+      customer_token = ${hashedToken},
+      token_expires_at = ${tokenExpiry.toISOString()},
+      token_used_at = NULL
+    WHERE id = ${tw.id}
+  `);
+
+  const signatoryEmail = tw.timesheet_signatory_email || tw.customer_project_manager_email || tw.site_manager_email;
+  const signatoryName = tw.timesheet_signatory_name || tw.customer_project_manager || tw.site_manager || 'Customer Representative';
+
+  if (signatoryEmail) {
+    const approvalUrl = `${APP_URL}/#/timesheet-approval/${rawToken}`;
+    const firstName = signatoryName.split(' ')[0];
+    await sendMail({
+      to: signatoryEmail,
+      subject: `Timesheet approval required — ${tw.project_name || tw.project_code} (w/c ${tw.week_commencing})`,
+      html: buildCustomerApprovalEmail(firstName, tw.project_name || tw.project_code, tw.week_commencing, approvalUrl),
+    });
+    console.log(`[timesheet] Sent to customer ${signatoryEmail} for ${tw.project_code} w/c ${tw.week_commencing}`);
+  } else {
+    console.warn(`[timesheet] No customer email for ${tw.project_code} week ${tw.id} — skipping send`);
+  }
+}
+
 export async function checkTimesheetReminders() {
   try {
     const now = new Date();
