@@ -2913,7 +2913,8 @@ export function registerRoutes(server: Server, app: Express) {
       const wid = parseInt(req.params.weekId);
       const week = await pool.query('SELECT id, status, day_sup_submitted_at, night_sup_submitted_at, pm_approved_at, recalled_at, sent_to_customer_at FROM timesheet_weeks WHERE id = $1', [wid]);
       const entries = await pool.query('SELECT COUNT(*) as cnt, SUM(total_hours) as total_hours FROM timesheet_entries WHERE timesheet_week_id = $1', [wid]);
-      return res.json({ week: week.rows[0], entries: entries.rows[0] });
+      const grtyToken = await pool.query("SELECT portal_access_token FROM projects WHERE code = 'GRTY'");
+      return res.json({ week: week.rows[0], entries: entries.rows[0], grtyPortalToken: grtyToken.rows[0]?.portal_access_token });
     } catch (e: any) { return res.status(500).json({ error: e?.message }); }
   });
 
