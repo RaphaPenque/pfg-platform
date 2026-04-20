@@ -232,7 +232,19 @@ export async function sendReportForProject(
     pdfBuffer = await generateWeeklyReportPdfHtml(reportData as any);
     base64Pdf = pdfBuffer.toString('base64');
   } catch (pdfErr: any) {
-    console.warn(`[report-scheduler] PDF generation skipped (${pdfErr.message?.slice(0, 80)}) — storing data record only`);
+    console.warn(`[report-scheduler] PDF generation skipped (${pdfErr.message?.slice(0, 80)}) — checking DB for stored PDF`);
+    // Fall back to a manually uploaded PDF stored in aggregated_data
+    try {
+      const existingReport = await storage.getWeeklyReportByWeek(project.id, weekStart);
+      const storedB64 = (existingReport?.aggregatedData as any)?.pdfBase64;
+      if (storedB64) {
+        base64Pdf = storedB64;
+        pdfBuffer = Buffer.from(storedB64, 'base64');
+        console.log(`[report-scheduler] Using stored PDF from DB (${pdfBuffer.length} bytes)`);
+      }
+    } catch (dbErr: any) {
+      console.warn(`[report-scheduler] Could not retrieve stored PDF: ${dbErr.message}`);
+    }
   }
 
   const filename = isFinal

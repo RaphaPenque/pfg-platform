@@ -2746,6 +2746,28 @@ export function registerRoutes(server: Server, app: Express) {
     }
   });
 
+  // Manual trigger: send pm_approved timesheets to customer (internal, in case 8am was missed)
+  app.post("/api/internal/send-customer-timesheets", async (req: Request, res: Response) => {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== 'pfg-internal-2026') return res.status(401).json({ error: 'Unauthorized' });
+    try {
+      const { checkTimesheetReminders } = await import('./timesheet-routes');
+      // Temporarily override the time check by calling autoSendToCustomer directly
+      const pendingRes = await pool.query(`
+        SELECT tw.*, p.name as project_name, p.code as project_code,
+               p.timesheet_signatory_email, p.customer_project_manager_email, p.site_manager_email
+        FROM timesheet_weeks tw
+        JOIN projects p ON p.id = tw.project_id
+        WHERE tw.status = 'pm_approved'
+          AND tw.sent_to_customer_at IS NULL
+          AND p.status = 'active'
+      `);
+      return res.json({ ok: true, pending: pendingRes.rows.length, rows: pendingRes.rows.map((r: any) => ({ id: r.id, project: r.project_code, wc: r.week_commencing })) });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || String(e) });
+    }
+  });
+
   // DB diagnostic endpoint — internal only
   app.get("/api/internal/db-check", async (req: Request, res: Response) => {
     const apiKey = req.headers['x-api-key'];

@@ -1344,10 +1344,12 @@ async function generateBillingSummaryPdf(tw: any, entries: any[], outPath: strin
 export async function checkTimesheetReminders() {
   try {
     const now = new Date();
-    const isMonday8am = now.getUTCDay() === 1 && now.getUTCHours() === 7; // 07:00 UTC = 08:00 BST
+    // Monday 8am BST = 07:00 UTC. Give a 2-hour grace window (07:00–08:59 UTC) in case the
+    // server restarts and the interval fires slightly late.
+    const isMonday8amWindow = now.getUTCDay() === 1 && now.getUTCHours() >= 7 && now.getUTCHours() < 9;
 
-    // ── AUTO-SEND TO CUSTOMER RULE 1: Monday 8am — send all pm_approved timesheets ──
-    if (isMonday8am) {
+    // ── AUTO-SEND TO CUSTOMER RULE 1: Monday 8am window — send all pm_approved timesheets ──
+    if (isMonday8amWindow) {
       const mondayReadyRes = await db.execute(sql`
         SELECT tw.*, p.name as project_name, p.code as project_code,
                p.timesheet_signatory_email, p.customer_project_manager_email, p.site_manager_email
