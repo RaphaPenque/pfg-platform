@@ -129,6 +129,15 @@ export async function sendReportForProject(
   }
 
   const { weekStart, weekEnd } = weekBounds(report.reportDate);
+
+  // Belt-and-braces: don't re-send if already sent this week
+  if (!isFinal) {
+    const alreadySent = await storage.getWeeklyReportByWeek(project.id, weekStart);
+    if (alreadySent?.sentAt) {
+      console.log(`[report-scheduler] ${project.code}: already sent for w/c ${weekStart} — skipping duplicate`);
+      return;
+    }
+  }
   const weekEndFormatted = fmtDateDisplay(weekEnd);
 
   const [assignments, allWorkers, allToolboxTalks, allSafetyObs, allIncidents, allComments] = await Promise.all([
@@ -404,8 +413,20 @@ export async function checkAndSendWeeklyReports(): Promise<void> {
     (!p.endDate || p.endDate > today)  // endDate strictly in the future
   );
 
+  // Calculate the current week commencing (Monday)
+  const dayOfWeek = now.getUTCDay(); // 1 = Monday
+  const weekStart = new Date(now);
+  weekStart.setUTCDate(now.getUTCDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+  const weekStartStr = weekStart.toISOString().split('T')[0];
+
   for (const project of activeProjects) {
     try {
+      // Guard: skip if we already sent a report for this week
+      const existing = await storage.getWeeklyReportByWeek(project.id, weekStartStr);
+      if (existing?.sentAt) {
+        console.log(`[report-scheduler] ${project.code}: report already sent for w/c ${weekStartStr} — skipping`);
+        continue;
+      }
       await sendReportForProject(project, false);
     } catch (err) {
       console.error(`[report-scheduler] Error processing project ${project.code}:`, err);
