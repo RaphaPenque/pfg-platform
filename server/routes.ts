@@ -2762,10 +2762,19 @@ export function registerRoutes(server: Server, app: Express) {
     try {
       // Reset to pm_approved so the send-to-customer route can pick it up
       await pool.query(
-        `UPDATE timesheet_weeks SET status = 'pm_approved', sent_to_customer_at = NULL, customer_token = NULL, token_expires_at = NULL WHERE id = $1`,
+        `UPDATE timesheet_weeks SET
+          status = 'draft',
+          sent_to_customer_at = NULL,
+          customer_token = NULL,
+          token_expires_at = NULL,
+          day_sup_submitted_at = NULL,
+          night_sup_submitted_at = NULL,
+          pm_approved_at = NULL,
+          recalled_at = NULL
+        WHERE id = $1`,
         [weekId]
       );
-      return res.json({ ok: true, reset: true, weekId });
+      return res.json({ ok: true, reset: true, weekId, status: 'draft' });
     } catch (e: any) {
       return res.status(500).json({ error: e?.message || String(e) });
     }
