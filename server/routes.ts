@@ -2851,6 +2851,28 @@ export function registerRoutes(server: Server, app: Express) {
     }
   });
 
+  // Force-submit a timesheet week on behalf of supervisors (admin/internal only)
+  app.post("/api/internal/force-submit-timesheet", async (req: Request, res: Response) => {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== 'pfg-internal-2026') return res.status(401).json({ error: 'Unauthorized' });
+    const { weekId } = req.body;
+    if (!weekId) return res.status(400).json({ error: 'weekId required' });
+    try {
+      const now = new Date().toISOString();
+      await pool.query(
+        `UPDATE timesheet_weeks SET
+          status = 'submitted',
+          day_sup_submitted_at = $2,
+          night_sup_submitted_at = $2,
+          submitted_at = $2
+        WHERE id = $1`,
+        [weekId, now]
+      );
+      const row = await pool.query('SELECT id, status, day_sup_submitted_at, night_sup_submitted_at FROM timesheet_weeks WHERE id = $1', [weekId]);
+      return res.json({ ok: true, week: row.rows[0] });
+    } catch (e: any) { return res.status(500).json({ error: e?.message }); }
+  });
+
   // Restore timesheet week timestamps after bad reset
   app.post("/api/internal/restore-tw-timestamps", async (req: Request, res: Response) => {
     const apiKey = req.headers['x-api-key'];

@@ -51,6 +51,8 @@ interface TimesheetWeek {
   night_sup_submitted_at: string | null;
   day_sup_name: string | null;
   night_sup_name: string | null;
+  recalled_at: string | null;
+  sent_to_customer_at: string | null;
 }
 
 interface TimesheetEntry {
@@ -465,8 +467,10 @@ function SupervisorGrid({ week, entries, userRole, onRefresh }: {
   const qc = useQueryClient();
   const [editCell, setEditCell] = useState<{ entryId: number; field: string } | null>(null);
 
-  // Draft (recalled) is editable by PM — all other post-submission statuses are locked
-  const isLocked = week.status === "customer_approved" || week.status === "submitted" || week.status === "pm_approved" || week.status === "sent_to_customer";
+  // Recalled timesheets (pm_approved + recalled_at set) are editable by PM
+  // All other post-submission statuses are locked
+  const isRecalled = week.status === "pm_approved" && !!week.recalled_at;
+  const isLocked = !isRecalled && (week.status === "customer_approved" || week.status === "submitted" || week.status === "pm_approved" || week.status === "sent_to_customer");
 
   const patchMutation = useMutation({
     mutationFn: (data: { id: number; patch: object }) =>
@@ -709,16 +713,11 @@ function PmApprovalPanel({ week, entries, onRefresh }: {
 
       {/* Actions */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        {/* Draft (recalled) — PM can approve directly without re-submission from workers */}
-        {week.status === "draft" && (
-          <button
-            onClick={() => approveMutation.mutate()}
-            disabled={approveMutation.isPending}
-            style={{ background: "#16a34a", color: "#fff", fontWeight: 700, fontSize: 13, padding: "10px 20px", borderRadius: 8, border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
-          >
-            {approveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
-            Approve
-          </button>
+        {/* Recalled timesheets: show a label so PM knows they can edit and send */}
+        {week.status === "pm_approved" && !!week.recalled_at && (
+          <span style={{ fontSize: 12, color: "#7c3aed", fontWeight: 600, padding: "8px 12px", background: "#f5f3ff", borderRadius: 6, border: "1px solid #ddd6fe" }}>
+            ↺ Recalled — edit cells then Send to Customer
+          </span>
         )}
         {(week.status === "submitted" || !!week.day_sup_submitted_at) && week.status !== "pm_approved" && week.status !== "sent_to_customer" && week.status !== "customer_approved" && week.status !== "draft" && (
           <>
