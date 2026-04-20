@@ -465,6 +465,7 @@ function SupervisorGrid({ week, entries, userRole, onRefresh }: {
   const qc = useQueryClient();
   const [editCell, setEditCell] = useState<{ entryId: number; field: string } | null>(null);
 
+  // Draft (recalled) is editable by PM — all other post-submission statuses are locked
   const isLocked = week.status === "customer_approved" || week.status === "submitted" || week.status === "pm_approved" || week.status === "sent_to_customer";
 
   const patchMutation = useMutation({
@@ -708,7 +709,18 @@ function PmApprovalPanel({ week, entries, onRefresh }: {
 
       {/* Actions */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        {(week.status === "submitted" || !!week.day_sup_submitted_at) && week.status !== "pm_approved" && week.status !== "sent_to_customer" && week.status !== "customer_approved" && (
+        {/* Draft (recalled) — PM can approve directly without re-submission from workers */}
+        {week.status === "draft" && (
+          <button
+            onClick={() => approveMutation.mutate()}
+            disabled={approveMutation.isPending}
+            style={{ background: "#16a34a", color: "#fff", fontWeight: 700, fontSize: 13, padding: "10px 20px", borderRadius: 8, border: "none", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
+          >
+            {approveMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+            Approve
+          </button>
+        )}
+        {(week.status === "submitted" || !!week.day_sup_submitted_at) && week.status !== "pm_approved" && week.status !== "sent_to_customer" && week.status !== "customer_approved" && week.status !== "draft" && (
           <>
             <button
               onClick={() => approveMutation.mutate()}

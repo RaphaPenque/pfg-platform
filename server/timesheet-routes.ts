@@ -443,7 +443,8 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
         const twRes = await db.execute(sql`SELECT * FROM timesheet_weeks WHERE id = ${weekId}`);
         const tw = twRes.rows[0] as any;
         if (!tw) return res.status(404).json({ error: "Week not found" });
-        if (tw.status !== "submitted") return res.status(400).json({ error: `Cannot approve from status: ${tw.status}` });
+        // Allow PM to approve from 'submitted' or 'draft' (recalled timesheets — PM edits and reapproves directly)
+        if (tw.status !== "submitted" && tw.status !== "draft") return res.status(400).json({ error: `Cannot approve from status: ${tw.status}` });
 
         // Check if customer sign-off required
         const cfgRes = await db.execute(sql`SELECT customer_signoff_required FROM timesheet_config WHERE project_id = ${tw.project_id}`);
