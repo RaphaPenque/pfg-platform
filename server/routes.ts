@@ -2851,6 +2851,18 @@ export function registerRoutes(server: Server, app: Express) {
     }
   });
 
+  // Quick timesheet week diagnostic
+  app.get("/api/internal/tw-check/:weekId", async (req: Request, res: Response) => {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== 'pfg-internal-2026') return res.status(401).json({ error: 'Unauthorized' });
+    try {
+      const wid = parseInt(req.params.weekId);
+      const week = await pool.query('SELECT id, status, day_sup_submitted_at, night_sup_submitted_at, pm_approved_at, recalled_at, sent_to_customer_at FROM timesheet_weeks WHERE id = $1', [wid]);
+      const entries = await pool.query('SELECT COUNT(*) as cnt, SUM(hours_worked) as total_hours FROM timesheet_entries WHERE timesheet_week_id = $1', [wid]);
+      return res.json({ week: week.rows[0], entries: entries.rows[0] });
+    } catch (e: any) { return res.status(500).json({ error: e?.message }); }
+  });
+
   // DB diagnostic endpoint — internal only
   app.get("/api/internal/db-check", async (req: Request, res: Response) => {
     const apiKey = req.headers['x-api-key'];
