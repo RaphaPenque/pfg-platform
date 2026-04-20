@@ -2772,6 +2772,24 @@ export function registerRoutes(server: Server, app: Express) {
     }
   });
 
+  // Resend weekly report email for a project (internal, API key auth)
+  app.post("/api/internal/resend-weekly-report", async (req: Request, res: Response) => {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== 'pfg-internal-2026') return res.status(401).json({ error: 'Unauthorized' });
+    const { projectCode } = req.body;
+    if (!projectCode) return res.status(400).json({ error: 'projectCode required' });
+    try {
+      const { sendReportForProject } = await import('./report-scheduler');
+      const allProjects = await storage.getProjects();
+      const project = allProjects.find((p: any) => p.code === projectCode.toUpperCase());
+      if (!project) return res.status(404).json({ error: 'Project not found' });
+      await sendReportForProject(project, false);
+      return res.json({ ok: true, project: project.code });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || String(e) });
+    }
+  });
+
   // DB diagnostic endpoint — internal only
   app.get("/api/internal/db-check", async (req: Request, res: Response) => {
     const apiKey = req.headers['x-api-key'];
