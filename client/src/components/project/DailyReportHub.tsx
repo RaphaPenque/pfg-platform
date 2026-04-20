@@ -458,21 +458,25 @@ function PMReportTab({
       const slot = roleSlots?.find((s: any) => s.id === a.roleSlotId);
       const slotPeriods = slot?.periods as Array<{ startDate: string; endDate: string }> | undefined;
       if (slotPeriods && slotPeriods.length > 0) {
-        // Periods exist — check if any covers the date
-        const coveredByPeriod = slotPeriods.some(p => p.startDate <= selectedDate && p.endDate >= selectedDate);
-        if (coveredByPeriod) return true;
-        // No period covers this date — fall through to assignment dates as fallback
-        // (handles case where periods were set incorrectly or worker is in a gap)
+        // Periods defined — worker is only on site if a period covers this exact date
+        return slotPeriods.some(p => p.startDate <= selectedDate && p.endDate >= selectedDate);
       }
-      // Fallback to assignment-level dates
+      // No periods defined — fall back to assignment-level start/end dates
       const start = a.startDate ? a.startDate.slice(0, 10) : null;
       const end = a.endDate ? a.endDate.slice(0, 10) : null;
       if (start && selectedDate < start) return false;
       if (end && selectedDate > end) return false;
       return true;
     });
+    // Deduplicate — one row per worker (take first match)
+    const seen = new Set<number>();
+    const deduped = onSite.filter(a => {
+      if (seen.has(a.workerId)) return false;
+      seen.add(a.workerId);
+      return true;
+    });
     // Sort: role order first, then day before night shift
-    return onSite.sort((a, b) => {
+    return deduped.sort((a, b) => {
       const ra = ROLE_ORDER.indexOf(a.role || "");
       const rb = ROLE_ORDER.indexOf(b.role || "");
       const roleSort = (ra === -1 ? 99 : ra) - (rb === -1 ? 99 : rb);
