@@ -192,6 +192,14 @@ export function registerRoutes(server: Server, app: Express) {
     const project = await storage.getProjectByCode((req.params.code as string).toUpperCase());
     if (!project) return res.status(404).json({ error: "Project not found" });
 
+    // Token validation — required if project has a portal_access_token set
+    if (project.portalAccessToken) {
+      const supplied = (req.query.token as string) || req.headers['x-portal-token'] as string;
+      if (!supplied || supplied !== project.portalAccessToken) {
+        return res.status(401).json({ error: "Invalid or missing portal access token" });
+      }
+    }
+
     const [projectAssignments, allWorkers, rawRoleSlots] = await Promise.all([
       storage.getAssignmentsByProject(project.id),
       storage.getWorkers(),
@@ -514,6 +522,10 @@ export function registerRoutes(server: Server, app: Express) {
       const allProjects = await storage.getProjects();
       const project = allProjects.find(p => p.code === code);
       if (!project) return res.status(404).json({ error: "Project not found" });
+      if (project.portalAccessToken) {
+        const supplied = (req.query.token as string) || req.headers['x-portal-token'] as string;
+        if (!supplied || supplied !== project.portalAccessToken) return res.status(401).json({ error: "Invalid or missing portal access token" });
+      }
       const reports = await storage.getWeeklyReportsByProject(project.id);
       const published = reports.filter(r => r.status === 'published');
       res.json(published.map(r => ({

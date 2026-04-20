@@ -412,13 +412,14 @@ function DelaysAccordion({ delays }: { delays: any[] }) {
 
 
 // ─── Weekly Reports Tab ──────────────────────────────────────────────────────
-function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs = [], publishedReports: portalReports = [], safetyData: portalSafetyData = {}, teamMembers: portalTeamMembers = [] }: { projectCode: string; color: string; project: any; standaloneConcernLogs?: any[]; publishedReports?: any[]; safetyData?: any; teamMembers?: any[] }) {
+function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs = [], publishedReports: portalReports = [], safetyData: portalSafetyData = {}, teamMembers: portalTeamMembers = [], portalToken = null }: { projectCode: string; color: string; project: any; standaloneConcernLogs?: any[]; publishedReports?: any[]; safetyData?: any; teamMembers?: any[]; portalToken?: string | null }) {
   const [expanded, setExpanded] = React.useState<number | null>(null);
+  const tokenParam = portalToken ? `?token=${portalToken}` : '';
 
   const { data: reports = [], isLoading } = useQuery({
-    queryKey: [`/api/portal/${projectCode}/weekly-reports`],
+    queryKey: [`/api/portal/${projectCode}/weekly-reports`, portalToken],
     queryFn: async () => {
-      const res = await fetch(`/api/portal/${projectCode}/weekly-reports`);
+      const res = await fetch(`/api/portal/${projectCode}/weekly-reports${tokenParam}`);
       if (!res.ok) throw new Error("Failed to load reports");
       return res.json() as Promise<Array<{
         id: number;
@@ -541,7 +542,7 @@ function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs =
                   {/* Download PDF — show for real reports with PDF, or offer print for fallback */}
                   {report.hasPdf ? (
                     <a
-                      href={`/api/portal/${projectCode}/weekly-reports/${report.id}/pdf`}
+                      href={`/api/portal/${projectCode}/weekly-reports/${report.id}/pdf${tokenParam}`}
                       download
                       onClick={e => e.stopPropagation()}
                       style={{ fontSize: 11, fontWeight: 600, color: color, background: color + "15", padding: "4px 10px", borderRadius: 5, textDecoration: "none", display: "flex", alignItems: "center", gap: 4 }}
@@ -550,7 +551,7 @@ function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs =
                     </a>
                   ) : (
                     <a
-                      href={`/api/portal/${projectCode}/weekly-reports/print?wc=${report.weekCommencing}`}
+                      href={`/api/portal/${projectCode}/weekly-reports/print?wc=${report.weekCommencing}${portalToken ? `&token=${portalToken}` : ''}`}
                       target="_blank"
                       rel="noreferrer"
                       onClick={e => e.stopPropagation()}
@@ -695,9 +696,20 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
   const [incSearch, setIncSearch] = useState("");
   const [incTypeFilter, setIncTypeFilter] = useState<string>("");
 
+  // Extract portal access token from URL hash query string: /#/portal/GRTY?token=xxx
+  const portalToken = useMemo(() => {
+    const hash = window.location.hash; // e.g. #/portal/GRTY?token=abc
+    const qIndex = hash.indexOf('?');
+    if (qIndex === -1) return null;
+    const qs = new URLSearchParams(hash.slice(qIndex + 1));
+    return qs.get('token');
+  }, []);
+
+  const tokenParam = portalToken ? `?token=${portalToken}` : '';
+
   const { data, isLoading } = useQuery({
-    queryKey: ["/api/portal", params.projectCode],
-    queryFn: () => apiRequest("GET", `/api/portal/${params.projectCode}`).then(r => (r as any).json()),
+    queryKey: ["/api/portal", params.projectCode, portalToken],
+    queryFn: () => apiRequest("GET", `/api/portal/${params.projectCode}${tokenParam}`).then(r => (r as any).json()),
     retry: false,
   });
 
@@ -1296,7 +1308,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
 
         {/* ════════════════ TAB 2: PROJECT REPORTS ════════════════ */}
         {activeTab === "reports" && (
-          <WeeklyReportsTab projectCode={params.projectCode} color={color} project={project} standaloneConcernLogs={standaloneConcernLogs} publishedReports={publishedReports} safetyData={safetyData} teamMembers={teamMembers} />
+          <WeeklyReportsTab projectCode={params.projectCode} color={color} project={project} standaloneConcernLogs={standaloneConcernLogs} publishedReports={publishedReports} safetyData={safetyData} teamMembers={teamMembers} portalToken={portalToken} />
         )}
 
         {/* ════════════════ TAB 3: HEALTH & SAFETY ════════════════ */}

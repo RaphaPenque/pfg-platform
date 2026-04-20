@@ -81,6 +81,7 @@ export const projects = pgTable("projects", {
   siteManagerEmail: text("site_manager_email"),
   timesheetSignatoryName: text("timesheet_signatory_name"),
   timesheetSignatoryEmail: text("timesheet_signatory_email"),
+  portalAccessToken: text("portal_access_token"),
 });
 
 export const insertProjectSchema = createInsertSchema(projects).omit({ id: true });

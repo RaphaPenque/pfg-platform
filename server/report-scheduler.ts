@@ -317,7 +317,10 @@ export async function sendReportForProject(
     ? `Final Project Report — ${project.name}`
     : `Weekly Project Report — ${project.name} — w/e ${weekEndFormatted}`;
 
-  const portalUrl = `${APP_URL}/#/portal/${project.code}`;
+  const portalToken = (project as any).portalAccessToken;
+  const portalUrl = portalToken
+    ? `${APP_URL}/#/portal/${project.code}?token=${portalToken}`
+    : `${APP_URL}/#/portal/${project.code}`;
   const emailHtml = isFinal
     ? buildFinalEmailHtml(project.name, project.code, fmtDateDisplay(project.endDate || ''), pmName, portalUrl)
     : buildEmailHtml(project.name, project.code, weekEndFormatted, pmName, portalUrl);

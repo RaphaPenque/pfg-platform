@@ -152,6 +152,13 @@ export async function runSchemaUpdates() {
     await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS sourcing_contact_email TEXT`);
     await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS customer_project_manager_email TEXT`);
     await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS site_manager_email TEXT`);
+    await db.execute(sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS portal_access_token TEXT`);
+    // Generate tokens for any projects that don't have one yet
+    const projectsWithoutToken = await db.execute(sql`SELECT id FROM projects WHERE portal_access_token IS NULL`);
+    for (const row of projectsWithoutToken.rows as any[]) {
+      const token = require('crypto').randomBytes(32).toString('hex');
+      await db.execute(sql`UPDATE projects SET portal_access_token = ${token} WHERE id = ${row.id}`);
+    }
 
     // ── Work Packages ──
     await db.execute(sql`CREATE TABLE IF NOT EXISTS work_packages (
