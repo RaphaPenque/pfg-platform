@@ -2851,6 +2851,26 @@ export function registerRoutes(server: Server, app: Express) {
     }
   });
 
+  // Restore timesheet week timestamps after bad reset
+  app.post("/api/internal/restore-tw-timestamps", async (req: Request, res: Response) => {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== 'pfg-internal-2026') return res.status(401).json({ error: 'Unauthorized' });
+    const { weekId, status, daySup, nightSup } = req.body;
+    if (!weekId) return res.status(400).json({ error: 'weekId required' });
+    try {
+      await pool.query(
+        `UPDATE timesheet_weeks SET
+          status = $2,
+          day_sup_submitted_at = $3,
+          night_sup_submitted_at = $4
+        WHERE id = $1`,
+        [weekId, status || 'submitted', daySup || null, nightSup || null]
+      );
+      const row = await pool.query('SELECT id, status, day_sup_submitted_at, night_sup_submitted_at FROM timesheet_weeks WHERE id = $1', [weekId]);
+      return res.json({ ok: true, week: row.rows[0] });
+    } catch (e: any) { return res.status(500).json({ error: e?.message }); }
+  });
+
   // Quick timesheet week diagnostic
   app.get("/api/internal/tw-check/:weekId", async (req: Request, res: Response) => {
     const apiKey = req.headers['x-api-key'];
