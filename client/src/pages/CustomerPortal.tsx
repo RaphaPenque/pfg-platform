@@ -697,19 +697,30 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
   const [incTypeFilter, setIncTypeFilter] = useState<string>("");
 
   // Extract portal access token from URL hash query string: /#/portal/GRTY?token=xxx
+  // Note: wouter passes the raw projectCode which may include ?token=... suffix
   const portalToken = useMemo(() => {
-    const hash = window.location.hash; // e.g. #/portal/GRTY?token=abc
-    const qIndex = hash.indexOf('?');
-    if (qIndex === -1) return null;
-    const qs = new URLSearchParams(hash.slice(qIndex + 1));
+    // Try from the projectCode param first (wouter may include it)
+    const qIndex = params.projectCode.indexOf('?');
+    if (qIndex !== -1) {
+      const qs = new URLSearchParams(params.projectCode.slice(qIndex + 1));
+      return qs.get('token');
+    }
+    // Fallback: read from window.location.hash
+    const hash = window.location.hash;
+    const hashQ = hash.indexOf('?');
+    if (hashQ === -1) return null;
+    const qs = new URLSearchParams(hash.slice(hashQ + 1));
     return qs.get('token');
-  }, []);
+  }, [params.projectCode]);
+
+  // Strip token from projectCode if wouter included it
+  const projectCode = params.projectCode.split('?')[0].toUpperCase();
 
   const tokenParam = portalToken ? `?token=${portalToken}` : '';
 
   const { data, isLoading } = useQuery({
-    queryKey: ["/api/portal", params.projectCode, portalToken],
-    queryFn: () => apiRequest("GET", `/api/portal/${params.projectCode}${tokenParam}`).then(r => (r as any).json()),
+    queryKey: ["/api/portal", projectCode, portalToken],
+    queryFn: () => apiRequest("GET", `/api/portal/${projectCode}${tokenParam}`).then(r => (r as any).json()),
     retry: false,
   });
 
@@ -798,7 +809,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
       : [];
 
     return { project, customer, color, teamMembers: uniqueTeamMembers, histogramRows, weekColumns, projectRoleSlots, publishedReports: publishedReports || [], standaloneConcernLogs: standaloneConcernLogs || [], safetyData: safetyData || {}, kpis: kpis || {} };
-  }, [data, params.projectCode]);
+  }, [data, projectCode]);
 
   if (isLoading || !data) return <LoadingSkeleton />;
 
@@ -812,7 +823,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
         <div className="flex items-center justify-center py-32">
           <div className="text-center">
             <h2 className="text-xl font-bold text-pfg-navy mb-2">Project Not Found</h2>
-            <p className="text-sm text-gray-500">No project found with code "{params.projectCode}"</p>
+            <p className="text-sm text-gray-500">No project found with code "{projectCode}"</p>
           </div>
         </div>
       </div>
@@ -1054,12 +1065,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
               >
                 <div style={{ fontSize: 11, fontWeight: 500, color: "#6b7280", letterSpacing: "0.04em", textTransform: "uppercase", marginBottom: 8 }}>On Site Now</div>
                 <div style={{ fontSize: "clamp(1.5rem,1.2rem+1vw,2rem)", fontWeight: 700, letterSpacing: "-0.03em", color: "#111318", lineHeight: 1, marginBottom: 8 }}>
-                  {teamMembers.filter(m => {
-                    const s = m.assignment.startDate ? new Date(m.assignment.startDate) : null;
-                    const e = m.assignment.endDate ? new Date(m.assignment.endDate) : null;
-                    const t = new Date(); t.setHours(0,0,0,0);
-                    return s && e && s <= t && e >= t;
-                  }).length}
+                  {kpis.activeTeam ?? 0}
                 </div>
                 <div style={{ fontSize: 12, color: "#6b7280" }}>Day &amp; Night shifts</div>
               </div>
@@ -1308,7 +1314,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
 
         {/* ════════════════ TAB 2: PROJECT REPORTS ════════════════ */}
         {activeTab === "reports" && (
-          <WeeklyReportsTab projectCode={params.projectCode} color={color} project={project} standaloneConcernLogs={standaloneConcernLogs} publishedReports={publishedReports} safetyData={safetyData} teamMembers={teamMembers} portalToken={portalToken} />
+          <WeeklyReportsTab projectCode={projectCode} color={color} project={project} standaloneConcernLogs={standaloneConcernLogs} publishedReports={publishedReports} safetyData={safetyData} teamMembers={teamMembers} portalToken={portalToken} />
         )}
 
         {/* ════════════════ TAB 3: HEALTH & SAFETY ════════════════ */}

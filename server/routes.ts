@@ -334,10 +334,32 @@ export function registerRoutes(server: Server, app: Express) {
       return sum + dl.length;
     }, 0);
 
+    // Count workers actually on site today (assignment period covers today, not MOB/DEMOB)
+    const todayStr = today.toISOString().split('T')[0];
+    const onSiteWorkerIds = new Set<number>();
+    for (const a of projectAssignments) {
+      if (!PORTAL_STATUSES.includes(a.status as string)) continue;
+      const slot = roleSlots.find((s: any) => s.id === a.roleSlotId);
+      const periods = (slot?.periods || []) as Array<{ startDate: string; endDate: string }>;
+      if (periods.length > 0) {
+        // Has periods — only on site if a period covers today
+        if (periods.some(p => p.startDate <= todayStr && p.endDate >= todayStr)) {
+          onSiteWorkerIds.add(a.workerId);
+        }
+      } else {
+        // No periods — use assignment dates
+        const s = a.startDate ? a.startDate.slice(0, 10) : null;
+        const e = a.endDate ? a.endDate.slice(0, 10) : null;
+        if ((!s || s <= todayStr) && (!e || e >= todayStr)) {
+          onSiteWorkerIds.add(a.workerId);
+        }
+      }
+    }
+
     const kpis = {
       daysRemaining,
       totalDays,
-      activeTeam: Object.keys(workers).length,
+      activeTeam: onSiteWorkerIds.size,
       delayCount: totalDelays,
       safetyObsCount: allSafetyObs.length,
     };
