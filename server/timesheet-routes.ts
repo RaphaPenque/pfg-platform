@@ -798,7 +798,11 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
             approval_email = NULL,
             approval_ip = NULL,
             customer_challenge = NULL,
-            pm_reject_comment = NULL
+            pm_reject_comment = NULL,
+            day_sup_submitted_at = NULL,
+            night_sup_submitted_at = NULL,
+            pm_approved_at = NULL,
+            sent_to_customer_at = NULL
           WHERE id = ${weekId}
         `);
 
