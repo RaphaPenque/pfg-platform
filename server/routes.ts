@@ -2753,6 +2753,24 @@ export function registerRoutes(server: Server, app: Express) {
     }
   });
 
+  // Reset a stuck sent_to_customer timesheet back to pm_approved and resend the customer email
+  app.post("/api/internal/reset-and-resend-timesheet", async (req: Request, res: Response) => {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== 'pfg-internal-2026') return res.status(401).json({ error: 'Unauthorized' });
+    const { weekId } = req.body;
+    if (!weekId) return res.status(400).json({ error: 'weekId required' });
+    try {
+      // Reset to pm_approved so the send-to-customer route can pick it up
+      await pool.query(
+        `UPDATE timesheet_weeks SET status = 'pm_approved', sent_to_customer_at = NULL, customer_token = NULL, token_expires_at = NULL WHERE id = $1`,
+        [weekId]
+      );
+      return res.json({ ok: true, reset: true, weekId });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || String(e) });
+    }
+  });
+
   // Manual trigger: send pm_approved timesheets to customer (internal, in case 8am was missed)
   app.post("/api/internal/send-customer-timesheets", async (req: Request, res: Response) => {
     const apiKey = req.headers['x-api-key'];
