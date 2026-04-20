@@ -1322,8 +1322,10 @@ export function registerRoutes(server: Server, app: Express) {
     if (startDate > endDate) return res.status(400).json({ error: "startDate must be before endDate" });
 
     const existingPeriods = await storage.getRoleSlotPeriods(roleSlotId);
-    if (existingPeriods.length === 0) return res.status(404).json({ error: "Role slot not found or has no initial period" });
-    const projectId = existingPeriods[0].projectId;
+    // Look up the slot directly to get projectId — don't require existing periods
+    const slotRow = await pool.query('SELECT id, project_id FROM role_slots WHERE id = $1', [roleSlotId]);
+    if (!slotRow.rows.length) return res.status(404).json({ error: "Role slot not found" });
+    const projectId = slotRow.rows[0].project_id;
 
     // No overlap within same slot
     const selfOverlap = existingPeriods.find(p => p.startDate <= endDate && p.endDate >= startDate);
@@ -1336,9 +1338,14 @@ export function registerRoutes(server: Server, app: Express) {
       projectId,
       startDate,
       endDate,
-      periodType: periodType || "remob",
+      periodType: periodType || (existingPeriods.length === 0 ? "initial" : "remob"),
       notes: notes || null,
     });
+    // Expand slot date range to encompass all periods
+    const allPeriods = [...existingPeriods, period];
+    const slotStart = allPeriods.map(p => p.startDate).sort()[0];
+    const slotEnd = allPeriods.map(p => p.endDate).sort().reverse()[0];
+    await pool.query('UPDATE role_slots SET start_date = $1, end_date = $2 WHERE id = $3', [slotStart, slotEnd, roleSlotId]);
     await logAudit(req.user!.id, "role_slot_period.create", "role_slot_period", period.id);
     res.status(201).json(period);
   });

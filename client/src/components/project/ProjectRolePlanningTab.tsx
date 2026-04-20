@@ -598,9 +598,9 @@ function SlotGanttRow({
           onClick={() => onEditPeriod({
             periodId: null,
             slotId: slot.id,
-            startDate: slot.startDate,
-            endDate: slot.endDate,
-            periodType: "remob",
+            startDate: "",
+            endDate: "",
+            periodType: periodsToRender.length === 0 ? "initial" : "remob",
             notes: "",
           })}
           className="flex items-center gap-1 text-[10px] font-semibold mt-1 self-start"
