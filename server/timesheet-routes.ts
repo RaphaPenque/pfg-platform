@@ -530,7 +530,8 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
         const twRes = await db.execute(sql`SELECT * FROM timesheet_weeks WHERE id = ${weekId}`);
         const tw = twRes.rows[0] as any;
         if (!tw) return res.status(404).json({ error: "Week not found" });
-        if (tw.status !== "pm_approved") return res.status(400).json({ error: `Cannot send to customer from status: ${tw.status}` });
+        // Allow resend if already sent_to_customer (email may have failed silently before)
+        if (tw.status !== "pm_approved" && tw.status !== "sent_to_customer") return res.status(400).json({ error: `Cannot send to customer from status: ${tw.status}` });
 
         // Generate approval hash from current entries
         const entriesRes = await db.execute(sql`
@@ -574,14 +575,22 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
           || proj?.site_manager
           || "Customer Representative";
 
-        if (signatoryEmail) {
-          const approvalUrl = `${APP_URL}/#/timesheet-approval/${rawToken}`;
-          const firstName = signatoryName.split(" ")[0];
-          await sendMail({
-            to: signatoryEmail,
-            subject: `Timesheet approval required — ${proj?.name || "Project"} (w/c ${tw.week_commencing})`,
-            html: buildCustomerApprovalEmail(firstName, proj?.name || "Project", tw.week_commencing, approvalUrl),
-          });
+        if (!signatoryEmail) {
+          return res.status(400).json({ error: "No customer signatory email configured on this project. Please add a Timesheet Signatory email in the project settings." });
+        }
+
+        const approvalUrl = `${APP_URL}/#/timesheet-approval/${rawToken}`;
+        const firstName = signatoryName.split(" ")[0];
+        const sent = await sendMail({
+          to: signatoryEmail,
+          subject: `Timesheet approval required — ${proj?.name || "Project"} (w/c ${tw.week_commencing})`,
+          html: buildCustomerApprovalEmail(firstName, proj?.name || "Project", tw.week_commencing, approvalUrl),
+        });
+
+        if (!sent) {
+          // Roll back status so PM can retry
+          await db.execute(sql`UPDATE timesheet_weeks SET status = 'pm_approved', sent_to_customer_at = NULL WHERE id = ${weekId}`);
+          return res.status(500).json({ error: "Email failed to send. Please try again. If the problem persists, contact support." });
         }
 
         const updated = await db.execute(sql`SELECT * FROM timesheet_weeks WHERE id = ${weekId}`);
