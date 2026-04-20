@@ -2797,6 +2797,33 @@ export function registerRoutes(server: Server, app: Express) {
     }
   });
 
+  // ONE-TIME: Add James's missing first period to slot 93
+  app.post("/api/internal/add-slot-period", async (req: Request, res: Response) => {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== 'pfg-internal-2026') return res.status(401).json({ error: 'Unauthorized' });
+    const { slotId, projectId, startDate, endDate, periodType } = req.body;
+    if (!slotId || !projectId || !startDate || !endDate) return res.status(400).json({ error: 'slotId, projectId, startDate, endDate required' });
+    try {
+      // Check for overlaps
+      const existing = await pool.query('SELECT * FROM role_slot_periods WHERE role_slot_id = $1', [slotId]);
+      const overlap = existing.rows.find((r: any) => r.start_date <= endDate && r.end_date >= startDate);
+      if (overlap) return res.status(409).json({ error: `Overlaps with ${overlap.start_date}–${overlap.end_date}` });
+      // Insert
+      const ins = await pool.query(
+        `INSERT INTO role_slot_periods (role_slot_id, project_id, start_date, end_date, period_type, notes) VALUES ($1,$2,$3,$4,$5,NULL) RETURNING *`,
+        [slotId, projectId, startDate, endDate, periodType || 'initial']
+      );
+      // Expand slot date range
+      const allPeriods = [...existing.rows, ins.rows[0]];
+      const slotStart = allPeriods.map((p: any) => p.start_date).sort()[0];
+      const slotEnd = allPeriods.map((p: any) => p.end_date).sort().reverse()[0];
+      await pool.query('UPDATE role_slots SET start_date = $1, end_date = $2 WHERE id = $3', [slotStart, slotEnd, slotId]);
+      return res.json({ ok: true, period: ins.rows[0], slotStart, slotEnd });
+    } catch (e: any) {
+      return res.status(500).json({ error: e?.message || String(e) });
+    }
+  });
+
   // DB diagnostic endpoint — internal only
   app.get("/api/internal/db-check", async (req: Request, res: Response) => {
     const apiKey = req.headers['x-api-key'];
