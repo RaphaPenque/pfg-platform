@@ -100,7 +100,7 @@ export async function buildTimesheetEntries(projectId: number) {
       FROM assignments a
       JOIN workers w ON w.id = a.worker_id
       WHERE a.project_id = ${projectId}
-        AND a.status NOT IN ('cancelled','declined')
+        AND a.status IN ('active','flagged')
     `);
     const assignments = asRes.rows as any[];
 
