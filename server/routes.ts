@@ -2940,6 +2940,19 @@ export function registerRoutes(server: Server, app: Express) {
     } catch (e: any) { return res.status(500).json({ error: e?.message }); }
   });
 
+  // Trigger timesheet rebuild for a project (internal only)
+  app.post("/api/internal/rebuild-timesheets", async (req: Request, res: Response) => {
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== 'pfg-internal-2026') return res.status(401).json({ error: 'Unauthorized' });
+    const { projectId } = req.body;
+    if (!projectId) return res.status(400).json({ error: 'projectId required' });
+    try {
+      const { buildTimesheetEntries } = await import('./timesheet-routes');
+      await buildTimesheetEntries(parseInt(projectId));
+      return res.json({ ok: true, projectId });
+    } catch (e: any) { return res.status(500).json({ error: e?.message }); }
+  });
+
   // DB diagnostic endpoint — internal only
   app.get("/api/internal/db-check", async (req: Request, res: Response) => {
     const apiKey = req.headers['x-api-key'];
