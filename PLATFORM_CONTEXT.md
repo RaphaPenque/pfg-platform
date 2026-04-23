@@ -364,17 +364,17 @@ At the start of every platform session, do the following **before accepting any 
 
 ## Health Check — Last Run
 
-> Run: 2026-04-23 | 60 checks | **1 critical failure, 22 warnings, 37 passed**
+> Run: 2026-04-23 | 60 checks | **0 critical failures, 22 warnings, 38 passed**
 
 | Status | Issue |
 |---|---|
-| 🔴 FAIL | 404 duplicate timesheet entries (GNT + GRTY) — see Known Bug in changelog |
+| ✅ PASS | No duplicate timesheet entries — fixed and verified |
 | 🟡 WARN | Projects with no assigned workers: OSKSHM, OLKL1, GMKD, GIL, SZWL, DHC — expected, pending reassignment |
 | 🟡 WARN | Stale headcount fields on GNT, GRTY, OSKSHM, OLKL1, GIL, SZWL, DHC — will be fixed when headcount becomes auto-calculated |
-| 🟡 WARN | Missing timesheet signatory + customer PM emails on OSKSHM, OLKL1, GMKD, GIL, SZWL, DHC — intentional, not customer-facing yet |
+| 🟡 WARN | Missing timesheet signatory + customer PM emails on OSKSHM, OLKL1, GIL, SZWL, DHC — intentional, not customer-facing yet |
 | 🟡 WARN | No daily reports published to portal on OSKSHM, OLKL1, GMKD, GIL, SZWL, DHC — expected, projects not yet active |
-| 🟡 WARN | 18 timesheet entries with 0 hours in approved state — likely caused by the duplicate entry bug |
-| 🟡 WARN | No timesheet week found for current Monday 2026-04-20 — may not have been built yet |
+| 🟡 WARN | 18 timesheet entries with 0 hours in approved state — residual from old duplicate bug, harmless |
+| 🟡 WARN | No timesheet week found for current Monday 2026-04-20 — not yet built |
 
 Run the health check again before starting any new development: `DATABASE_URL=... npm run health-check`
 
@@ -386,6 +386,8 @@ Run the health check again before starting any new development: `DATABASE_URL=..
 
 | Date | Change | Reason | Files |
 |---|---|---|---|
+| 2026-04-23 | Fixed health-check.ts C4 duplicate entries check — threshold was `> 1` (wrong, flags every worker) corrected to `> 7` (one row per day × 7 days = correct) | Health check was reporting 397 false-positive critical failures | `scripts/health-check.ts` |
+| 2026-04-23 | Fixed timesheet rebuild — expanded week-skip guard to include `sent_to_customer` and `pm_approved` weeks; added stale-worker DELETE to clean orphan entries from cancelled assignments | Prevents duplicate entries when assignments are replaced; protects GRTY w/c 13 Apr 2026 (sent_to_customer) from being overwritten | `server/timesheet-routes.ts` |
 | 2026-04-23 | **KNOWN BUG — NOT YET FIXED:** 404 duplicate timesheet entries on GNT and GRTY. Root cause: timesheet rebuild creates new day entries for new assignments without clearing entries from old `removed` assignments on the same worker/week. Fix needed in `server/timesheet-routes.ts` — rebuild logic must check for existing entries before inserting. DO NOT touch timesheet rebuild logic without reading this first. The one real submitted timesheet (GRTY w/c 13 April, status: `sent_to_customer`) must not be affected by the fix. | Known bug | `server/timesheet-routes.ts` |
 | 2026-04-23 | Added `capacity_planning` as valid project status across server, Gantt, Schedule, Allocation pages and health check | HEY-001 and CAR-ST were failing health check with invalid status | `server/routes.ts`, `GanttChart.tsx`, `PersonSchedule.tsx`, `ProjectAllocation.tsx`, `health-check.ts` |
 | 2026-04-23 | Cancelled 66 assignments outside GNT/GRTY on active projects (DHC, GIL, HEY-001, OLKL1, OSKSHM, SZWL) and marked 33 assignments completed on finished projects (TRNS, SALT, SVRN, TRNZN) | Clean slate before fresh reassignment | DB direct |
