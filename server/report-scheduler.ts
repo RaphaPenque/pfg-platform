@@ -176,7 +176,11 @@ export async function sendReportForProject(
   const weekReports = published.filter((r: any) => r.reportDate >= weekStart && r.reportDate <= weekEnd);
 
   // Delays: aggregate across all week's reports (no tasks in PDF)
-  const reportDelays = weekReports.flatMap((r: any) => Array.isArray(r.delaysLog) ? r.delaysLog : []);
+  const reportDelays = weekReports.flatMap((r: any) =>
+    Array.isArray(r.delaysLog)
+      ? r.delaysLog.map((d: any) => ({ ...d, date: r.reportDate || r.date || '' }))
+      : []
+  );
 
   // Comments: entries within the week by logDate OR linked to a week report by reportId
   const weekReportIds = new Set(weekReports.map((r: any) => r.id));
@@ -227,6 +231,12 @@ export async function sendReportForProject(
       nearMisses: (allIncidents as any[]).filter((i: any) => i.incidentType === 'near_miss' && (i.incidentDate || '') >= weekStart && (i.incidentDate || '') <= weekEnd).length,
       incidents: (allIncidents as any[]).filter((i: any) => i.incidentType !== 'near_miss' && (i.incidentDate || '') >= weekStart && (i.incidentDate || '') <= weekEnd).length,
     },
+    safetyObservations: (allSafetyObs as any[]).filter((o: any) =>
+      (o.observationDate || '') >= weekStart && (o.observationDate || '') <= weekEnd
+    ),
+    toolboxTalks: (allToolboxTalks as any[]).filter((t: any) =>
+      (t.reportDate || '') >= weekStart && (t.reportDate || '') <= weekEnd
+    ),
     daysRemaining,
     activeTeam: teamMembers.length,
     progressPct: Math.round((elapsedDays / totalDays) * 100),
