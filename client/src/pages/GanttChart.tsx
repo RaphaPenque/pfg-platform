@@ -140,7 +140,7 @@ export default function GanttChart() {
     // Collect all active assignments with customer info
     const allAssignments = workers.flatMap((w) =>
       w.assignments
-        .filter((a) => activeProjectIds.has(a.projectId))
+        .filter((a) => activeProjectIds.has(a.projectId) && ['active', 'confirmed'].includes(a.status ?? ''))
         .map((a) => ({
           startDate: a.startDate ? new Date(a.startDate) : null,
           endDate: a.endDate ? new Date(a.endDate) : null,
