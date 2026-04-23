@@ -293,6 +293,8 @@ export async function sendReportForProject(
         })),
         tasks: weekReports.flatMap((r: any) => Array.isArray(r.completedTasks) ? r.completedTasks : []),
         safetyStats: reportData.safetyData,
+        toolboxTalks: reportData.toolboxTalks,
+        safetyObservations: reportData.safetyObservations,
         teamMembers,
         daysRemaining,
         progressPct: reportData.progressPct,
