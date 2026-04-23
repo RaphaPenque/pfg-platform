@@ -358,7 +358,22 @@ function OverviewTab({
               </div>
             </div>
             <div>
-              <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>Headcount</span>
+              <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>On Site Today</span>
+              <div className="mt-0.5">
+                {(() => {
+                  const today = new Date().toISOString().slice(0, 10);
+                  const liveHeadcount = assignments.filter((a: any) =>
+                    a.projectId === project.id &&
+                    ['active', 'confirmed'].includes(a.status ?? '') &&
+                    (a.startDate ?? '') <= today &&
+                    (a.endDate == null || a.endDate >= today)
+                  ).length;
+                  return <span className="text-lg font-bold" style={{ color: "var(--pfg-navy)" }}>{liveHeadcount}</span>;
+                })()}
+              </div>
+            </div>
+            <div>
+              <span className="text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--pfg-steel)" }}>Target Headcount</span>
               <div className="mt-0.5">
                 <InlineField value={project.headcount} onSave={saveField("headcount")} type="number" canEdit={canEdit} placeholder="0" />
               </div>
