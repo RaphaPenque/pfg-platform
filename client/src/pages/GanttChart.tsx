@@ -119,7 +119,7 @@ export default function GanttChart() {
     });
 
     // Summary stats — only count active
-    const activeProjects = projects.filter((p) => ["active", "confirmed", "completed"].includes(p.status));
+    const activeProjects = projects.filter((p) => p.status === "active" || p.status === "confirmed" || p.status === "completed");
     const totalPositions = projectRows
       .filter((r) => r.status === "active")
       .reduce((sum, r) => sum + r.headcount, 0);
