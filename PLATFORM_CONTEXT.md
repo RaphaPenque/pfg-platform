@@ -460,6 +460,26 @@ Run the health check again before starting any new development: `DATABASE_URL=..
 - role_slot_periods has NO worker_id or status columns in this codebase
 - Worker assignment is via the assignments table (assignment → role_slot → role_slot_periods)
 
+### 2026-04-23 (late evening) — Role Slot Deletion Refinement + PM Permissions
+
+**Fix — Role slot deletion refinement (commit fcbaea3):**
+- Treat cancelled/completed assignments as safe to cascade-delete (same as null-worker placeholders)
+- Only active/confirmed worker assignments now block role slot deletion
+- Fixes: slots with cancelled assignments were incorrectly blocking deletion
+
+**Fix — PM permissions match Resource Manager (commit 0294af9):**
+- Add Worker button on Workforce Table now visible to project_manager role (was admin/RM only — UI/server mismatch)
+- POST/PATCH/DELETE /api/role-slots now require admin/resource_manager/project_manager (previously auth-only — security gap closed)
+- PATCH /api/projects/:id now allows resource_manager (fixes Commercial tab 403 for RMs)
+- ProjectHubDetail.tsx required no changes — PMs already paired with RMs via isAdminOrPM at every tab/access check
+
+**Remaining priority list:**
+1. Re-assign workers to projects (DHC, GIL, OSKSHM, OLKL1, SZWL, HEY-001, CAR-ST, GNT)
+2. Clean up stale timesheet_entries after workforce reassignment (one-off DB script)
+3. Review completed project data accuracy (TRNS, SALT, SVRN, TRNZN)
+4. Add health check coverage for generated document content (PDF data validation)
+5. Piece 2 — Timesheet stale worker display (will self-resolve after reassignment + cleanup script)
+
 | 2026-04-21 | Added portal access token per-project | Secure customer portal access | `shared/schema.ts`, `server/routes.ts` |
 | 2026-04-21 | Fixed On Site Now KPI to use server-side period-aware count | Frontend count was wrong | `server/routes.ts`, `client/src/hooks/use-dashboard-data.ts` |
 | 2026-04-20 | DISABLED all auto-sends | Mass duplicate emails during restarts | `server/index.ts` |
