@@ -137,7 +137,7 @@ export async function buildTimesheetEntries(projectId: number) {
         WHERE project_id = ${projectId} AND week_commencing = ${weekComm}::date
       `);
       const tw = twRes.rows[0] as any;
-      if (!tw || tw.status === 'customer_approved') {
+      if (!tw || ['customer_approved', 'sent_to_customer', 'pm_approved'].includes(tw.status)) {
         cur.setUTCDate(cur.getUTCDate() + 7);
         continue;
       }
@@ -150,6 +150,26 @@ export async function buildTimesheetEntries(projectId: number) {
           DELETE FROM timesheet_entries WHERE timesheet_week_id = ${twId}
         `);
       }
+
+      // Delete entries for workers who are no longer assigned to this week
+      // Catches orphan rows left by cancelled/replaced assignments
+      const weekStart = new Date(cur);
+      const weekEnd = new Date(cur);
+      weekEnd.setUTCDate(weekEnd.getUTCDate() + 6);
+      const weekStartStr = weekStart.toISOString().slice(0, 10);
+      const weekEndStr = weekEnd.toISOString().slice(0, 10);
+      await db.execute(sql`
+        DELETE FROM timesheet_entries
+        WHERE timesheet_week_id = ${twId}
+          AND worker_id NOT IN (
+            SELECT DISTINCT a.worker_id
+            FROM assignments a
+            WHERE a.project_id = ${projectId}
+              AND a.status IN ('active','flagged','confirmed')
+              AND a.start_date <= ${weekEndStr}::date
+              AND (a.end_date IS NULL OR a.end_date >= ${weekStartStr}::date)
+          )
+      `);
 
       // Build entries for each worker
       for (const asgn of assignments) {
