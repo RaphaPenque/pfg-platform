@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { Link, useLocation } from "wouter";
 import { useDashboardData, type DashboardProject, type DashboardRoleSlot, type DashboardAssignment } from "@/hooks/use-dashboard-data";
 import { OEM_BRAND_COLORS, PROJECT_CUSTOMER, calcPeakHeadcount, OEM_OPTIONS, EQUIPMENT_TYPES } from "@/lib/constants";
@@ -308,6 +308,25 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
+  const codeManuallyEdited = useRef(false);
+
+  useEffect(() => {
+    if (!form.customer || form.customer.trim().length < 2) return;
+    if (codeManuallyEdited.current) return;
+
+    let cancelled = false;
+    apiRequest("POST", "/api/projects/generate-code", { customer: form.customer.trim() })
+      .then(r => (r as any).json())
+      .then((data: { code: string }) => {
+        if (!cancelled && !codeManuallyEdited.current) {
+          set("code", data.code);
+        }
+      })
+      .catch(() => {});
+
+    return () => { cancelled = true; };
+  }, [form.customer]);
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.code.trim()) {
@@ -406,9 +425,12 @@ function CreateProjectModal({ onClose }: { onClose: () => void }) {
               <label className={labelCls} style={{ color: "var(--pfg-steel)" }}>Project Code *</label>
               <input
                 className={inputCls}
-                placeholder="e.g. GNT-001"
+                placeholder="Auto-generated from customer"
                 value={form.code}
-                onChange={e => set("code", e.target.value)}
+                onChange={e => {
+                  codeManuallyEdited.current = true;
+                  set("code", e.target.value);
+                }}
                 required
                 style={{ borderColor: "hsl(var(--border))" }}
               />
