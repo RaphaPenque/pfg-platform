@@ -368,6 +368,7 @@ At the start of every platform session, do the following **before accepting any 
 
 | Date | Change | Reason | Files |
 |---|---|---|---|
+| 2026-04-23 | Fixed customer portal loading (grey boxes) — added `/api/portal/*` to auth middleware bypass | Customers with no session cookie were being blocked by auth middleware before reaching portal API | `server/routes.ts` line 795 |
 | 2026-04-21 | Added portal access token per-project | Secure customer portal access | `shared/schema.ts`, `server/routes.ts` |
 | 2026-04-21 | Fixed On Site Now KPI to use server-side period-aware count | Frontend count was wrong | `server/routes.ts`, `client/src/hooks/use-dashboard-data.ts` |
 | 2026-04-20 | DISABLED all auto-sends | Mass duplicate emails during restarts | `server/index.ts` |
