@@ -77,17 +77,43 @@ export default function GanttChart() {
       const color = getProjectColorFromProject(p);
       const status = (p.status || "active") as ProjectStatus;
 
-      // Count active assignments
-      const assignedCount = workers.reduce((count, w) => {
-        return count + w.assignments.filter((a) => a.projectId === p.id && a.status === "active").length;
-      }, 0);
+      // Compute peak headcount: max simultaneous workers on any day during the project
+      // Use assignment-level date ranges for accuracy; include active + confirmed
+      const projectAssignments = workers.flatMap(w =>
+        w.assignments.filter((a: any) =>
+          a.projectId === p.id &&
+          ['active', 'confirmed'].includes(a.status ?? '') &&
+          a.startDate != null &&
+          a.endDate != null
+        )
+      );
+
+      let peakHeadcount = 0;
+      if (projectAssignments.length > 0 && p.startDate && p.endDate) {
+        const rangeStart = new Date(p.startDate);
+        const rangeEnd = new Date(p.endDate);
+        // Sample every 7 days to approximate peak without O(n*days) cost
+        for (let d = new Date(rangeStart); d <= rangeEnd; d.setUTCDate(d.getUTCDate() + 7)) {
+          const dayStr = d.toISOString().slice(0, 10);
+          const count = projectAssignments.filter((a: any) =>
+            a.startDate <= dayStr && a.endDate >= dayStr
+          ).length;
+          if (count > peakHeadcount) peakHeadcount = count;
+        }
+        // Also check final day
+        const endStr = p.endDate;
+        const endCount = projectAssignments.filter((a: any) =>
+          a.startDate <= endStr && a.endDate >= endStr
+        ).length;
+        if (endCount > peakHeadcount) peakHeadcount = endCount;
+      }
 
       return {
         project: p,
         startMonth: startMonth ?? 0,
         endMonth: endMonth ?? 11,
         color,
-        headcount: assignedCount || p.headcount || 0,
+        headcount: peakHeadcount || p.headcount || 0,
         status,
       };
     });
