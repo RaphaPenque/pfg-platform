@@ -432,6 +432,34 @@ Run the health check again before starting any new development: `DATABASE_URL=..
 - Period splitting + demob action from Team tab
 - Timesheet filter: show workers whose assignment period overlaps the selected week
 
+### 2026-04-23 (evening) — Role Planning + Team Tab + Timesheet Redesign (Piece 2)
+
+**2A — Migrate multi-qty role slots (commit d20cb0f):**
+- Migration script expanded 23 multi-qty role_slots into individual quantity-1 slots
+- 83 slots → 152 slots. All periods copied to new slots. Ran atomically in one transaction.
+- Script: scripts/migrate-multi-qty-slots.ts
+
+**2B — Remove QTY from role slot creation (commit 62b02ab):**
+- Removed QTY input field from frontend form (ProjectRolePlanningTab.tsx)
+- Backend POST /api/role-slots now hardcodes quantity: 1, ignores any qty in request body
+- One slot = one named position. Add multiple slots for multiple workers in the same role.
+
+**2C — Demob action + period splitting (commit dd5c3c6):**
+- New endpoint: POST /api/role-slot-periods/:id/demob — takes { demobDate }
+- Splits period at demob date: current period end_date = demobDate, new 'remob' period created for remainder (worker_id = NULL)
+- If demobDate == endDate: marks period as completed, no split
+- Demob button added to Active Personnel tab in Team tab with inline date picker
+
+**2D — Timesheet worker filter (commit 4e34745):**
+- Timesheet now only shows workers whose role_slot_period overlaps the selected week
+- Overlap check: period.start_date <= weekEnd AND period.end_date >= weekStart
+- Workers demobbed mid-week still appear on that week's timesheet
+- Fix applied in server/timesheet-routes.ts (buildTimesheetEntries)
+
+**Note on role_slot_periods schema:**
+- role_slot_periods has NO worker_id or status columns in this codebase
+- Worker assignment is via the assignments table (assignment → role_slot → role_slot_periods)
+
 | 2026-04-21 | Added portal access token per-project | Secure customer portal access | `shared/schema.ts`, `server/routes.ts` |
 | 2026-04-21 | Fixed On Site Now KPI to use server-side period-aware count | Frontend count was wrong | `server/routes.ts`, `client/src/hooks/use-dashboard-data.ts` |
 | 2026-04-20 | DISABLED all auto-sends | Mass duplicate emails during restarts | `server/index.ts` |
