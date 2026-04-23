@@ -384,6 +384,16 @@ Run the health check again before starting any new development: `DATABASE_URL=..
 
 > Keep a running log of significant changes. Most recent first. Format: `YYYY-MM-DD | What changed | Why | Files touched`
 
+### 2026-04-23 — PDF Generation Fix + Report Regeneration
+- Fixed `server/report-scheduler.ts`: safety observations array, toolbox talks array, and delay report dates were not being passed to the PDF generator. Generator was correct; scheduler was only passing scalar counts.
+- Fixed `server/routes.ts` (one-off regenerate endpoint): comment mapping used `{ shift, text }` but generator expected `{ entry, userName }` — caused split error. Fixed to match type.
+- Regenerated GRTY w/c 13 Apr (weekly_reports id=1) PDF with corrected data: obsCount=6, tbtCount=7, delayCount=8.
+- One-off regenerate endpoint removed after successful use.
+- Auto-generated project codes: new format PREFIX-YEAR-SEQ (e.g. GEV-2026-001), auto-populated on project creation form, duplicate 409 handling added.
+- Headcount variants (3): project overview live count + target field, Gantt peak headcount (date-aware), demand curve includes confirmed assignments.
+- Duplicate timesheet fix: expanded skip guard (sent_to_customer, pm_approved) + stale-worker DELETE.
+- Health-check C4 threshold fixed: >1 → >7 (was causing false positive on legitimate daily reports).
+
 | Date | Change | Reason | Files |
 |---|---|---|---|
 | 2026-04-23 | Add duplicate code handling to POST /api/projects — returns 409 instead of raw DB error on duplicate code | Previously surfaced as unhandled 500 | `server/routes.ts` |
