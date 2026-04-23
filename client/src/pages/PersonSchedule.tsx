@@ -7,6 +7,8 @@ import { downloadCSV } from "@/lib/csv-export";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const CURRENT_YEAR = 2026;
 
+const VISIBLE_ASSIGNMENT_STATUSES = new Set(['active', 'confirmed', 'completed', 'pending_confirmation', 'flagged']);
+
 type ProjectStatus = "active" | "potential" | "capacity_planning" | "completed" | "cancelled";
 
 function LoadingSkeleton() {
@@ -335,8 +337,10 @@ function PersonRow({
   const util = calcUtilisation(worker.assignments);
   const utilColor = util.pct >= 80 ? "var(--green)" : util.pct >= 50 ? "var(--amber)" : "var(--red)";
 
-  // Only show bars for assignments in visible projects
-  const visibleAssignments = worker.assignments.filter((a) => visibleProjectIds.has(a.projectId));
+  // Only show bars for assignments in visible projects and with a visible status
+  const visibleAssignments = worker.assignments.filter(
+    (a) => visibleProjectIds.has(a.projectId) && a.status != null && VISIBLE_ASSIGNMENT_STATUSES.has(a.status)
+  );
 
   // Build assignment bars — use assignment dates as primary source.
   // Slot periods can be stale/incorrect (e.g. set to a future window that doesn't match
