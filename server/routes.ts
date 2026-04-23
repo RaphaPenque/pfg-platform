@@ -1005,6 +1005,47 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(project);
   });
 
+  app.post("/api/projects/generate-code", requireAuth, async (req: Request, res: Response) => {
+    const { customer } = req.body;
+    if (!customer || typeof customer !== "string") {
+      return res.status(400).json({ error: "customer is required" });
+    }
+
+    // Derive 3-char prefix from customer name
+    // Take first 3 uppercase letters from the name, stripping spaces/punctuation
+    const prefix = customer
+      .toUpperCase()
+      .replace(/[^A-Z]/g, "")
+      .slice(0, 3);
+
+    if (prefix.length < 2) {
+      return res.status(400).json({ error: "Cannot derive prefix from customer name" });
+    }
+
+    const year = new Date().getFullYear();
+
+    // Find highest existing sequence for this prefix+year
+    const existing = await db.execute(sql`
+      SELECT code FROM projects
+      WHERE code ~ ${`^${prefix}-${year}-\\d+$`}
+      ORDER BY code DESC
+      LIMIT 1
+    `);
+
+    let nextSeq = 1;
+    if (existing.rows.length > 0) {
+      const lastCode = (existing.rows[0] as any).code as string;
+      const parts = lastCode.split("-");
+      const lastSeq = parseInt(parts[parts.length - 1], 10);
+      if (!isNaN(lastSeq)) nextSeq = lastSeq + 1;
+    }
+
+    const seq = String(nextSeq).padStart(3, "0");
+    const code = `${prefix}-${year}-${seq}`;
+
+    return res.json({ code });
+  });
+
   app.post("/api/projects", requireAuth, requireRole("admin", "project_manager", "resource_manager"), async (req: Request, res: Response) => {
     // Resource managers can only create capacity planning projects
     if (req.user!.role === "resource_manager" && req.body.status !== "capacity_planning") {
