@@ -1037,7 +1037,7 @@ export function registerRoutes(server: Server, app: Express) {
 
   const handleProjectStatus = async (req: Request, res: Response) => {
     const { status } = req.body;
-    if (!status || !["active", "completed", "cancelled", "potential"].includes(status)) {
+    if (!status || !["active", "completed", "cancelled", "potential", "capacity_planning"].includes(status)) {
       return res.status(400).json({ error: "Invalid status" });
     }
     // Cancel requires role check
@@ -1072,7 +1072,7 @@ export function registerRoutes(server: Server, app: Express) {
   app.delete("/api/projects/:id", requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
     const project = await storage.getProject(parseInt(req.params.id));
     if (!project) return res.status(404).json({ error: "Project not found" });
-    if (project.status !== "potential" && project.status !== "cancelled") {
+    if (project.status !== "potential" && project.status !== "cancelled" && project.status !== "capacity_planning") {
       return res.status(400).json({ error: "Only potential or cancelled projects can be deleted. Cancel the project first." });
     }
     // Release any remaining assignments before deleting

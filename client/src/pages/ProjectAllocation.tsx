@@ -81,7 +81,7 @@ interface RoleSlotDraft {
   shift: string;
 }
 
-type ProjectStatus = "active" | "potential" | "completed" | "cancelled";
+type ProjectStatus = "active" | "potential" | "capacity_planning" | "completed" | "cancelled";
 
 // ─── Confirm Dialog ──────────────────────────────────────────────
 
@@ -146,6 +146,7 @@ function ConfirmDialog({
 const STATUS_FILTERS: { key: ProjectStatus; label: string; defaultOn: boolean }[] = [
   { key: "active", label: "Active", defaultOn: true },
   { key: "potential", label: "Potential", defaultOn: true },
+  { key: "capacity_planning", label: "Capacity Planning", defaultOn: true },
   { key: "completed", label: "Completed", defaultOn: false },
   { key: "cancelled", label: "Cancelled", defaultOn: false },
 ];
@@ -2785,7 +2786,7 @@ export default function ProjectAllocation() {
   const { data, isLoading } = useDashboardData();
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [activeFilters, setActiveFilters] = useState<Set<ProjectStatus>>(() => new Set<ProjectStatus>(["active", "potential"]));
+  const [activeFilters, setActiveFilters] = useState<Set<ProjectStatus>>(() => new Set<ProjectStatus>(["active", "potential", "capacity_planning"]));
 
   const handleToggleFilter = (status: ProjectStatus) => {
     setActiveFilters((prev) => {
@@ -2829,7 +2830,7 @@ export default function ProjectAllocation() {
     })
     .sort((a, b) => {
       // Sort: active first, then potential, then completed, then cancelled
-      const statusOrder: Record<string, number> = { active: 0, potential: 1, completed: 2, cancelled: 3 };
+      const statusOrder: Record<string, number> = { active: 0, potential: 1, capacity_planning: 1, completed: 2, cancelled: 3 };
       const aOrder = statusOrder[getEffectiveStatus(a.project)] ?? 0;
       const bOrder = statusOrder[getEffectiveStatus(b.project)] ?? 0;
       if (aOrder !== bOrder) return aOrder - bOrder;

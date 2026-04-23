@@ -8,7 +8,7 @@ const FTE_BASELINE = 54;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const CURRENT_YEAR = 2026;
 
-type ProjectStatus = "active" | "potential" | "completed" | "cancelled";
+type ProjectStatus = "active" | "potential" | "capacity_planning" | "completed" | "cancelled";
 
 function LoadingSkeleton() {
   return (
@@ -43,13 +43,14 @@ function dateToWeekIndex(dateStr: string): number {
 const STATUS_FILTERS: { key: ProjectStatus; label: string; defaultOn: boolean }[] = [
   { key: "active", label: "Active", defaultOn: true },
   { key: "potential", label: "Potential", defaultOn: true },
+  { key: "capacity_planning", label: "Capacity Planning", defaultOn: true },
   { key: "completed", label: "Completed", defaultOn: false },
   { key: "cancelled", label: "Cancelled", defaultOn: false },
 ];
 
 export default function GanttChart() {
   const { data, isLoading } = useDashboardData();
-  const [activeFilters, setActiveFilters] = useState<Set<ProjectStatus>>(() => new Set<ProjectStatus>(["active", "potential"]));
+  const [activeFilters, setActiveFilters] = useState<Set<ProjectStatus>>(() => new Set<ProjectStatus>(["active", "potential", "capacity_planning"]));
 
   const handleToggleFilter = (status: ProjectStatus) => {
     setActiveFilters((prev) => {

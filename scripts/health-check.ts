@@ -372,7 +372,7 @@ async function main() {
   section("D. Project KPI Accuracy");
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const activeProjects = await q(`SELECT * FROM projects WHERE status IN ('active', 'potential')`);
+  const activeProjects = await q(`SELECT * FROM projects WHERE status IN ('active', 'potential', 'capacity_planning')`);
 
   for (const project of activeProjects) {
     const code = project.code;
@@ -461,7 +461,7 @@ async function main() {
   // D5 — Project statuses are valid values
   const invalidStatuses = await q(`
     SELECT code, status FROM projects
-    WHERE status NOT IN ('active', 'potential', 'completed', 'cancelled')
+    WHERE status NOT IN ('active', 'potential', 'capacity_planning', 'completed', 'cancelled')
   `);
   check("All project statuses are valid", invalidStatuses.length === 0,
     invalidStatuses.length > 0 ? `Invalid statuses: ${invalidStatuses.map((p: any) => `${p.code}=${p.status}`).join(", ")}` : undefined);

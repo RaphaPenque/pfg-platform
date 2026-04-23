@@ -7,7 +7,7 @@ import { downloadCSV } from "@/lib/csv-export";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const CURRENT_YEAR = 2026;
 
-type ProjectStatus = "active" | "potential" | "completed" | "cancelled";
+type ProjectStatus = "active" | "potential" | "capacity_planning" | "completed" | "cancelled";
 
 function LoadingSkeleton() {
   return (
@@ -41,6 +41,7 @@ function dateToDayFraction(dateStr: string): number {
 const STATUS_FILTERS: { key: ProjectStatus; label: string }[] = [
   { key: "active", label: "Active" },
   { key: "potential", label: "Potential" },
+  { key: "capacity_planning", label: "Capacity Planning" },
   { key: "completed", label: "Completed" },
   { key: "cancelled", label: "Cancelled" },
 ];
