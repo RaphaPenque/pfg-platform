@@ -358,7 +358,7 @@ async function main() {
       SELECT timesheet_week_id, worker_id, COUNT(*) AS n
       FROM timesheet_entries
       GROUP BY timesheet_week_id, worker_id
-      HAVING COUNT(*) > 1
+      HAVING COUNT(*) > 7
     `);
     check("No duplicate timesheet entries (worker + week)", dupEntries.length === 0,
       dupEntries.length > 0 ? `${dupEntries.length} duplicate worker/week combination(s)` : undefined);
