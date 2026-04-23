@@ -1607,13 +1607,13 @@ export function registerRoutes(server: Server, app: Express) {
       const id = parseInt(req.params.id);
       // Check for real worker assignments on this slot
       const realAssignments = await db.execute(
-        sql`SELECT id FROM assignments WHERE role_slot_id = ${id} AND worker_id IS NOT NULL LIMIT 1`
+        sql`SELECT id FROM assignments WHERE role_slot_id = ${id} AND worker_id IS NOT NULL AND status NOT IN ('cancelled', 'completed') LIMIT 1`
       );
       if (realAssignments.rows.length > 0) {
         return res.status(409).json({ error: "Cannot delete: this slot has workers assigned. Remove them from the Team tab first." });
       }
       // Safe to delete — first cascade-delete any placeholder (no worker) assignments
-      await db.execute(sql`DELETE FROM assignments WHERE role_slot_id = ${id} AND worker_id IS NULL`);
+      await db.execute(sql`DELETE FROM assignments WHERE role_slot_id = ${id} AND (worker_id IS NULL OR status IN ('cancelled', 'completed'))`);
       await storage.deleteRoleSlot(id);
       await logAudit(req.user!.id, "role_slot.delete", "role_slot", id);
       res.status(204).send();
