@@ -1053,9 +1053,17 @@ export function registerRoutes(server: Server, app: Express) {
     }
     const parsed = insertProjectSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: parsed.error });
-    const project = await storage.createProject(parsed.data);
-    await logAudit(req.user!.id, "project.create", "project", project.id, project.name);
-    res.status(201).json(project);
+    try {
+      const project = await storage.createProject(parsed.data);
+      await logAudit(req.user!.id, "project.create", "project", project.id, project.name);
+      return res.status(201).json(project);
+    } catch (err: any) {
+      if (err.code === "23505") {
+        return res.status(409).json({ error: "Project code already exists" });
+      }
+      console.error("[project.create] error:", err.message);
+      return res.status(500).json({ error: "Failed to create project" });
+    }
   });
 
   app.patch("/api/projects/:id", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
