@@ -219,7 +219,7 @@ export async function sendReportForProject(
     pmName,
     completedTasks: [], // Tasks removed from PDF — shown on portal instead
     delaysLog: reportDelays,
-    commentsEntries: reportComments.map((c: any) => ({
+    commentsEntries: reportComments.filter((c: any) => (c.entry || '').trim()).map((c: any) => ({
       date: c.enteredAt ? new Date(c.enteredAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }) : '',
       entry: c.entry || '',
       userName: '',
@@ -286,7 +286,7 @@ export async function sendReportForProject(
         weekStart,
         weekEnd,
         delays: reportDelays,
-        comments: reportComments.map((c: any) => ({
+        comments: reportComments.filter((c: any) => (c.entry || '').trim()).map((c: any) => ({
           date: c.logDate || c.enteredAt?.slice(0, 10) || '',
           entry: c.entry || '',
           userName: (c as any).userName || '',
