@@ -386,6 +386,9 @@ Run the health check again before starting any new development: `DATABASE_URL=..
 
 | Date | Change | Reason | Files |
 |---|---|---|---|
+| 2026-04-23 | Add duplicate code handling to POST /api/projects — returns 409 instead of raw DB error on duplicate code | Previously surfaced as unhandled 500 | `server/routes.ts` |
+| 2026-04-23 | Auto-populate project code from customer name on project creation form — calls generate-code endpoint, user can override, code resets on modal close | Eliminates free-text code entry errors | `client/src/pages/ProjectHub.tsx` |
+| 2026-04-23 | Add POST /api/projects/generate-code endpoint — derives 3-char prefix from customer name, sequences by year (e.g. GEV-2026-001). Existing project codes unchanged. | Standardises new project codes to format PREFIX-YEAR-SEQ | `server/routes.ts` |
 | 2026-04-23 | Headcount variant 3 — demand curve now includes `confirmed` assignments (committed headcount, not just active) | Confirmed workers are real committed headcount and must show on demand curve | `client/src/pages/GanttChart.tsx` |
 | 2026-04-23 | Headcount variant 2 — Gantt headcount column now shows peak headcount (max simultaneous workers on any day, active + confirmed, date-aware 7-day sampling) | Was only counting active assignments with no date awareness | `client/src/pages/GanttChart.tsx` |
 | 2026-04-23 | Headcount variant 1 — project overview now shows live "On Site Today" count (active + confirmed assignments covering today) plus separate editable "Target Headcount" field | Was showing a stale manually-entered number | `client/src/pages/ProjectHubDetail.tsx` |
