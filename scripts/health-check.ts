@@ -20,6 +20,7 @@
  *   F. Customer Portal          — portal tokens, SQEP data, published reports
  *   G. QHSE Records             — safety data integrity
  *   H. Worker Profile           — employment type, status vs assignment, document basics
+ *   I. Person Schedule & Assignment Accuracy — stale, overlapping, and over-utilised assignments
  */
 
 import { Pool } from "pg";
@@ -725,6 +726,127 @@ async function main() {
   if (workersWithEmailNoAccount.length > 0) {
     info(`${workersWithEmailNoAccount.length} worker(s) have a work email but no platform login account`);
   }
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  section("I. Person Schedule & Assignment Accuracy");
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // I1 — No active/confirmed/flagged assignments on completed or cancelled projects.
+  // Stale assignments poison the Person Schedule, Workforce Table, and timesheet worker list.
+  const staleOnClosed = await q(`
+    SELECT a.id, a.status AS assignment_status, w.name AS worker_name,
+           p.code AS project_code, p.status AS project_status,
+           a.start_date, a.end_date
+      FROM assignments a
+      JOIN workers w ON w.id = a.worker_id
+      LEFT JOIN role_slots rs ON rs.id = a.role_slot_id
+      JOIN projects p ON p.id = COALESCE(rs.project_id, a.project_id)
+     WHERE a.status IN ('active', 'confirmed', 'flagged', 'pending_confirmation')
+       AND p.status IN ('completed', 'cancelled')
+     ORDER BY p.code, w.name
+  `);
+  check(
+    "No active/confirmed/flagged assignments on completed or cancelled projects",
+    staleOnClosed.length === 0,
+    staleOnClosed.length > 0
+      ? `${staleOnClosed.length} stale assignment(s): ${staleOnClosed.slice(0, 5).map((r: any) => `${r.worker_name} on ${r.project_code} (${r.project_status}, status=${r.assignment_status})`).join("; ")}${staleOnClosed.length > 5 ? "..." : ""}`
+      : undefined
+  );
+
+  // I2 — No worker has overlapping active assignments on two different projects on the same date.
+  // Workers can only be on one project at a time. Uses role_slot_periods when available,
+  // falling back to assignment start/end dates.
+  const overlappingActive = await q(`
+    WITH active_spans AS (
+      SELECT a.id AS assignment_id,
+             a.worker_id,
+             a.project_id,
+             COALESCE(rsp.start_date, a.start_date) AS span_start,
+             COALESCE(rsp.end_date,   a.end_date)   AS span_end
+        FROM assignments a
+        LEFT JOIN role_slot_periods rsp ON rsp.role_slot_id = a.role_slot_id
+       WHERE a.status IN ('active', 'confirmed', 'flagged')
+    )
+    SELECT s1.worker_id, w.name,
+           s1.project_id AS project1_id, p1.code AS project1,
+           s2.project_id AS project2_id, p2.code AS project2,
+           s1.span_start AS start1, s1.span_end AS end1,
+           s2.span_start AS start2, s2.span_end AS end2
+      FROM active_spans s1
+      JOIN active_spans s2
+        ON s1.worker_id = s2.worker_id
+       AND s1.project_id <> s2.project_id
+       AND s1.assignment_id < s2.assignment_id
+       AND s1.span_start IS NOT NULL AND s1.span_end IS NOT NULL
+       AND s2.span_start IS NOT NULL AND s2.span_end IS NOT NULL
+       AND s1.span_start <= s2.span_end
+       AND s2.span_start <= s1.span_end
+      JOIN workers w ON w.id = s1.worker_id
+      JOIN projects p1 ON p1.id = s1.project_id
+      JOIN projects p2 ON p2.id = s2.project_id
+     LIMIT 20
+  `);
+  check(
+    "No worker appears on the Person Schedule with overlapping assignments on two projects the same day",
+    overlappingActive.length === 0,
+    overlappingActive.length > 0
+      ? `${overlappingActive.length} overlap(s): ${overlappingActive.slice(0, 3).map((o: any) => `${o.name} on ${o.project1} (${o.start1}→${o.end1}) & ${o.project2} (${o.start2}→${o.end2})`).join("; ")}${overlappingActive.length > 3 ? "..." : ""}`
+      : undefined,
+    true
+  );
+
+  // I3 — Utilisation outliers.
+  // Calendar days between start_date and end_date clamped to the current year,
+  // summed per worker across non-cancelled / non-declined assignments.
+  const utilisationOutliers = await q(`
+    WITH bounds AS (
+      SELECT date_trunc('year', CURRENT_DATE)::date AS year_start,
+             (date_trunc('year', CURRENT_DATE) + INTERVAL '1 year - 1 day')::date AS year_end
+    ),
+    clamped AS (
+      SELECT a.worker_id,
+             GREATEST(a.start_date::date, (SELECT year_start FROM bounds)) AS s,
+             LEAST(COALESCE(a.end_date::date, (SELECT year_end FROM bounds)),
+                   (SELECT year_end FROM bounds)) AS e
+        FROM assignments a
+       WHERE a.status NOT IN ('cancelled', 'declined', 'removed')
+         AND a.start_date IS NOT NULL
+         AND a.start_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+         AND (a.end_date IS NULL OR a.end_date ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+    ),
+    totals AS (
+      SELECT worker_id, SUM(GREATEST((e - s) + 1, 0))::int AS days
+        FROM clamped
+       WHERE e >= s
+       GROUP BY worker_id
+    )
+    SELECT w.name, t.days
+      FROM totals t
+      JOIN workers w ON w.id = t.worker_id
+     WHERE t.days > 250
+     ORDER BY t.days DESC
+  `);
+
+  const impossibleUtilisation = utilisationOutliers.filter((r: any) => +r.days > 365);
+  const highUtilisation = utilisationOutliers.filter((r: any) => +r.days > 250 && +r.days <= 365);
+
+  check(
+    "No workers with > 365 assigned days in current year (impossible — duplicate or stale data)",
+    impossibleUtilisation.length === 0,
+    impossibleUtilisation.length > 0
+      ? `${impossibleUtilisation.length} worker(s): ${impossibleUtilisation.slice(0, 5).map((r: any) => `${r.name} (${r.days}d)`).join(", ")}`
+      : undefined
+  );
+
+  check(
+    "No workers over-utilised (> 250 assigned days in current year)",
+    highUtilisation.length === 0,
+    highUtilisation.length > 0
+      ? `${highUtilisation.length} worker(s) worth reviewing: ${highUtilisation.slice(0, 5).map((r: any) => `${r.name} (${r.days}d)`).join(", ")}${highUtilisation.length > 5 ? "..." : ""}`
+      : undefined,
+    true
+  );
 
 
   // ═══════════════════════════════════════════════════════════════════════════
