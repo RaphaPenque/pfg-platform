@@ -3048,15 +3048,22 @@ export function registerRoutes(server: Server, app: Express) {
       const { generateWeeklyReportPdfHtml } = await import("./report-generator");
       const pdfBuffer = await generateWeeklyReportPdfHtml(reportData as any);
 
-      // Write to disk (same path as original)
-      const pdfPath = wr.pdf_path;
-      if (pdfPath) {
-        const dir = pdfPath.substring(0, pdfPath.lastIndexOf('/'));
+      const fs = await import("fs");
+      const path = await import("path");
+
+      // Use existing pdf_path or construct one
+      const pdfPath = wr.pdf_path || `/data/uploads/reports/${wr.code}/weekly-report-wc-${weekStart}.pdf`;
+      const dir = path.dirname(pdfPath);
+
+      try {
         fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(pdfPath, pdfBuffer);
+        console.log('[regenerate-weekly-report] PDF written to:', pdfPath);
+      } catch (fsErr: any) {
+        console.warn('[regenerate-weekly-report] Could not write PDF file:', fsErr.message, '— continuing with DB update only');
       }
 
-      // Update aggregated_data in DB (keep pdf_path, update data)
+      // Update aggregated_data in DB
       await db.execute(sql`
         UPDATE weekly_reports
         SET aggregated_data = ${JSON.stringify(reportData)}::jsonb
