@@ -15,7 +15,6 @@ interface NewSlotDraft {
   role: string;
   startDate: string;
   endDate: string;
-  quantity: number;
   shift: string;
 }
 
@@ -271,7 +270,6 @@ export default function ProjectRolePlanningTab({
         role: newSlot.role,
         startDate: newSlot.startDate,
         endDate: newSlot.endDate,
-        quantity: newSlot.quantity,
         shift: newSlot.shift,
       });
       await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
@@ -339,7 +337,6 @@ export default function ProjectRolePlanningTab({
             role: "Technician 2",
             startDate: project.startDate || "",
             endDate: project.endDate || "",
-            quantity: 1,
             shift: "Day",
           })}
           className="flex items-center gap-1.5 text-[13px] font-semibold px-4 py-2 rounded-lg border"
@@ -413,18 +410,6 @@ export default function ProjectRolePlanningTab({
                 value={newSlot.endDate}
                 onChange={e => setNewSlot(s => s ? { ...s, endDate: e.target.value } : null)}
                 className="text-[13px] px-2 py-1.5 rounded border mt-0.5"
-                style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}
-              />
-            </div>
-            <div>
-              <label className="text-[10px] font-semibold uppercase tracking-wide block" style={{ color: "var(--pfg-steel)" }}>Qty</label>
-              <input
-                type="number"
-                min={1}
-                max={50}
-                value={newSlot.quantity}
-                onChange={e => setNewSlot(s => s ? { ...s, quantity: parseInt(e.target.value) || 1 } : null)}
-                className="text-[13px] px-2 py-1.5 rounded border w-16 mt-0.5 tabular-nums"
                 style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}
               />
             </div>

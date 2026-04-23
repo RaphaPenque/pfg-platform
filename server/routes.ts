@@ -1516,7 +1516,8 @@ export function registerRoutes(server: Server, app: Express) {
   });
 
   app.post("/api/role-slots", async (req: Request, res: Response) => {
-    const parsed = insertRoleSlotSchema.safeParse(req.body);
+    const { quantity: _ignored, ...rest } = req.body ?? {};
+    const parsed = insertRoleSlotSchema.safeParse({ ...rest, quantity: 1 });
     if (!parsed.success) return res.status(400).json({ error: parsed.error });
     const slot = await storage.createRoleSlot(parsed.data);
     await logAudit(req.user!.id, "role_slot.create", "role_slot", slot.id);
