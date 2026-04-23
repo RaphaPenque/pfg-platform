@@ -1457,6 +1457,58 @@ export function registerRoutes(server: Server, app: Express) {
     res.status(204).send();
   });
 
+  app.post("/api/role-slot-periods/:id/demob", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { demobDate } = req.body as { demobDate?: string };
+      if (!demobDate || !/^\d{4}-\d{2}-\d{2}$/.test(demobDate)) {
+        return res.status(400).json({ error: "demobDate must be YYYY-MM-DD" });
+      }
+      const all = await storage.getAllRoleSlotPeriods();
+      const period = all.find(p => p.id === id);
+      if (!period) return res.status(404).json({ error: "Period not found" });
+      if (demobDate < period.startDate || demobDate > period.endDate) {
+        return res.status(400).json({ error: `demobDate must be between ${period.startDate} and ${period.endDate}` });
+      }
+
+      // Shrink any overlapping assignments on this slot so the worker drops out of Active Personnel
+      const slotAssignments = (await storage.getAssignments()).filter(a => a.roleSlotId === period.roleSlotId);
+      for (const a of slotAssignments) {
+        if (!a.startDate || !a.endDate) continue;
+        if (a.startDate <= period.endDate && a.endDate >= period.startDate && a.endDate > demobDate) {
+          await storage.updateAssignment(a.id, { endDate: demobDate });
+        }
+      }
+
+      if (demobDate === period.endDate) {
+        await logAudit(req.user!.id, "role_slot_period.demob", "role_slot_period", id);
+        return res.json({ ok: true, updatedPeriod: period, newPeriod: null });
+      }
+
+      const updatedPeriod = await storage.updateRoleSlotPeriod(id, { endDate: demobDate });
+
+      // Add 1 day to demobDate in UTC to compute remainder start
+      const d = new Date(`${demobDate}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + 1);
+      const nextStart = d.toISOString().slice(0, 10);
+
+      const newPeriod = await storage.createRoleSlotPeriod({
+        roleSlotId: period.roleSlotId,
+        projectId: period.projectId,
+        startDate: nextStart,
+        endDate: period.endDate,
+        periodType: "remob",
+        notes: null,
+      });
+
+      await logAudit(req.user!.id, "role_slot_period.demob", "role_slot_period", id);
+      res.json({ ok: true, updatedPeriod, newPeriod });
+    } catch (e: any) {
+      console.error("demob error", e);
+      res.status(500).json({ error: e?.message || "Failed to demob" });
+    }
+  });
+
   // ===== DOCUMENTS =====
   app.get("/api/workers/:workerId/documents", async (req: Request, res: Response) => {
     const docs = await storage.getDocumentsByWorker(parseInt(req.params.workerId));

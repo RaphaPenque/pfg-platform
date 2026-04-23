@@ -656,8 +656,8 @@ export default function ProjectTeamTab({
             </div>
           ) : (
             <div className="space-y-6">
-              {activeDay.length > 0 && <PersonnelTable label="Day Shift" rows={activeDay} />}
-              {activeNight.length > 0 && <PersonnelTable label="Night Shift" rows={activeNight} />}
+              {activeDay.length > 0 && <PersonnelTable label="Day Shift" rows={activeDay} onUpdate={onUpdate} />}
+              {activeNight.length > 0 && <PersonnelTable label="Night Shift" rows={activeNight} onUpdate={onUpdate} />}
             </div>
           )}
         </div>
@@ -1111,11 +1111,59 @@ function AssignmentChip({
 function PersonnelTable({
   label,
   rows,
+  onUpdate,
 }: {
   label: string;
   rows: { worker: DashboardWorker; assignment: DashboardAssignment }[];
+  onUpdate: () => void;
 }) {
   const today = new Date();
+  const todayStr = today.toISOString().split("T")[0];
+  const { toast } = useToast();
+  const [demobRowId, setDemobRowId] = useState<number | null>(null);
+  const [demobDate, setDemobDate] = useState<string>(todayStr);
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleConfirmDemob = async (m: { worker: DashboardWorker; assignment: DashboardAssignment }) => {
+    const a = m.assignment;
+    if (!a.roleSlotId) {
+      toast({ title: "Cannot demob", description: "Assignment has no role slot", variant: "destructive" });
+      return;
+    }
+    if (!a.startDate || !a.endDate) {
+      toast({ title: "Cannot demob", description: "Assignment has no dates", variant: "destructive" });
+      return;
+    }
+    if (demobDate < a.startDate || demobDate > a.endDate) {
+      toast({ title: "Invalid date", description: `Must be between ${a.startDate} and ${a.endDate}`, variant: "destructive" });
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const periodsRes = await apiRequest("GET", `/api/role-slots/${a.roleSlotId}/periods`);
+      const periods: Array<{ id: number; startDate: string; endDate: string }> = await periodsRes.json();
+      const match = periods.find(p => p.startDate <= demobDate && p.endDate >= demobDate)
+        ?? periods.find(p => p.startDate <= a.startDate! && p.endDate >= a.endDate!);
+      if (!match) {
+        toast({ title: "Cannot demob", description: "No matching period found", variant: "destructive" });
+        setSubmitting(false);
+        return;
+      }
+      await apiRequest("POST", `/api/role-slot-periods/${match.id}/demob`, { demobDate });
+      await queryClient.invalidateQueries({ queryKey: ["/api/dashboard"] });
+      toast({ title: "Worker demobilised", description: `${cleanName(m.worker.name)} · ${demobDate}` });
+      setDemobRowId(null);
+      onUpdate();
+    } catch (e: any) {
+      let description = e?.message || "Unknown error";
+      try {
+        const body = await e?.response?.json?.();
+        if (body?.error) description = body.error;
+      } catch {}
+      toast({ title: "Demob failed", description, variant: "destructive" });
+    }
+    setSubmitting(false);
+  };
 
   return (
     <div>
@@ -1127,7 +1175,7 @@ function PersonnelTable({
         <table className="w-full text-[12px]" style={{ borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ background: "var(--pfg-navy, #1A1D23)", color: "#fff" }}>
-              {["Name", "Role", "MOB Date", "Expected DEMOB", "Days on Site", "Status"].map(h => (
+              {["Name", "Role", "MOB Date", "Expected DEMOB", "Days on Site", "Status", ""].map(h => (
                 <th
                   key={h}
                   className="text-left px-3 py-2.5 text-[10px] font-bold uppercase tracking-wider"
@@ -1144,6 +1192,7 @@ function PersonnelTable({
                 ? Math.max(0, Math.ceil((today.getTime() - start.getTime()) / 86400000))
                 : 0;
               const hasStarted = start ? today.getTime() >= start.getTime() : false;
+              const isDemobRow = demobRowId === m.assignment.id;
               return (
                 <tr
                   key={m.assignment.id}
@@ -1166,6 +1215,45 @@ function PersonnelTable({
                       <span className="text-[10px] font-bold px-2 py-0.5 rounded" style={{ background: "#DBEAFE", color: "#1D4ED8" }}>
                         Pending MOB
                       </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-2.5 text-right">
+                    {isDemobRow ? (
+                      <div className="flex items-center justify-end gap-1.5">
+                        <input
+                          type="date"
+                          value={demobDate}
+                          min={m.assignment.startDate || undefined}
+                          max={m.assignment.endDate || undefined}
+                          onChange={e => setDemobDate(e.target.value)}
+                          className="text-[11px] px-2 py-1 rounded border"
+                          style={{ borderColor: "hsl(var(--border))", background: "hsl(var(--card))" }}
+                        />
+                        <button
+                          onClick={() => handleConfirmDemob(m)}
+                          disabled={submitting}
+                          className="text-[11px] font-bold px-2.5 py-1 rounded border"
+                          style={{ borderColor: "var(--red, #B91C1C)", background: "var(--red, #B91C1C)", color: "#fff" }}
+                        >
+                          {submitting ? <Loader2 className="w-3 h-3 animate-spin inline" /> : "Confirm"}
+                        </button>
+                        <button
+                          onClick={() => { setDemobRowId(null); setDemobDate(todayStr); }}
+                          disabled={submitting}
+                          className="text-[11px] font-semibold px-2 py-1 rounded"
+                          style={{ color: "var(--pfg-steel)" }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => { setDemobRowId(m.assignment.id); setDemobDate(todayStr); }}
+                        className="text-[11px] font-bold px-2.5 py-1 rounded border"
+                        style={{ borderColor: "var(--red, #B91C1C)", background: "#fff", color: "var(--red, #B91C1C)" }}
+                      >
+                        Demob
+                      </button>
                     )}
                   </td>
                 </tr>
