@@ -3014,7 +3014,7 @@ export function registerRoutes(server: Server, app: Express) {
       // PM name
       const pmRes = await db.execute(sql`
         SELECT u.name FROM project_leads pl JOIN users u ON u.id = pl.user_id
-        WHERE pl.project_id = ${projectId} AND pl.role = 'pm' LIMIT 1
+        WHERE pl.project_id = ${projectId} LIMIT 1
       `);
       const pmName = (pmRes.rows[0] as any)?.name || 'James Hodgson';
 
