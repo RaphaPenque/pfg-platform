@@ -2042,7 +2042,7 @@ type SortDir = "asc" | "desc";
 
 export default function WorkforceTable() {
   const { user: authUser } = useAuth();
-  const canAddWorker = authUser?.role === "admin" || authUser?.role === "resource_manager";
+  const canAddWorker = authUser?.role === "admin" || authUser?.role === "resource_manager" || authUser?.role === "project_manager";
   const { data, isLoading } = useDashboardData();
   const roleSlots = data?.roleSlots || [];
   const [search, setSearch] = useState("");

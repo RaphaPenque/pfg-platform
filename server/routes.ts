@@ -1066,7 +1066,7 @@ export function registerRoutes(server: Server, app: Express) {
     }
   });
 
-  app.patch("/api/projects/:id", requireAuth, requireRole("admin", "project_manager"), async (req: Request, res: Response) => {
+  app.patch("/api/projects/:id", requireAuth, requireRole("admin", "project_manager", "resource_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     const before = await storage.getProject(id);
     const project = await storage.updateProject(id, req.body);
@@ -1567,7 +1567,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(slots);
   });
 
-  app.post("/api/role-slots", async (req: Request, res: Response) => {
+  app.post("/api/role-slots", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
     const { quantity: _ignored, ...rest } = req.body ?? {};
     const parsed = insertRoleSlotSchema.safeParse({ ...rest, quantity: 1 });
     if (!parsed.success) return res.status(400).json({ error: parsed.error });
@@ -1576,7 +1576,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.status(201).json(slot);
   });
 
-  app.patch("/api/role-slots/:id", async (req: Request, res: Response) => {
+  app.patch("/api/role-slots/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
     const id = parseInt(req.params.id);
     const slot = await storage.updateRoleSlot(id, req.body);
     if (!slot) return res.status(404).json({ error: "Role slot not found" });
@@ -1602,7 +1602,7 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(slot);
   });
 
-  app.delete("/api/role-slots/:id", requireAuth, async (req: Request, res: Response) => {
+  app.delete("/api/role-slots/:id", requireAuth, requireRole("admin", "resource_manager", "project_manager"), async (req: Request, res: Response) => {
     try {
       const id = parseInt(req.params.id);
       // Check for real worker assignments on this slot
