@@ -1,3 +1,5 @@
+import type { DashboardAssignment } from "@/hooks/use-dashboard-data";
+
 // OEM brand colours
 export const OEM_BRAND_COLORS: Record<string, string> = {
   'Arabelle Solutions': '#FE5716',
@@ -136,16 +138,36 @@ export function getHighestRole(roles: string[]): string {
 export const ENGLISH_LEVELS = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2', 'TBC'];
 
 // Utilisation calculation: 187 working days baseline, 2 days mob/demob per assignment
-// Uses actualDaysWorked (timesheet-confirmed) when available, falls back to planned duration
-export function calcUtilisation(assignments: any[]): { days: number; pct: number; confirmed: boolean } {
-  if (!assignments || assignments.length === 0) return { days: 0, pct: 0, confirmed: false };
-  const hasActual = assignments.some((a: any) => a.actualDaysWorked != null);
-  const rawDays = assignments.reduce((sum: number, a: any) => {
-    return sum + (a.actualDaysWorked != null ? a.actualDaysWorked : (a.duration || 0));
-  }, 0);
-  const mobDemob = assignments.length * 2;
-  const effectiveDays = Math.max(0, rawDays - mobDemob);
-  return { days: effectiveDays, pct: Math.round(effectiveDays / 187 * 100), confirmed: hasActual };
+// Date-based current-year calc. Only includes assignments in active/confirmed/completed/
+// pending_confirmation/flagged states (excludes cancelled/declined). Clips each assignment
+// window to the current calendar year and subtracts 2 travel days per period.
+export function calcUtilisation(assignments: DashboardAssignment[]): { days: number; pct: number } {
+  const ANNUAL_TARGET = 187;
+  const TRAVEL_DAYS = 2;
+  const now = new Date();
+  const yearStart = new Date(now.getFullYear(), 0, 1);
+  const yearEnd = new Date(now.getFullYear(), 11, 31);
+
+  const INCLUDE_STATUSES = new Set(["active", "confirmed", "completed", "pending_confirmation", "flagged"]);
+
+  let totalDays = 0;
+
+  for (const a of assignments) {
+    if (!INCLUDE_STATUSES.has(a.status ?? "")) continue;
+    if (!a.startDate || !a.endDate) continue;
+
+    const start = new Date(Math.max(new Date(a.startDate).getTime(), yearStart.getTime()));
+    const end = new Date(Math.min(new Date(a.endDate).getTime(), yearEnd.getTime()));
+
+    if (start > end) continue;
+
+    const calDays = Math.round((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    const netDays = Math.max(0, calDays - TRAVEL_DAYS);
+    totalDays += netDays;
+  }
+
+  const pct = Math.round((totalDays / ANNUAL_TARGET) * 100);
+  return { days: totalDays, pct };
 }
 // Auto-deploy test Wed Apr  8 16:53:59 UTC 2026
 
