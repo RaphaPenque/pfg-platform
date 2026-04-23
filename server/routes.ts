@@ -1549,11 +1549,24 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(slot);
   });
 
-  app.delete("/api/role-slots/:id", async (req: Request, res: Response) => {
-    const id = parseInt(req.params.id);
-    await storage.deleteRoleSlot(id);
-    await logAudit(req.user!.id, "role_slot.delete", "role_slot", id);
-    res.status(204).send();
+  app.delete("/api/role-slots/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      // Check for real worker assignments on this slot
+      const realAssignments = await db.execute(
+        sql`SELECT id FROM assignments WHERE role_slot_id = ${id} AND worker_id IS NOT NULL LIMIT 1`
+      );
+      if (realAssignments.rows.length > 0) {
+        return res.status(409).json({ error: "Cannot delete: this slot has workers assigned. Remove them from the Team tab first." });
+      }
+      // Safe to delete — first cascade-delete any placeholder (no worker) assignments
+      await db.execute(sql`DELETE FROM assignments WHERE role_slot_id = ${id} AND worker_id IS NULL`);
+      await storage.deleteRoleSlot(id);
+      await logAudit(req.user!.id, "role_slot.delete", "role_slot", id);
+      res.status(204).send();
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // ===== OEM TYPES =====
