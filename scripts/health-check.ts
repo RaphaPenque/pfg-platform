@@ -283,7 +283,7 @@ async function main() {
   let timesheetEntries: any[] = [];
   try {
     timesheetWeeks = await q(`SELECT * FROM timesheet_weeks ORDER BY week_commencing DESC LIMIT 100`);
-    timesheetEntries = await q(`SELECT * FROM timesheet_entries WHERE week_id IN (SELECT id FROM timesheet_weeks ORDER BY week_commencing DESC LIMIT 100)`);
+    timesheetEntries = await q(`SELECT * FROM timesheet_entries WHERE timesheet_week_id IN (SELECT id FROM timesheet_weeks ORDER BY week_commencing DESC LIMIT 100)`);
   } catch (e: any) {
     warn(`Could not read timesheet tables — ${e.message}`);
   }
@@ -314,7 +314,7 @@ async function main() {
     if (currentWeeks.length > 0) {
       const weekIds = currentWeeks.map((w: any) => w.id);
       const workersCoveredThisWeek = new Set(
-        timesheetEntries.filter((e: any) => weekIds.includes(e.week_id)).map((e: any) => e.worker_id)
+        timesheetEntries.filter((e: any) => weekIds.includes(e.timesheet_week_id)).map((e: any) => e.worker_id)
       );
 
       const activeAssignmentsThisWeek = await q(`
@@ -346,7 +346,7 @@ async function main() {
     const zeroHourEntries = await q(`
       SELECT COUNT(*) AS n
       FROM timesheet_entries te
-      JOIN timesheet_weeks tw ON tw.id = te.week_id
+      JOIN timesheet_weeks tw ON tw.id = te.timesheet_week_id
       WHERE (te.total_hours = 0 OR te.total_hours IS NULL)
       AND tw.status IN ('submitted', 'pm_approved', 'sent_to_customer', 'customer_approved')
     `);
@@ -355,9 +355,9 @@ async function main() {
 
     // C4 — No duplicate timesheet entries (same worker, same week)
     const dupEntries = await q(`
-      SELECT week_id, worker_id, COUNT(*) AS n
+      SELECT timesheet_week_id, worker_id, COUNT(*) AS n
       FROM timesheet_entries
-      GROUP BY week_id, worker_id
+      GROUP BY timesheet_week_id, worker_id
       HAVING COUNT(*) > 1
     `);
     check("No duplicate timesheet entries (worker + week)", dupEntries.length === 0,
@@ -516,7 +516,7 @@ async function main() {
         SELECT COUNT(DISTINCT a.worker_id) AS n
         FROM assignments a
         WHERE a.project_id = $1
-        AND a.status IN ('active', 'flagged')
+        AND a.status IN ('active', 'flagged', 'confirmed')
         AND a.start_date <= $3
         AND (a.end_date IS NULL OR a.end_date >= $2)
       `, [report.project_id, report.week_commencing, report.week_ending]);
