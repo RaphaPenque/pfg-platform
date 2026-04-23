@@ -498,3 +498,28 @@ Run the health check again before starting any new development: `DATABASE_URL=..
 | 2026-04-20 | Fixed send-to-customer: rollback on failure, allow resend | Stuck `sent_to_customer` states | `server/timesheet-routes.ts` |
 | 2026-04-19 | Fixed recall: PM can edit directly in draft, re-approve without worker resubmission | PM workflow improvement | `server/timesheet-routes.ts` |
 | 2026-04-19 | DB fix + env restore | Production outage recovery | `server/index.ts` |
+
+## Platform Data Chain — How Everything Connects
+
+### Core data flow
+Role Planning (role_slots + role_slot_periods)
+  → Team tab (assignments — links workers to role_slot_periods)
+  → Person Schedule (reads assignments + role_slot_periods for timeline)
+  → Workforce Table (reads assignments for utilization % and availability)
+  → Timesheets (reads assignments to determine which workers appear per week)
+  → Weekly Reports / PDF (reads timesheet_entries + daily_reports + assignments)
+  → Customer Portal (reads weekly_reports.aggregated_data)
+
+### Key rules
+- A stale assignment (active/confirmed on a completed/cancelled project) poisons ALL downstream views simultaneously: Person Schedule shows wrong bars, Workforce Table shows wrong utilization, Timesheets show wrong workers
+- Utilization = (sum of assignment calendar days in current year, excluding cancelled/declined, minus 2 travel days per assignment) / 187 target days × 100%
+- Timesheet workers = only those with a role_slot_period overlapping the selected week
+- Portal data = weekly_reports.aggregated_data JSONB (keys: safetyStats, delays, comments, toolboxTalks, safetyObservations, teamMembers)
+- Role slots = always quantity 1. One slot = one named position. Multiple periods per slot = different workers at different stages.
+
+### 2026-04-23 (session close) — Utilization + Schedule Fixes
+- calcUtilisation rewritten: date-based current-year calc, excludes cancelled/declined, 2 travel days per assignment period (commit c3e39a9)
+- 27 stale assignments on TRNS + SALT marked completed (cleanup-stale-assignments.ts)
+- Health check section I added: Person Schedule and assignment accuracy (I1 stale assignments, I2 overlapping assignments, I3 utilization outliers)
+- Demand curve includes completed projects (commit 0a1fa26 / 98308be)
+- PM permissions match Resource Manager (commit 0294af9)
