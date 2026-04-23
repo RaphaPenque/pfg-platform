@@ -408,6 +408,30 @@ Run the health check again before starting any new development: `DATABASE_URL=..
 | 2026-04-23 | Added `capacity_planning` as valid project status across server, Gantt, Schedule, Allocation pages and health check | HEY-001 and CAR-ST were failing health check with invalid status | `server/routes.ts`, `GanttChart.tsx`, `PersonSchedule.tsx`, `ProjectAllocation.tsx`, `health-check.ts` |
 | 2026-04-23 | Cancelled 66 assignments outside GNT/GRTY on active projects (DHC, GIL, HEY-001, OLKL1, OSKSHM, SZWL) and marked 33 assignments completed on finished projects (TRNS, SALT, SVRN, TRNZN) | Clean slate before fresh reassignment | DB direct |
 | 2026-04-23 | Fixed customer portal loading (grey boxes) — added `/api/portal/*` to auth middleware bypass | Customers with no session cookie were being blocked by auth middleware before reaching portal API | `server/routes.ts` line 795 |
+
+### 2026-04-23 (afternoon) — Role Slot Deletion + Portal Data Fixes
+
+**Fix 1 — Role slot deletion (commit 01fb386):**
+- DELETE /api/role-slots/:id now blocks deletion if real workers are assigned (returns 409 with clear message)
+- Cascade-deletes placeholder (worker_id IS NULL) assignments before deleting the slot
+- Added requireAuth middleware (was missing)
+
+**Fix 2 — Portal weekly report showing zeros (commit 1b9dd9f):**
+- Root cause: aggregated_data stored keys as `safetyData`/`delaysLog`/`commentsEntries` but portal frontend reads `safetyStats`/`delays`/`comments`
+- Fixed key names in report-scheduler.ts aggregatedData object
+- Added toolboxTalks and safetyObservations arrays to aggregatedData
+- Re-patched live GRTY weekly_reports id=1 row with corrected key names
+
+**Fix 3 — Blank comment text in weekly reports (commit f3668ae):**
+- Root cause: original report generation captured comment rows before users had entered text (entry was blank)
+- Added .filter((c) => (c.entry || '').trim()) before both reportComments.map() calls in report-scheduler.ts
+- Re-patched GRTY weekly_reports id=1 aggregated_data.comments with 6 real comment entries for w/c 13–19 Apr
+
+**Known upcoming work (Piece 2):**
+- Remove QTY field from role slot creation (slots are always quantity 1)
+- Period splitting + demob action from Team tab
+- Timesheet filter: show workers whose assignment period overlaps the selected week
+
 | 2026-04-21 | Added portal access token per-project | Secure customer portal access | `shared/schema.ts`, `server/routes.ts` |
 | 2026-04-21 | Fixed On Site Now KPI to use server-side period-aware count | Frontend count was wrong | `server/routes.ts`, `client/src/hooks/use-dashboard-data.ts` |
 | 2026-04-20 | DISABLED all auto-sends | Mass duplicate emails during restarts | `server/index.ts` |
