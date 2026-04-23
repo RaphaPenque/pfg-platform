@@ -2984,8 +2984,8 @@ export function registerRoutes(server: Server, app: Express) {
         weekReportIds.has(c.reportId)
       ).map((c: any) => ({
         date: c.logDate || '',
-        shift: c.shift || 'Dayshift',
-        text: c.comment || c.text || '',
+        entry: c.comment || c.text || '',
+        userName: c.userName || c.user_name || '',
       }));
 
       // Safety data counts + arrays
