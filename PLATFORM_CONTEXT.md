@@ -480,6 +480,18 @@ Run the health check again before starting any new development: `DATABASE_URL=..
 4. Add health check coverage for generated document content (PDF data validation)
 5. Piece 2 — Timesheet stale worker display (will self-resolve after reassignment + cleanup script)
 
+### 2026-04-23 (night) — Demand Curve + PM Permissions
+
+**Fix — Demand curve includes completed projects (commit 0a1fa26):**
+- GanttChart.tsx line 122: changed status filter from `=== "active"` to `["active", "confirmed", "completed"]`
+- Completed projects (e.g. TRNS/Torness) now show historical headcount on the demand curve
+- Cancelled projects remain excluded
+- Summary cards (Active Projects, Total Positions, Peak Demand) also benefit from this fix
+
+**Note — Demand curve filter is frontend-only:**
+- Backend /api/dashboard returns all projects with no status filter
+- The STATUS_FILTERS UI toggles only affect Gantt table rows, not the demand curve
+
 | 2026-04-21 | Added portal access token per-project | Secure customer portal access | `shared/schema.ts`, `server/routes.ts` |
 | 2026-04-21 | Fixed On Site Now KPI to use server-side period-aware count | Frontend count was wrong | `server/routes.ts`, `client/src/hooks/use-dashboard-data.ts` |
 | 2026-04-20 | DISABLED all auto-sends | Mass duplicate emails during restarts | `server/index.ts` |
