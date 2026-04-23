@@ -96,7 +96,7 @@ export async function buildTimesheetEntries(projectId: number) {
 
     // Get all active assignments for this project
     const asRes = await db.execute(sql`
-      SELECT a.id, a.worker_id, a.shift, a.start_date, a.end_date, REGEXP_REPLACE(w.name, ' [(][^)]*[)]$', '') as worker_name
+      SELECT a.id, a.worker_id, a.role_slot_id, a.shift, a.start_date, a.end_date, REGEXP_REPLACE(w.name, ' [(][^)]*[)]$', '') as worker_name
       FROM assignments a
       JOIN workers w ON w.id = a.worker_id
       WHERE a.project_id = ${projectId}
@@ -105,6 +105,21 @@ export async function buildTimesheetEntries(projectId: number) {
     const assignments = asRes.rows as any[];
 
     if (assignments.length === 0) return;
+
+    // Pre-fetch role_slot_periods for this project — a worker is only on a week's
+    // timesheet if their assignment's role_slot has a period overlapping that week.
+    const rspRes = await db.execute(sql`
+      SELECT role_slot_id, start_date, end_date
+      FROM role_slot_periods
+      WHERE project_id = ${projectId}
+    `);
+    const periodsBySlot = new Map<number, { start_date: string; end_date: string }[]>();
+    for (const p of rspRes.rows as any[]) {
+      if (p.role_slot_id == null) continue;
+      const arr = periodsBySlot.get(p.role_slot_id) || [];
+      arr.push({ start_date: String(p.start_date), end_date: String(p.end_date) });
+      periodsBySlot.set(p.role_slot_id, arr);
+    }
 
     // Determine date range: from earliest assignment start to latest end
     const starts = assignments.map(a => a.start_date).filter(Boolean);
@@ -164,15 +179,28 @@ export async function buildTimesheetEntries(projectId: number) {
           AND worker_id NOT IN (
             SELECT DISTINCT a.worker_id
             FROM assignments a
+            JOIN role_slot_periods rsp ON rsp.role_slot_id = a.role_slot_id
             WHERE a.project_id = ${projectId}
               AND a.status IN ('active','flagged','confirmed')
               AND a.start_date <= ${weekEndStr}::date
               AND (a.end_date IS NULL OR a.end_date >= ${weekStartStr}::date)
+              AND rsp.start_date <= ${weekEndStr}::date
+              AND rsp.end_date >= ${weekStartStr}::date
           )
       `);
 
       // Build entries for each worker
       for (const asgn of assignments) {
+        // Require a role_slot_period for this assignment's slot that overlaps the week.
+        // Overlap: period.start_date <= weekEnd AND period.end_date >= weekStart
+        // (demob mid-week still appears — period.end_date is the demob date)
+        const slotPeriods = asgn.role_slot_id != null ? periodsBySlot.get(asgn.role_slot_id) : undefined;
+        if (!slotPeriods || slotPeriods.length === 0) continue;
+        const overlaps = slotPeriods.some(p =>
+          p.start_date <= weekEndStr && p.end_date >= weekStartStr
+        );
+        if (!overlaps) continue;
+
         const mobDate = asgn.start_date ? new Date(asgn.start_date) : null;
         const demobDate = asgn.end_date ? new Date(asgn.end_date) : null;
         const shift = (asgn.shift || "Day").toLowerCase().startsWith("n") ? "night" : "day";
