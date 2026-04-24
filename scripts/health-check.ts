@@ -21,10 +21,13 @@
  *   G. QHSE Records             — safety data integrity
  *   H. Worker Profile           — employment type, status vs assignment, document basics
  *   I. Person Schedule & Assignment Accuracy — stale, overlapping, and over-utilised assignments
+ *   K. FTE Baseline, Worker Status & Deployed Today — live baseline, status validity, deployment plausibility
  */
 
 import { Pool } from "pg";
 import * as dotenv from "dotenv";
+import * as fs from "fs";
+import * as path from "path";
 dotenv.config();
 
 // ── Terminal colours ────────────────────────────────────────────────────────
@@ -840,6 +843,55 @@ async function main() {
     highUtilisation.length > 0
       ? `${highUtilisation.length} worker(s) worth reviewing: ${highUtilisation.slice(0, 5).map((r: any) => `${r.name} (${r.days}d)`).join(", ")}${highUtilisation.length > 5 ? "..." : ""}`
       : undefined,
+    true
+  );
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  section("K. FTE Baseline, Worker Status & Deployed Today");
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // K1 — FTE Baseline must be derived from live API, not a hardcoded constant.
+  const ganttPath = path.join(__dirname, "..", "client", "src", "pages", "GanttChart.tsx");
+  const ganttSource = fs.readFileSync(ganttPath, "utf8");
+  const hasHardcodedBaseline = ganttSource.includes("FTE_BASELINE = 54");
+  check(
+    "GanttChart.tsx FTE Baseline is live (not hardcoded)",
+    !hasHardcodedBaseline,
+    hasHardcodedBaseline
+      ? "GanttChart.tsx still has hardcoded FTE_BASELINE — must be derived from live API"
+      : undefined
+  );
+
+  // K2 — All workers must have status = 'FTE' or 'Temp'.
+  const invalidStatus = await q(`SELECT COUNT(*)::int AS n FROM workers WHERE status NOT IN ('FTE', 'Temp')`);
+  const invalidStatusCount = +invalidStatus[0].n;
+  check(
+    "All workers have valid status (FTE or Temp)",
+    invalidStatusCount === 0,
+    invalidStatusCount > 0
+      ? `${invalidStatusCount} worker(s) have invalid status (must be FTE or Temp)`
+      : undefined,
+    false
+  );
+
+  // K3 — Deployed Today card plausibility (0–200 workers on site today).
+  const deployedToday = await q(`
+    SELECT COUNT(DISTINCT a.worker_id)::int AS n
+      FROM assignments a
+      JOIN role_slot_periods rsp ON a.role_slot_period_id = rsp.id
+     WHERE a.status IN ('active','confirmed','completed','pending_confirmation','flagged')
+       AND rsp.start_date <= CURRENT_DATE
+       AND rsp.end_date >= CURRENT_DATE
+  `);
+  const deployedCount = +deployedToday[0].n;
+  const deployedPlausible = deployedCount >= 0 && deployedCount <= 200;
+  check(
+    deployedPlausible
+      ? `Deployed Today count plausible — ${deployedCount} worker(s) on site today`
+      : `Deployed Today count implausible — ${deployedCount} (expected 0–200)`,
+    deployedPlausible,
+    undefined,
     true
   );
 
