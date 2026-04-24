@@ -852,7 +852,8 @@ async function main() {
   // ═══════════════════════════════════════════════════════════════════════════
 
   // K1 — FTE Baseline must be derived from live API, not a hardcoded constant.
-  const ganttPath = path.join(__dirname, "..", "client", "src", "pages", "GanttChart.tsx");
+  const scriptDir = path.dirname(new URL(import.meta.url).pathname);
+  const ganttPath = path.join(scriptDir, "..", "client", "src", "pages", "GanttChart.tsx");
   const ganttSource = fs.readFileSync(ganttPath, "utf8");
   const hasHardcodedBaseline = ganttSource.includes("FTE_BASELINE = 54");
   check(
@@ -879,10 +880,10 @@ async function main() {
   const deployedToday = await q(`
     SELECT COUNT(DISTINCT a.worker_id)::int AS n
       FROM assignments a
-      JOIN role_slot_periods rsp ON a.role_slot_period_id = rsp.id
+      JOIN role_slot_periods rsp ON rsp.role_slot_id = a.role_slot_id
      WHERE a.status IN ('active','confirmed','completed','pending_confirmation','flagged')
-       AND rsp.start_date <= CURRENT_DATE
-       AND rsp.end_date >= CURRENT_DATE
+       AND rsp.start_date::date <= CURRENT_DATE
+       AND rsp.end_date::date >= CURRENT_DATE
   `);
   const deployedCount = +deployedToday[0].n;
   const deployedPlausible = deployedCount >= 0 && deployedCount <= 200;
