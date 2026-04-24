@@ -138,6 +138,11 @@ export default function GanttChart() {
     // Only count assignments from active projects for demand
     const activeProjectIds = new Set(activeProjects.map((p) => p.id));
 
+    // Demand curve includes completed projects for full historical accuracy
+    const demandProjectIds = new Set(
+      projects.filter((p) => p.status === "active" || p.status === "completed").map((p) => p.id)
+    );
+
     // Build a project-to-customer map
     const projectCustomerMap: Record<number, string> = {};
     for (const p of projects) {
@@ -147,7 +152,7 @@ export default function GanttChart() {
     // Collect all active assignments with customer info
     const allAssignments = workers.flatMap((w) =>
       w.assignments
-        .filter((a) => activeProjectIds.has(a.projectId) && ['active', 'confirmed'].includes(a.status ?? ''))
+        .filter((a) => demandProjectIds.has(a.projectId) && ['active', 'confirmed', 'completed', 'flagged', 'pending_confirmation'].includes(a.status ?? ''))
         .map((a) => ({
           startDate: a.startDate ? new Date(a.startDate) : null,
           endDate: a.endDate ? new Date(a.endDate) : null,
