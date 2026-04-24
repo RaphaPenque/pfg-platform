@@ -424,6 +424,12 @@ Run the health check again before starting any new development: `DATABASE_URL=..
 - `completed`/`confirmed`/`cancelled` must NEVER be counted as "active"
 - Health check: M2 verifies this on every run
 
+## Demand Curve (Gantt Chart)
+- Includes: active + completed projects
+- Assignment statuses included: active, confirmed, completed, flagged, pending_confirmation
+- activeProjects (for card count) = status='active' ONLY — separate from demandProjectIds
+- demandProjectIds = active + completed — never use activeProjectIds for the demand curve
+
 ### Person Schedule Visibility
 - Shows: `active`, `confirmed`, `completed`, `pending_confirmation`, `flagged` assignments
 - Hides: `cancelled`, `declined`, `removed`
@@ -454,6 +460,11 @@ Every summary card in the platform must be backed by a DB query. This table is t
 ## Changelog
 
 > Keep a running log of significant changes. Most recent first. Format: `YYYY-MM-DD | What changed | Why | Files touched`
+
+### 2026-04-24 (late night, continued) — Demand Curve Fix
+- `client/src/pages/GanttChart.tsx`: demand curve was silently reusing `activeProjectIds` (scoped to `status='active'` for the card count in Session #5), which dropped completed projects (Torness Jan–Mar, Saltend Apr) out of the chart and produced flat-zero weeks Jan through mid-March. Added a separate `demandProjectIds = active + completed` for the demand computation and expanded the assignment status filter from `['active', 'confirmed']` to `['active', 'confirmed', 'completed', 'flagged', 'pending_confirmation']`. `activeProjects` / `activeProjectIds` untouched — they still drive the Active Projects card count and `totalPositions`.
+- Added Demand Curve section to the filter spec above so `activeProjectIds` and `demandProjectIds` cannot be conflated again.
+- Commit: `8515ca5`.
 
 ### 2026-04-23 — PDF Generation Fix + Report Regeneration
 - Fixed `server/report-scheduler.ts`: safety observations array, toolbox talks array, and delay report dates were not being passed to the PDF generator. Generator was correct; scheduler was only passing scalar counts.

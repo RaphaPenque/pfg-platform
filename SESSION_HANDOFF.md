@@ -4,6 +4,21 @@
 
 ---
 
+## Session #8 — 2026-04-24 (late night, continued) — Demand Curve Fix
+
+### What Was Done This Session
+
+| Commit | Change |
+|---|---|
+| `8515ca5` | Fix demand curve — include completed projects + completed/flagged assignments for full year history |
+| (this commit) | Update PLATFORM_CONTEXT.md + SESSION_HANDOFF.md — demand curve fix, session close |
+
+### Detail
+
+1. **Workforce Demand Curve missing historical data** — in `GanttChart.tsx`, the demand curve reused `activeProjectIds` (narrowed to `status='active'` in Session #5 for the card count), so completed projects (Torness Jan–Mar, Saltend Apr, etc.) dropped out of the chart and the curve showed flat zero from Jan through mid-March. The assignment filter was also restricted to `['active', 'confirmed']`, which would have excluded completed-project workers even with the project set fixed. Added a separate `demandProjectIds = active + completed`, and expanded the assignment status filter to `['active', 'confirmed', 'completed', 'flagged', 'pending_confirmation']`. `activeProjects`/`activeProjectIds` are untouched — they still drive the Active Projects card count and `totalPositions`.
+
+---
+
 ## Session #7 — 2026-04-24 (late night) — I2 False Positive Fix
 
 ### What Was Done This Session
@@ -11,7 +26,7 @@
 | Commit | Change |
 |---|---|
 | `ff22668` | Fix I2 overlap query — use assignment dates directly, not role_slot_periods (false positive fix) |
-| (this commit) | Update SESSION_HANDOFF.md — I2 false positive fix, health check state |
+| `3f3ed63` | Update SESSION_HANDOFF.md — I2 false positive fix, health check state |
 
 ### Detail
 
@@ -60,7 +75,7 @@
 
 ## Health Check — Current State
 
-> 72 checks | **0 critical failures, 17 warnings, 55 passed** (run at session close)
+> 72 checks | **0 critical failures, 17 warnings, 55 passed** (run at session close after demand curve fix)
 
 | Section | Status | Notes |
 |---|---|---|
