@@ -322,6 +322,7 @@ PM can re-approve and resend without worker resubmission
 - `/api/milestone-certificates/*`
 - `/api/surveys/*`
 - `/api/payroll-rules/*`
+- `/api/workers/fte-count` — returns `{ count }` live count of workers with `status = 'FTE'`; used by GanttChart demand curve as the FTE baseline (replaces the previous hardcoded `FTE_BASELINE = 54`)
 
 ---
 
@@ -364,19 +365,31 @@ At the start of every platform session, do the following **before accepting any 
 
 ## Health Check — Last Run
 
-> Run: 2026-04-23 | 56 checks | **0 critical failures, 20 warnings, 36 passed**
+> Run: 2026-04-24 (evening) | 64 checks | **0 critical failures, 18 warnings, 46 passed**
+
+Sections: A projects · B role slots · C timesheets · D headcount · E workers · F portal/customer emails · G assignments · H workers core fields · I person schedule · J documents · **K FTE baseline + worker deployment (new, 2026-04-24)**
 
 | Status | Issue |
 |---|---|
 | ✅ PASS | No duplicate timesheet entries |
+| ✅ PASS | Section H — all workers have valid `employment_type` (Telmo Alfaro id=178 fixed this session) |
+| ✅ PASS | Section K1 — `GanttChart.tsx` does not contain hardcoded `FTE_BASELINE` constant |
+| ✅ PASS | Section K2 — 0 workers with `status` outside `['FTE', 'Temp']` |
+| ✅ PASS | Section K3 — Deployed Today count plausible (0–200) |
 | 🟡 WARN | Stale `headcount` field (Target) on GNT, GRTY — now displayed separately as "Target Headcount"; live count shown correctly |
 | 🟡 WARN | Projects with no assigned workers: OSKSHM, OLKL1, GIL, SZWL, DHC — expected, pending reassignment |
 | 🟡 WARN | Missing timesheet signatory + customer PM emails on OSKSHM, OLKL1, GIL, SZWL, DHC — intentional |
 | 🟡 WARN | No daily reports published to portal on OSKSHM, OLKL1, GIL, SZWL, DHC — expected |
 | 🟡 WARN | 18 timesheet entries with 0 hours in approved state — residual, harmless |
 | 🟡 WARN | No timesheet week for current Monday 2026-04-20 — not yet built |
+| 🟡 WARN | Section I — 5 person schedule overlaps (Luka Stefanac, Luka Brozovic, Antonio Manuel Moreira dos Santos + 2 more) — INFO only, historical |
 
 Run the health check again before starting any new development: `DATABASE_URL=... npm run health-check`
+
+### Section K (added 2026-04-24 evening)
+- **K1**: Code-content check — verifies `client/src/pages/GanttChart.tsx` does NOT contain the hardcoded constant `FTE_BASELINE`. FAIL if present (prevents regression of the hardcode fix).
+- **K2**: Verifies 0 workers have `status` outside `['FTE', 'Temp']`. FAIL if violated.
+- **K3**: Deployed Today count plausible (0–200). WARN if out of range.
 
 ---
 
@@ -523,3 +536,26 @@ Role Planning (role_slots + role_slot_periods)
 - Health check section I added: Person Schedule and assignment accuracy (I1 stale assignments, I2 overlapping assignments, I3 utilization outliers)
 - Demand curve includes completed projects (commit 0a1fa26 / 98308be)
 - PM permissions match Resource Manager (commit 0294af9)
+
+### 2026-04-24 (evening) — Session #4: FTE Baseline + Worker Data Fixes + Health Check Section K
+
+**Fixes — Worker data cleanup:**
+- Joao Paulo (commit e4c2d75): status already correct (`Temp`); idempotent script documents the state.
+- Telmo Alfaro id=178 (commit 5a7c1b3): `employment_type` was `null` → corrected to `'Temp'`. Resolves Section H warning.
+
+**Fix — FTE Baseline no longer hardcoded (commit 6d668de):**
+- `client/src/pages/GanttChart.tsx` previously had `const FTE_BASELINE = 54` hardcoded. Removed.
+- New backend endpoint `GET /api/workers/fte-count` returns `{ count }` from live DB (`SELECT COUNT(*) FROM workers WHERE status = 'FTE'`).
+- GanttChart fetches the count on mount via `useEffect`; demand curve baseline now tracks live FTE headcount.
+
+**Health check Section K added (commits f295c50, fa49928):**
+- K1: code-content check — verifies `GanttChart.tsx` does NOT contain `FTE_BASELINE` (prevents hardcode regression). PASS.
+- K2: verifies 0 workers have `status` outside `['FTE', 'Temp']`. PASS.
+- K3: Deployed Today count plausible (0–200). PASS.
+- Runtime bug fixes in Section K: ESM `__dirname` handling, correct `role_slot_periods` join column, date cast.
+
+**Health check state at session close: 64 checks — 0 failed, 18 warnings, 46 passed.**
+- H warning (Telmo Alfaro employment_type) resolved.
+- F warning for MIT-2026-002 missing portal token resolved (token now present).
+- K1/K2/K3 all passing.
+- Remaining 18 warnings are all operational / expected: C2/C3 timesheets, D1 stale headcount, F missing emails/portal reports, I person schedule overlaps (5 workers, historical).
