@@ -1,10 +1,9 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useDashboardData } from "@/hooks/use-dashboard-data";
 import { getProjectColor, getProjectColorFromProject, OEM_BRAND_COLORS, PROJECT_CUSTOMER, cleanName } from "@/lib/constants";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, ReferenceLine, ResponsiveContainer, Tooltip } from "recharts";
 import { Check } from "lucide-react";
 
-const FTE_BASELINE = 54;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const CURRENT_YEAR = 2026;
 
@@ -51,6 +50,14 @@ const STATUS_FILTERS: { key: ProjectStatus; label: string; defaultOn: boolean }[
 export default function GanttChart() {
   const { data, isLoading } = useDashboardData();
   const [activeFilters, setActiveFilters] = useState<Set<ProjectStatus>>(() => new Set<ProjectStatus>(["active", "potential", "capacity_planning"]));
+  const [fteBaseline, setFteBaseline] = useState<number>(0);
+
+  useEffect(() => {
+    fetch("/api/workers/fte-count")
+      .then((r) => r.json())
+      .then((d: { count: number }) => setFteBaseline(d.count ?? 0))
+      .catch(() => setFteBaseline(0));
+  }, []);
 
   const handleToggleFilter = (status: ProjectStatus) => {
     setActiveFilters((prev) => {
@@ -210,7 +217,7 @@ export default function GanttChart() {
           { label: "Active Projects", value: ganttData.activeCount, color: "var(--pfg-navy)" },
           { label: "Total Positions", value: ganttData.totalPositions, color: "var(--pfg-navy)" },
           { label: "Peak Demand", value: ganttData.peakDemand, color: "var(--red)" },
-          { label: "FTE Baseline", value: FTE_BASELINE, color: "var(--pfg-navy)" },
+          { label: "FTE Baseline", value: fteBaseline, color: "var(--pfg-navy)" },
         ].map((card) => (
           <div
             key={card.label}
@@ -434,7 +441,7 @@ export default function GanttChart() {
             ))}
             <div className="flex items-center gap-1.5">
               <div className="w-6 border-t-2 border-dashed" style={{ borderColor: "var(--red)" }} />
-              FTE Baseline ({FTE_BASELINE})
+              FTE Baseline ({fteBaseline})
             </div>
           </div>
         </div>
@@ -480,12 +487,12 @@ export default function GanttChart() {
                 itemStyle={{ color: "#fff", fontSize: 11, padding: "1px 0" }}
               />
               <ReferenceLine
-                y={FTE_BASELINE}
+                y={fteBaseline}
                 stroke="var(--red)"
                 strokeDasharray="6 4"
                 strokeWidth={2}
                 label={{
-                  value: `FTE ${FTE_BASELINE}`,
+                  value: `FTE ${fteBaseline}`,
                   position: "right",
                   fill: "var(--red)",
                   fontSize: 10,

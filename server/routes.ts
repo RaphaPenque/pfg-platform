@@ -855,6 +855,12 @@ export function registerRoutes(server: Server, app: Express) {
     res.json(allWorkers);
   });
 
+  app.get("/api/workers/fte-count", async (_req: Request, res: Response) => {
+    const result = await db.execute(sql`SELECT COUNT(*)::int AS count FROM workers WHERE status = 'FTE'`);
+    const count = (result.rows[0] as { count: number })?.count ?? 0;
+    res.json({ count });
+  });
+
   app.get("/api/workers/:id", async (req: Request, res: Response) => {
     const worker = await storage.getWorker(parseInt(req.params.id));
     if (!worker) return res.status(404).json({ error: "Worker not found" });
