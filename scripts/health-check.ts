@@ -23,12 +23,16 @@
  *   I. Person Schedule & Assignment Accuracy — stale, overlapping, and over-utilised assignments
  *   K. FTE Baseline, Worker Status & Deployed Today — live baseline, status validity, deployment plausibility
  *   L. UI Card Data Accuracy   — ground-truth DB counts for Active Projects, Headcount, Deployed Today, Available FTE
+ *   M. Filter & Logic Consistency — UI filter implementations match platform spec
  */
 
 import { Pool } from "pg";
 import * as dotenv from "dotenv";
 import * as fs from "fs";
 import * as path from "path";
+import { fileURLToPath } from "url";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 dotenv.config();
 
 // ── Terminal colours ────────────────────────────────────────────────────────
@@ -968,6 +972,115 @@ async function main() {
       : undefined,
     true
   );
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  section("M. Filter & Logic Consistency");
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  const repoRoot = path.resolve(__dirname, "..");
+
+  // M1 — WorkforceTable Available filter uses isCurrentlyActive (date-aware).
+  try {
+    const workforceTablePath = path.join(repoRoot, "client/src/pages/WorkforceTable.tsx");
+    const workforceSrc = fs.readFileSync(workforceTablePath, "utf8");
+    const availableIdx = workforceSrc.indexOf('filterAssigned.includes("Available")');
+    let m1Ok = false;
+    if (availableIdx >= 0) {
+      const winStart = Math.max(0, availableIdx - 300);
+      const winEnd = Math.min(workforceSrc.length, availableIdx + 300);
+      const window = workforceSrc.slice(winStart, winEnd);
+      m1Ok = window.includes("isCurrentlyActive");
+    }
+    check(
+      m1Ok
+        ? "Available filter uses isCurrentlyActive (date-aware)"
+        : "WorkforceTable Available filter does not use isCurrentlyActive — will show wrong results",
+      m1Ok
+    );
+  } catch (e: any) {
+    check(`WorkforceTable.tsx read failed: ${e.message}`, false);
+  }
+
+  // M2 — GanttChart Active Projects uses status='active' only (not completed).
+  try {
+    const ganttPath = path.join(repoRoot, "client/src/pages/GanttChart.tsx");
+    const ganttSrc = fs.readFileSync(ganttPath, "utf8");
+    const activeIdx = ganttSrc.indexOf("activeProjects =");
+    let m2Ok = true;
+    if (activeIdx >= 0) {
+      const winStart = Math.max(0, activeIdx - 50);
+      const winEnd = Math.min(ganttSrc.length, activeIdx + 200);
+      const window = ganttSrc.slice(winStart, winEnd);
+      m2Ok = !window.includes('p.status === "completed"');
+    } else {
+      m2Ok = false;
+    }
+    check(
+      m2Ok
+        ? "GanttChart Active Projects filter is status='active' only"
+        : "GanttChart activeProjects filter includes completed projects — inflates Active Projects count",
+      m2Ok
+    );
+  } catch (e: any) {
+    check(`GanttChart.tsx read failed: ${e.message}`, false);
+  }
+
+  // M3 — PersonSchedule VISIBLE_ASSIGNMENT_STATUSES matches canonical status set.
+  try {
+    const personSchedulePath = path.join(repoRoot, "client/src/pages/PersonSchedule.tsx");
+    const constantsPath = path.join(repoRoot, "client/src/lib/constants.ts");
+    const psSrc = fs.readFileSync(personSchedulePath, "utf8");
+    const constSrc = fs.readFileSync(constantsPath, "utf8");
+    const extract = (src: string, marker: string): Set<string> | null => {
+      const idx = src.indexOf(marker);
+      if (idx < 0) return null;
+      const open = src.indexOf("[", idx);
+      const close = src.indexOf("]", open);
+      if (open < 0 || close < 0) return null;
+      const arr = src.slice(open + 1, close);
+      const statuses = Array.from(arr.matchAll(/['"]([a-z_]+)['"]/g)).map(m => m[1]);
+      return new Set(statuses);
+    };
+    const psSet = extract(psSrc, "VISIBLE_ASSIGNMENT_STATUSES");
+    const canonicalSet = extract(constSrc, "INCLUDE_STATUSES");
+    const expected = ["active", "confirmed", "completed", "pending_confirmation", "flagged"];
+    const sameSet = (a: Set<string> | null, b: Set<string> | null) =>
+      !!a && !!b && a.size === b.size && [...a].every(x => b.has(x));
+    const m3Ok = sameSet(psSet, canonicalSet) &&
+      expected.every(s => psSet!.has(s)) && psSet!.size === expected.length;
+    check(
+      m3Ok
+        ? "PersonSchedule VISIBLE_ASSIGNMENT_STATUSES matches shared assignment-status constants"
+        : "VISIBLE_ASSIGNMENT_STATUSES in PersonSchedule.tsx does not match shared/assignment-status.ts SCHEDULE_VISIBLE_STATUSES",
+      m3Ok,
+      m3Ok ? undefined : `PersonSchedule=${psSet ? [...psSet].join(",") : "missing"} vs canonical=${canonicalSet ? [...canonicalSet].join(",") : "missing"}`
+    );
+  } catch (e: any) {
+    check(`PersonSchedule/constants read failed: ${e.message}`, false);
+  }
+
+  // M4 — calcUtilisation excludes cancelled/declined (no 'cancelled' inside INCLUDE_STATUSES window).
+  try {
+    const constantsPath = path.join(repoRoot, "client/src/lib/constants.ts");
+    const constSrc = fs.readFileSync(constantsPath, "utf8");
+    const includeIdx = constSrc.indexOf("INCLUDE_STATUSES");
+    let m4Ok = true;
+    if (includeIdx >= 0) {
+      const window = constSrc.slice(includeIdx, Math.min(constSrc.length, includeIdx + 300));
+      m4Ok = !window.includes('"cancelled"') && !window.includes("'cancelled'");
+    } else {
+      m4Ok = false;
+    }
+    check(
+      m4Ok
+        ? "calcUtilisation correctly excludes cancelled/declined assignments"
+        : "calcUtilisation INCLUDE_STATUSES may include cancelled/declined — check constants.ts",
+      m4Ok
+    );
+  } catch (e: any) {
+    check(`constants.ts read failed: ${e.message}`, false);
+  }
 
 
   // ═══════════════════════════════════════════════════════════════════════════
