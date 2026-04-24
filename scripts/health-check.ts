@@ -758,36 +758,31 @@ async function main() {
   info(`${staleOnClosed.length} historical active/confirmed/flagged assignment(s) on completed/cancelled projects (intentional — powers Person Schedule history)`);
 
   // I2 — No worker has overlapping active assignments on two different projects on the same date.
-  // Workers can only be on one project at a time. Uses role_slot_periods when available,
-  // falling back to assignment start/end dates.
+  // Workers can only be on one project at a time.
+  // IMPORTANT: Uses assignment start_date/end_date directly — NOT role_slot_periods.
+  // Periods are sub-windows within an assignment (e.g. two stints on the same project)
+  // and must NOT be used for overlap detection — they cause false positives when a worker
+  // has a future period that overlaps with a sequential assignment on a different project.
   const overlappingActive = await q(`
-    WITH active_spans AS (
-      SELECT a.id AS assignment_id,
-             a.worker_id,
-             a.project_id,
-             COALESCE(rsp.start_date, a.start_date) AS span_start,
-             COALESCE(rsp.end_date,   a.end_date)   AS span_end
-        FROM assignments a
-        LEFT JOIN role_slot_periods rsp ON rsp.role_slot_id = a.role_slot_id
-       WHERE a.status IN ('active', 'confirmed', 'flagged')
-    )
-    SELECT s1.worker_id, w.name,
-           s1.project_id AS project1_id, p1.code AS project1,
-           s2.project_id AS project2_id, p2.code AS project2,
-           s1.span_start AS start1, s1.span_end AS end1,
-           s2.span_start AS start2, s2.span_end AS end2
-      FROM active_spans s1
-      JOIN active_spans s2
-        ON s1.worker_id = s2.worker_id
-       AND s1.project_id <> s2.project_id
-       AND s1.assignment_id < s2.assignment_id
-       AND s1.span_start IS NOT NULL AND s1.span_end IS NOT NULL
-       AND s2.span_start IS NOT NULL AND s2.span_end IS NOT NULL
-       AND s1.span_start <= s2.span_end
-       AND s2.span_start <= s1.span_end
-      JOIN workers w ON w.id = s1.worker_id
-      JOIN projects p1 ON p1.id = s1.project_id
-      JOIN projects p2 ON p2.id = s2.project_id
+    SELECT a1.worker_id, w.name,
+           a1.project_id AS project1_id, p1.code AS project1,
+           a2.project_id AS project2_id, p2.code AS project2,
+           a1.start_date AS start1, a1.end_date AS end1,
+           a2.start_date AS start2, a2.end_date AS end2
+      FROM assignments a1
+      JOIN assignments a2
+        ON a1.worker_id = a2.worker_id
+       AND a1.project_id <> a2.project_id
+       AND a1.id < a2.id
+       AND a1.status IN ('active', 'confirmed', 'flagged')
+       AND a2.status IN ('active', 'confirmed', 'flagged')
+       AND a1.start_date IS NOT NULL AND a1.end_date IS NOT NULL
+       AND a2.start_date IS NOT NULL AND a2.end_date IS NOT NULL
+       AND a1.start_date::date <= a2.end_date::date
+       AND a2.start_date::date <= a1.end_date::date
+      JOIN workers w ON w.id = a1.worker_id
+      JOIN projects p1 ON p1.id = a1.project_id
+      JOIN projects p2 ON p2.id = a2.project_id
      LIMIT 20
   `);
   check(
