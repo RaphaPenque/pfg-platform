@@ -367,7 +367,7 @@ At the start of every platform session, do the following **before accepting any 
 
 > Run: 2026-04-24 (late evening) | 68 checks | **0 critical failures, 18 warnings, 50 passed**
 
-Sections: A projects · B role slots · C timesheets · D headcount · E workers · F portal/customer emails · G assignments · H workers core fields · I person schedule · J documents · K FTE baseline + worker deployment · **L UI card data accuracy (new, 2026-04-24 late evening)**
+Sections: A projects · B role slots · C timesheets · D headcount · E workers · F portal/customer emails · G assignments · H workers core fields · I person schedule · J documents · K FTE baseline + worker deployment · L UI card data accuracy · **M filter & logic consistency (new, 2026-04-24 late evening)**
 
 The Active Projects card on the Gantt Chart was fixed this session to filter `status='active'` only (previously included `completed` and `confirmed`, inflating the count from 11 to 20).
 
@@ -398,6 +398,37 @@ Run the health check again before starting any new development: `DATABASE_URL=..
 - **L2**: Workforce headcount — FTE + Temp counts. FAIL if either is 0.
 - **L3**: Deployed Today — distinct workers with an active assignment (`active`/`confirmed`/`flagged`/`pending_confirmation`) whose role_slot_period spans today. WARN if > 200.
 - **L4**: Available FTE — FTE workers with no active assignment today. WARN if > total FTE (impossible).
+
+### Section M — Filter & Logic Consistency (added 2026-04-24 late evening)
+- **M1**: Available filter uses `isCurrentlyActive` (date-aware), not status-only
+- **M2**: GanttChart `activeProjects` filter is `status='active'` only
+- **M3**: PersonSchedule `VISIBLE_ASSIGNMENT_STATUSES` matches shared constants
+- **M4**: `calcUtilisation` excludes cancelled/declined
+
+---
+
+## Filter Specification — Non-Negotiable Rules
+
+### Available Filter (WorkforceTable)
+- Definition: worker has NO active assignment where start_date <= today <= end_date
+- Future assignments (start_date > today) do NOT make a worker "Assigned"
+- Implementation MUST use `isCurrentlyActive(assignment, slot?.periods)` — not raw status check
+- Health check: M1 verifies this on every run
+
+### Assigned Filter (WorkforceTable)
+- Definition: worker HAS an active assignment where start_date <= today <= end_date
+- Same `isCurrentlyActive` logic — must match "Deployed Today" card exactly
+
+### Active Projects Filter (GanttChart)
+- Definition: projects WHERE `status = 'active'` ONLY
+- `completed`/`confirmed`/`cancelled` must NEVER be counted as "active"
+- Health check: M2 verifies this on every run
+
+### Person Schedule Visibility
+- Shows: `active`, `confirmed`, `completed`, `pending_confirmation`, `flagged` assignments
+- Hides: `cancelled`, `declined`, `removed`
+- Must match `SCHEDULE_VISIBLE_STATUSES` in `shared/assignment-status.ts`
+- Health check: M3 verifies this on every run
 
 ---
 

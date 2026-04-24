@@ -4,6 +4,23 @@
 
 ---
 
+## Session #6 — 2026-04-24 (late evening, continued) — Filter Fix + Section M
+
+### Filter fix + Section M session (2026-04-24 late evening)
+
+| Commit | Change |
+|---|---|
+| `4aa7185` | Fix Available filter — use isCurrentlyActive (date-aware) not status-only check |
+| `afde997` | Add health check Section M — filter and logic consistency (M1–M4) |
+| (this commit) | Update PLATFORM_CONTEXT.md and SESSION_HANDOFF.md — filter spec, Section M, session close |
+
+### Detail
+1. **WorkforceTable Available/Assigned filter** — the filter previously checked assignment status only. A worker with a future-dated (`start_date > today`) `active` assignment was counted as Assigned, even though they are not currently deployed. Result: filter showed 1 Available when 19 were actually available. Now uses `isCurrentlyActive(assignment, slot?.periods)` to require `start_date <= today <= end_date`. Matches the "Deployed Today" card logic exactly.
+2. **Section M health check** — M1 (Available filter uses isCurrentlyActive), M2 (GanttChart activeProjects status='active' only), M3 (PersonSchedule VISIBLE_ASSIGNMENT_STATUSES matches canonical set), M4 (calcUtilisation excludes cancelled/declined). All code-content checks — cheap and regression-proof.
+3. **Docs** — PLATFORM_CONTEXT.md gained a Filter Specification block (non-negotiable rules for Available/Assigned/Active Projects/Person Schedule visibility) and Section M in the health check description.
+
+---
+
 ## Session #5 — 2026-04-24 (late evening) — UI Data Accuracy
 
 ### What Was Done This Session
@@ -12,7 +29,7 @@
 |---|---|
 | `e5206e5` | Fix GanttChart Active Projects count — filter to status='active' only (was including completed/confirmed) |
 | `2cf72d2` | Add health check Section L — UI card data accuracy (L1 active projects, L2 headcount, L3 deployed today, L4 available FTE) |
-| (this commit) | Update PLATFORM_CONTEXT.md + SESSION_HANDOFF.md — UI card accuracy, Section L, session close |
+| `b37d044` | Update PLATFORM_CONTEXT.md + SESSION_HANDOFF.md — UI card accuracy, Section L, session close |
 
 ### Detail
 
@@ -28,7 +45,7 @@
 
 ## Health Check — Current State
 
-> 68 checks | **0 critical failures, 18 warnings, 50 passed** (run at session close)
+> 72 checks | **0 critical failures, 18 warnings, 54 passed** (run at session close)
 
 | Section | Status | Notes |
 |---|---|---|
@@ -39,15 +56,16 @@
 | E workers | ✅ | |
 | F portal/customer emails | 🟡 | OSKSHM, OLKL1, GIL, SZWL, DHC — missing emails / portal reports (expected) |
 | G assignments | ✅ | |
-| H workers core fields | ✅ | Telmo Alfaro `employment_type` fixed this session |
+| H workers core fields | ✅ | Telmo Alfaro `employment_type` fixed previously |
 | I person schedule | 🟡 | **5 person schedule overlaps** (Luka Stefanac, Luka Brozovic, Antonio Manuel Moreira dos Santos + 2 more) — INFO only, historical |
 | J documents | ✅ | |
 | K FTE baseline / deployment | ✅ | K1/K2/K3 all passing |
-| L UI card data accuracy (new) | ✅ | L1 (11 active projects), L2 (45 FTE + 133 Temp), L3 (39 deployed today), L4 (18 available FTE) all passing |
+| L UI card data accuracy | ✅ | L1 (11 active projects), L2 (45 FTE + 133 Temp), L3 (39 deployed today), L4 (18 available FTE) all passing |
+| M filter & logic consistency (new) | ✅ | M1 Available filter date-aware, M2 GanttChart active only, M3 PersonSchedule statuses match, M4 calcUtilisation excludes cancelled — all passing |
 
 **Resolved this session:**
-- GanttChart Active Projects card now shows 11 (DB truth) instead of 20 (was counting `completed` + `confirmed`).
-- Section L1–L4 — all passing at introduction.
+- WorkforceTable Available filter is now date-aware — previously showed 1 available when 19 were actually available (workers with future-dated active assignments were wrongly counted as Assigned).
+- Section M1–M4 — all passing at introduction.
 
 **Remaining 18 warnings are all operational** (team to action): C2/C3 timesheets, D1 stale headcount fields, F missing emails/portal reports, I person schedule overlaps.
 
