@@ -22,6 +22,7 @@
  *   H. Worker Profile           — employment type, status vs assignment, document basics
  *   I. Person Schedule & Assignment Accuracy — stale, overlapping, and over-utilised assignments
  *   K. FTE Baseline, Worker Status & Deployed Today — live baseline, status validity, deployment plausibility
+ *   L. UI Card Data Accuracy   — ground-truth DB counts for Active Projects, Headcount, Deployed Today, Available FTE
  */
 
 import { Pool } from "pg";
@@ -893,6 +894,78 @@ async function main() {
       : `Deployed Today count implausible — ${deployedCount} (expected 0–200)`,
     deployedPlausible,
     undefined,
+    true
+  );
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  section("L. UI Card Data Accuracy");
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // L1 — Active Projects card (Gantt).
+  const activeProjectsRow = await q(`SELECT COUNT(*)::int AS n FROM projects WHERE status = 'active'`);
+  const activeProjectCount = +activeProjectsRow[0].n;
+  check(
+    `Active Projects ground truth: ${activeProjectCount} active project(s) — Gantt card must match`,
+    activeProjectCount > 0,
+    activeProjectCount === 0 ? "No active projects found — DB state is wrong" : undefined,
+    false
+  );
+
+  // L2 — Workforce headcount (FTE + Temp).
+  const fteRow = await q(`SELECT COUNT(*)::int AS n FROM workers WHERE status = 'FTE'`);
+  const tempRow = await q(`SELECT COUNT(*)::int AS n FROM workers WHERE status = 'Temp'`);
+  const fteCount = +fteRow[0].n;
+  const tempCount = +tempRow[0].n;
+  const totalWorkforce = fteCount + tempCount;
+  check(
+    `Workforce headcount: ${fteCount} FTE + ${tempCount} Temp = ${totalWorkforce} total workers`,
+    fteCount > 0 && tempCount > 0,
+    fteCount === 0 || tempCount === 0
+      ? `Missing workforce category — FTE=${fteCount}, Temp=${tempCount}`
+      : undefined,
+    false
+  );
+
+  // L3 — Deployed Today (workers with active assignment spanning today).
+  const deployedL3Row = await q(`
+    SELECT COUNT(DISTINCT a.worker_id)::int AS n
+      FROM assignments a
+      JOIN role_slots rs ON rs.id = a.role_slot_id
+      JOIN role_slot_periods rsp ON rsp.role_slot_id = rs.id
+     WHERE a.status IN ('active','confirmed','flagged','pending_confirmation')
+       AND rsp.start_date::date <= CURRENT_DATE
+       AND rsp.end_date::date >= CURRENT_DATE
+  `);
+  const deployedL3Count = +deployedL3Row[0].n;
+  check(
+    `Deployed Today: ${deployedL3Count} worker(s) on site — Workforce Table card must match`,
+    deployedL3Count <= 200,
+    deployedL3Count > 200 ? `Implausible deployed count: ${deployedL3Count}` : undefined,
+    true
+  );
+
+  // L4 — Available FTE (FTE workers with no active assignment today).
+  const availableFteRow = await q(`
+    SELECT COUNT(*)::int AS n FROM workers w
+     WHERE w.status = 'FTE'
+       AND NOT EXISTS (
+         SELECT 1 FROM assignments a
+           JOIN role_slots rs ON rs.id = a.role_slot_id
+           JOIN role_slot_periods rsp ON rsp.role_slot_id = rs.id
+          WHERE a.worker_id = w.id
+            AND a.status IN ('active','confirmed','flagged','pending_confirmation')
+            AND rsp.start_date::date <= CURRENT_DATE
+            AND rsp.end_date::date >= CURRENT_DATE
+       )
+  `);
+  const availableFteCount = +availableFteRow[0].n;
+  check(
+    `Available FTE: ${availableFteCount} FTE worker(s) not currently deployed`,
+    availableFteCount <= fteCount,
+    availableFteCount > fteCount
+      ? `Available FTE (${availableFteCount}) exceeds total FTE (${fteCount}) — impossible`
+      : undefined,
     true
   );
 
