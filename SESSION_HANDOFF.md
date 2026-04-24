@@ -4,6 +4,21 @@
 
 ---
 
+## Session #7 — 2026-04-24 (late night) — I2 False Positive Fix
+
+### What Was Done This Session
+
+| Commit | Change |
+|---|---|
+| `ff22668` | Fix I2 overlap query — use assignment dates directly, not role_slot_periods (false positive fix) |
+| (this commit) | Update SESSION_HANDOFF.md — I2 false positive fix, health check state |
+
+### Detail
+
+1. **I2 overlap false positive** — the I2 check used `LEFT JOIN role_slot_periods` and `COALESCE(rsp.start_date, a.start_date)` to compute span dates. This fanned out each assignment into one row per period, so a worker with multiple sub-windows (e.g. two stints on GNT: Mar–May and Jun–Jul) had the Jun–Jul period falsely overlap with a sequential assignment (e.g. SZWL May–Jul) on a different project. Replaced the CTE with a direct self-join on `assignments` using `a.start_date`/`a.end_date`. Periods are sub-windows within an assignment (demob/remob planning) and must NOT be used for overlap detection. Confirmed: I2 now reports 0 overlaps.
+
+---
+
 ## Session #6 — 2026-04-24 (late evening, continued) — Filter Fix + Section M
 
 ### Filter fix + Section M session (2026-04-24 late evening)
@@ -45,7 +60,7 @@
 
 ## Health Check — Current State
 
-> 72 checks | **0 critical failures, 18 warnings, 54 passed** (run at session close)
+> 72 checks | **0 critical failures, 17 warnings, 55 passed** (run at session close)
 
 | Section | Status | Notes |
 |---|---|---|
@@ -57,17 +72,16 @@
 | F portal/customer emails | 🟡 | OSKSHM, OLKL1, GIL, SZWL, DHC — missing emails / portal reports (expected) |
 | G assignments | ✅ | |
 | H workers core fields | ✅ | Telmo Alfaro `employment_type` fixed previously |
-| I person schedule | 🟡 | **5 person schedule overlaps** (Luka Stefanac, Luka Brozovic, Antonio Manuel Moreira dos Santos + 2 more) — INFO only, historical |
+| I person schedule | ✅ | I2 overlap query fixed — uses assignment dates directly, no false positives |
 | J documents | ✅ | |
 | K FTE baseline / deployment | ✅ | K1/K2/K3 all passing |
 | L UI card data accuracy | ✅ | L1 (11 active projects), L2 (45 FTE + 133 Temp), L3 (39 deployed today), L4 (18 available FTE) all passing |
 | M filter & logic consistency (new) | ✅ | M1 Available filter date-aware, M2 GanttChart active only, M3 PersonSchedule statuses match, M4 calcUtilisation excludes cancelled — all passing |
 
 **Resolved this session:**
-- WorkforceTable Available filter is now date-aware — previously showed 1 available when 19 were actually available (workers with future-dated active assignments were wrongly counted as Assigned).
-- Section M1–M4 — all passing at introduction.
+- I2 person schedule overlap check — fixed false positive caused by joining `role_slot_periods` and fanning each assignment into one row per period. Now uses assignment dates directly. Down from 5 false-positive overlaps to 0 real overlaps.
 
-**Remaining 18 warnings are all operational** (team to action): C2/C3 timesheets, D1 stale headcount fields, F missing emails/portal reports, I person schedule overlaps.
+**Remaining 17 warnings are all operational** (team to action): C2/C3 timesheets, D1 stale headcount fields, F missing emails/portal reports.
 
 Run: `DATABASE_URL=... npm run health-check`
 
