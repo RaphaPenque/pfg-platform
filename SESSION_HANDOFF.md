@@ -4,33 +4,31 @@
 
 ---
 
-## Session #4 — 2026-04-24 (evening)
+## Session #5 — 2026-04-24 (late evening) — UI Data Accuracy
 
 ### What Was Done This Session
 
 | Commit | Change |
 |---|---|
-| `e4c2d75` | Fix Joao Paulo — script documents status already correct (`Temp`); idempotent |
-| `5a7c1b3` | Fix Telmo Alfaro (id=178) `employment_type` null → `'Temp'`; resolves H warning |
-| `6d668de` | Fix FTE Baseline — derive from live worker count via API, not hardcoded 54 |
-| `f295c50` | Add health check Section K — K1 FTE Baseline live, K2 worker status valid, K3 Deployed Today plausible |
-| `fa49928` | Fix Section K runtime bugs (ESM `__dirname`, `role_slot_periods` join column, date cast) |
+| `e5206e5` | Fix GanttChart Active Projects count — filter to status='active' only (was including completed/confirmed) |
+| `2cf72d2` | Add health check Section L — UI card data accuracy (L1 active projects, L2 headcount, L3 deployed today, L4 available FTE) |
+| (this commit) | Update PLATFORM_CONTEXT.md + SESSION_HANDOFF.md — UI card accuracy, Section L, session close |
 
 ### Detail
 
-1. **Telmo Alfaro** (id=178) — `employment_type` was `null`; corrected to `'Temp'`. H warning resolved.
-2. **Joao Paulo** — already `Temp`; script made idempotent for documentation.
-3. **FTE Baseline** — `GanttChart.tsx` previously had `const FTE_BASELINE = 54` hardcoded. Now removed. New endpoint `GET /api/workers/fte-count` returns `{ count }` (live DB count of `status = 'FTE'` workers). Component fetches on mount via `useEffect`.
-4. **Section K health check** — added to `scripts/health-check.ts`:
-   - **K1**: Code-content check — verifies `GanttChart.tsx` does NOT contain the hardcoded `FTE_BASELINE` constant. Prevents regression of the hardcode fix.
-   - **K2**: Verifies 0 workers have `status` outside `['FTE', 'Temp']` — FAIL if violated.
-   - **K3**: Deployed Today count plausible (0–200) — WARN if out of range.
+1. **GanttChart Active Projects card** — filter previously included `active`, `confirmed`, and `completed`, inflating the card from 11 to 20. Corrected to `status === 'active'` only. `activeProjectIds` (used for the demand curve further down) is derived from `activeProjects`, so the demand curve also now only reflects active projects.
+2. **Section L health check** — added to `scripts/health-check.ts`:
+   - **L1**: Active Projects ground truth — `SELECT COUNT(*) FROM projects WHERE status='active'`. 11 active. FAIL if 0.
+   - **L2**: Workforce headcount — 45 FTE + 133 Temp = 178 total. FAIL if either is 0.
+   - **L3**: Deployed Today — 39 workers on site. WARN if > 200.
+   - **L4**: Available FTE — 18 FTE not deployed today. WARN if > total FTE.
+3. **Docs** — PLATFORM_CONTEXT.md gained a "UI Card Data — Source of Truth" table mapping each summary card to its DB query and covering health check. Noted Total Positions and Peak Demand as remaining technical debt (frontend-computed, no DB validation yet).
 
 ---
 
 ## Health Check — Current State
 
-> 64 checks | **0 critical failures, 18 warnings, 46 passed** (run at session close)
+> 68 checks | **0 critical failures, 18 warnings, 50 passed** (run at session close)
 
 | Section | Status | Notes |
 |---|---|---|
@@ -44,12 +42,12 @@
 | H workers core fields | ✅ | Telmo Alfaro `employment_type` fixed this session |
 | I person schedule | 🟡 | **5 person schedule overlaps** (Luka Stefanac, Luka Brozovic, Antonio Manuel Moreira dos Santos + 2 more) — INFO only, historical |
 | J documents | ✅ | |
-| K FTE baseline / deployment (new) | ✅ | K1/K2/K3 all passing |
+| K FTE baseline / deployment | ✅ | K1/K2/K3 all passing |
+| L UI card data accuracy (new) | ✅ | L1 (11 active projects), L2 (45 FTE + 133 Temp), L3 (39 deployed today), L4 (18 available FTE) all passing |
 
 **Resolved this session:**
-- H warning (Telmo Alfaro missing `employment_type`) — now passing.
-- F warning for MIT-2026-002 missing portal token — now passing (token present).
-- Sections K1/K2/K3 — all passing at introduction.
+- GanttChart Active Projects card now shows 11 (DB truth) instead of 20 (was counting `completed` + `confirmed`).
+- Section L1–L4 — all passing at introduction.
 
 **Remaining 18 warnings are all operational** (team to action): C2/C3 timesheets, D1 stale headcount fields, F missing emails/portal reports, I person schedule overlaps.
 
@@ -69,6 +67,7 @@ Run: `DATABASE_URL=... npm run health-check`
 ### Platform / dev
 6. Add health check coverage for generated document content (PDF data validation).
 7. Piece 2 — Timesheet stale worker display (will self-resolve after reassignment + cleanup script above).
+8. **Total Positions and Peak Demand cards on Gantt — not yet health-checked; frontend-computed only.** Add DB-backed ground-truth queries so the cards can be validated against the same pattern as L1–L4.
 
 ### Known bugs (not yet fixed)
 - **Duplicate timesheet entries on GNT and GRTY.** Root cause: timesheet rebuild creates new day entries for new assignments without clearing entries from old `removed` assignments on the same worker/week. Fix needed in `server/timesheet-routes.ts` — rebuild logic must check for existing entries before inserting. The one real submitted timesheet (GRTY w/c 13 April, status: `sent_to_customer`) must NOT be affected by the fix. **Still unaddressed.**

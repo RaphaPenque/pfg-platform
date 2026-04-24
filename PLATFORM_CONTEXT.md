@@ -365,9 +365,11 @@ At the start of every platform session, do the following **before accepting any 
 
 ## Health Check — Last Run
 
-> Run: 2026-04-24 (evening) | 64 checks | **0 critical failures, 18 warnings, 46 passed**
+> Run: 2026-04-24 (late evening) | 68 checks | **0 critical failures, 18 warnings, 50 passed**
 
-Sections: A projects · B role slots · C timesheets · D headcount · E workers · F portal/customer emails · G assignments · H workers core fields · I person schedule · J documents · **K FTE baseline + worker deployment (new, 2026-04-24)**
+Sections: A projects · B role slots · C timesheets · D headcount · E workers · F portal/customer emails · G assignments · H workers core fields · I person schedule · J documents · K FTE baseline + worker deployment · **L UI card data accuracy (new, 2026-04-24 late evening)**
+
+The Active Projects card on the Gantt Chart was fixed this session to filter `status='active'` only (previously included `completed` and `confirmed`, inflating the count from 11 to 20).
 
 | Status | Issue |
 |---|---|
@@ -390,6 +392,31 @@ Run the health check again before starting any new development: `DATABASE_URL=..
 - **K1**: Code-content check — verifies `client/src/pages/GanttChart.tsx` does NOT contain the hardcoded constant `FTE_BASELINE`. FAIL if present (prevents regression of the hardcode fix).
 - **K2**: Verifies 0 workers have `status` outside `['FTE', 'Temp']`. FAIL if violated.
 - **K3**: Deployed Today count plausible (0–200). WARN if out of range.
+
+### Section L (added 2026-04-24 late evening)
+- **L1**: Active Projects ground truth — `SELECT COUNT(*) FROM projects WHERE status='active'`. FAIL if 0 (DB state wrong). The Gantt Active Projects card must match this number.
+- **L2**: Workforce headcount — FTE + Temp counts. FAIL if either is 0.
+- **L3**: Deployed Today — distinct workers with an active assignment (`active`/`confirmed`/`flagged`/`pending_confirmation`) whose role_slot_period spans today. WARN if > 200.
+- **L4**: Available FTE — FTE workers with no active assignment today. WARN if > total FTE (impossible).
+
+---
+
+## UI Card Data — Source of Truth
+
+Every summary card in the platform must be backed by a DB query. This table is the authoritative mapping.
+
+| Card | Page | DB Query | Health Check |
+|---|---|---|---|
+| Active Projects | Gantt Chart | SELECT COUNT(*) FROM projects WHERE status='active' | L1 |
+| Total Positions | Gantt Chart | Sum of headcount on active project rows (from assignments) | — |
+| Peak Demand | Gantt Chart | Max simultaneous workers across any week on active projects | — |
+| FTE Baseline | Gantt Chart | SELECT COUNT(*) FROM workers WHERE status='FTE' (via /api/workers/fte-count) | K1 |
+| Headcount (FTE/Temp) | Workforce Table | SELECT COUNT(*) FROM workers WHERE status='FTE'/'Temp' | L2 |
+| FTE Utilisation % | Workforce Table | calcUtilisation() avg across FTE workers (187-day basis, excl. cancelled/declined) | — |
+| Deployed Today | Workforce Table | Workers with active assignment where role_slot_period spans today | L3 |
+| Available FTE | Workforce Table | FTE workers with no active assignment spanning today | L4 |
+
+**Known technical debt:** `Total Positions` and `Peak Demand` on the Gantt Chart are frontend-computed from assignment data — no direct DB validation in the health check yet. Add coverage when tackling Gantt summary data.
 
 ---
 
@@ -559,3 +586,21 @@ Role Planning (role_slots + role_slot_periods)
 - F warning for MIT-2026-002 missing portal token resolved (token now present).
 - K1/K2/K3 all passing.
 - Remaining 18 warnings are all operational / expected: C2/C3 timesheets, D1 stale headcount, F missing emails/portal reports, I person schedule overlaps (5 workers, historical).
+
+### 2026-04-24 (late evening) — UI Card Data Accuracy
+
+**Fix — GanttChart Active Projects count (commit e5206e5):**
+- `client/src/pages/GanttChart.tsx` line 129: filter was `status === 'active' || 'confirmed' || 'completed'` — inflated card count from 11 (true active) to 20.
+- Corrected to `status === 'active'` only. `activeProjectIds` used downstream for the demand curve is derived from `activeProjects`, so the fix propagates automatically: demand curve now only reflects active projects.
+
+**Health check Section L added (commit 2cf72d2):**
+- L1: Active Projects ground truth (SELECT COUNT(*) FROM projects WHERE status='active'). 11 active. FAIL if 0.
+- L2: Workforce headcount — 45 FTE + 133 Temp = 178 total. FAIL if either is 0.
+- L3: Deployed Today — distinct workers with active assignment spanning today. 39 on site. WARN if > 200.
+- L4: Available FTE — FTE workers not deployed today. 18 available. WARN if > total FTE.
+
+**Docs updated (this commit):**
+- Added "UI Card Data — Source of Truth" table to PLATFORM_CONTEXT.md.
+- Added Known technical debt note: Total Positions and Peak Demand still frontend-only (no DB validation yet).
+
+**Health check state at session close: 68 checks — 0 failed, 18 warnings, 50 passed.**
