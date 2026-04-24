@@ -2088,7 +2088,11 @@ export default function WorkforceTable() {
         if (!filterOem.some(o => workerOems.includes(o))) return false;
       }
       if (filterAssigned.length > 0) {
-        const hasActive = w.assignments.some(a => a.status === "active" || a.status === "flagged" || a.status === "confirmed" || a.status === "pending_confirmation");
+        const hasActive = w.assignments.some((a: DashboardAssignment) => {
+          if (!["active", "flagged", "confirmed", "pending_confirmation"].includes(a.status ?? "")) return false;
+          const slot = roleSlots.find((s: any) => s.id === a.roleSlotId);
+          return isCurrentlyActive(a, slot?.periods);
+        });
         if (filterAssigned.includes("Assigned") && !hasActive) return false;
         if (filterAssigned.includes("Available") && hasActive) return false;
       }
@@ -2104,7 +2108,7 @@ export default function WorkforceTable() {
       }
       return true;
     });
-  }, [workers, search, filterRole, filterStatus, filterCostCentre, filterEnglish, filterOem, filterAssigned, filterCert]);
+  }, [workers, roleSlots, search, filterRole, filterStatus, filterCostCentre, filterEnglish, filterOem, filterAssigned, filterCert]);
 
   // Sort
   const sorted = useMemo(() => {
