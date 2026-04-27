@@ -140,9 +140,16 @@ export const STAGE_META: Record<WorkflowStage, StageMeta> = {
     tone: "success",
   },
   recalled: {
-    label: "Recalled — back to draft",
+    // Server behaviour (server/timesheet-routes.ts recall handler):
+    //   • status reset to 'pm_approved' and recalled_at stamped
+    //   • customer-side fields cleared: customer_token, approval_*,
+    //     customer_challenge, sent_to_customer_at
+    //   • pm_approved_at is RETAINED — the original PM approval timestamp is
+    //     preserved for audit. The PM must still re-approve and resend.
+    // The description below must reflect that, not claim a wholesale reset.
+    label: "Recalled — re-approval required",
     description:
-      "Week was recalled by the PM. Timestamps cleared; PM can edit and re-approve in place.",
+      "Week was recalled by the PM. Customer-side state cleared (token, signed approval, sent-to-customer timestamp); the original PM approval timestamp is retained for audit. PM must edit and re-approve before resending.",
     tone: "amber",
   },
 };
@@ -309,10 +316,16 @@ export function deriveSteps(
   steps.push(
     {
       id: "pm",
+      // Recalled weeks: pm_approved_at is retained on the row but the recall
+      // requires a fresh re-approval before resend. Labelling the step
+      // simply "PM approved" + state=current would read as a contradiction
+      // ("done but in progress"). Make the label unambiguous instead.
       label:
         stage === "pm_approved_override"
           ? "PM approved — OVERRIDE"
-          : "PM approved",
+          : stage === "recalled"
+            ? "PM re-approval required (recalled)"
+            : "PM approved",
       state: tw?.pmApprovedAt ? "done" : "pending",
     },
     {

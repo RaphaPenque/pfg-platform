@@ -145,7 +145,16 @@ export default function WeeklyOpsWorkflowCard(props: WorkflowCardProps) {
   const isRecalled = stage === "recalled";
 
   return (
-    <Card className="p-4" data-testid="weekly-ops-workflow-card">
+    <Card
+      className="p-4"
+      data-testid="weekly-ops-workflow-card"
+      role="region"
+      aria-labelledby="weekly-ops-workflow-card-heading"
+    >
+      <h2 id="weekly-ops-workflow-card-heading" className="sr-only">
+        Weekly Ops workflow status — {projectName} ({projectCode}), week
+        commencing {fmtDate(weekCommencing)}
+      </h2>
       {/* Header: stage chip, project, week */}
       <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0">

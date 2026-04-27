@@ -345,6 +345,100 @@ await check("first pending step is marked 'current' when work is in flight", () 
   assert.strictEqual(pm!.state, "current");
 });
 
+// ── Invariant 6: recalled PM-step regression must be unambiguous ─────────────
+// On recall the server retains pm_approved_at (audit trail) but resets
+// customer-side state. The card must regress the PM step to `current` AND
+// label it so a viewer cannot mistake it for "already approved".
+section("Recalled PM-step regression");
+
+await check("recalled stage regresses PM step to current and labels it as re-approval required", () => {
+  const steps = deriveSteps(
+    "recalled",
+    tw({
+      // Server post-recall row state: status reset to pm_approved,
+      // recalled_at stamped, sent_to_customer_at cleared, pm_approved_at
+      // retained.
+      status: "pm_approved",
+      pmApprovedAt: "2026-04-20T09:00:00Z",
+      recalledAt: "2026-04-27T11:00:00Z",
+      sentToCustomerAt: null,
+    }),
+    false,
+    null,
+  );
+  const pm = steps.find((s) => s.id === "pm");
+  assert.ok(pm, "pm step must exist");
+  assert.strictEqual(
+    pm!.state,
+    "current",
+    "PM step must regress to current on recall regardless of pmApprovedAt",
+  );
+  assert.doesNotMatch(
+    pm!.label,
+    /^PM approved$/,
+    "PM step label must NOT read simply 'PM approved' on a recalled week",
+  );
+  assert.match(
+    pm!.label,
+    /recall|re-approval/i,
+    "PM step label must indicate recall / re-approval required",
+  );
+  // Customer-side steps must be pending — recall clears them server-side.
+  const sent = steps.find((s) => s.id === "sent");
+  assert.strictEqual(sent!.state, "pending");
+});
+
+await check("recalled stage description reflects retained pm_approved_at and cleared customer state", () => {
+  const meta = STAGE_META.recalled;
+  // Description must NOT claim wholesale clearing of timestamps — server
+  // retains pm_approved_at on recall.
+  assert.doesNotMatch(
+    meta.description,
+    /^Week was recalled by the PM\. Timestamps cleared/,
+    "Old wording overstated the reset — must reflect server behaviour",
+  );
+  assert.match(
+    meta.description,
+    /retained|audit/i,
+    "Description must note PM approval timestamp is retained for audit",
+  );
+  assert.match(
+    meta.description,
+    /customer/i,
+    "Description must mention customer-side state is cleared",
+  );
+});
+
+// ── Invariant 7: override path is still blocked when no customer emails ──────
+// PR #10 contract: pm_approved_override must NOT bypass the customer-email
+// guard. The override only relaxes the supervisor requirement; it does not
+// authorise sending to a project that has no customer-facing recipient.
+section("Override path respects customer-email block");
+
+await check("pm_approved_override with zero customer emails → blocked (override does not bypass send guard)", () => {
+  const next = deriveNextAction(
+    "pm_approved_override",
+    tw({
+      status: "pm_approved",
+      pmApprovedAt: "2026-04-27",
+      overrideApproval: {
+        at: "2026-04-27T10:00:00Z",
+        byUserId: 1,
+        reason: "Supervisor unreachable for >48h",
+        evidence: "INC-1042",
+      },
+    }),
+    false,
+    0, // <-- no customer-facing emails on file
+  );
+  assert.strictEqual(
+    next.tone,
+    "blocked",
+    "override path must still hit the blocked tone when no customer emails are on file",
+  );
+  assert.match(next.label, /no customer-facing emails/i);
+});
+
 }
 
 main()
