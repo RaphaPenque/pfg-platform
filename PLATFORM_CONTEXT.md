@@ -452,6 +452,38 @@ These are the rules established as the safe manual workflow for weekly reports, 
 - Smoke test: `tests/smoke/worker-certificates.test.ts`.
 - Files: `server/routes.ts` (POST /api/workers/:id/upload, PUT /api/workers/:workerId/documents).
 
+### Worker document → portal Team SQEP workflow
+This is the full chain from a PM uploading a certificate or passport on the worker profile through the customer-facing Team SQEP zip. Every step is invariant — break any one and the customer pack ships with missing files.
+
+**1. Upload (worker profile → disk + DB row).**
+- `POST /api/workers/:id/upload` writes the file to `/data/uploads/<workerId>/`.
+- `type === "photo"` updates `workers.profile_photo_path`. `type === "passport"` updates `workers.passport_path`. Any `cert_*` type upserts a row in `documents` (see "Worker certificate upload persistence" above).
+
+**2. Read (worker profile / allocation / portal must reconcile the DB row with disk).**
+- Some legacy rows have `file_path = NULL` because of the regression PR #9 fixes. Files often still exist on `/data/uploads/<workerId>/`.
+- The read paths (`GET /api/workers/:id/full`, `GET /api/workers/:workerId/documents`, `GET /api/dashboard`, `GET /api/portal/:code`) all run `reconcileDocsWithDisk(workerId, dbDocs)` and `reconcileWorkerFilePaths(worker)` (`server/routes.ts`). These helpers are **read-only** — they synthesize a `filePath` (or surface a disk-only cert as a `fromDisk: true` doc entry) without writing to the DB. The health check pins this in O4.
+- The static-source assertion in `tests/smoke/worker-certificates.test.ts` ("reconcileDocsWithDisk must not touch the database") guards the read-only contract.
+
+**3. Worker profile UI affordances.**
+- **Certificates tab** renders a download icon for every doc with a non-empty `filePath`; the renderer handles certs surfaced from disk identically to certs sourced from the DB row.
+- **Profile card** shows a passport download icon (`data-testid="passport-download-${worker.id}"`) when `worker.passportPath` is set. The icon is rendered next to the "Passport" header so PMs can download the file even when no passport number / expiry has been captured. Health check: O6.
+
+**4. Customer portal link (Project Hub detail header + Project Allocation card).**
+- Direct click must open the customer portal in a **new tab** with the hash URL `/#/portal/<code>?token=<portalAccessToken>`. Both call sites use a plain `<a target="_blank" rel="noopener noreferrer" href=…>` — wouter's `<Link>` would navigate the current tab, hijacking the PM's working view, which is the user-reported regression. The "Copy link" button on the Project Hub still produces the same URL for sharing externally. Health check: O5a, O5b.
+
+**5. Customer portal Team SQEP zip (`client/src/lib/sqep-pdf.ts → downloadCustomerPack`).**
+- For each unique assigned worker, the export creates `<safeName>/SQEP_<safeName>.pdf` and a `<safeName>/Certificates/` folder, then iterates `worker.documents` and fetches every doc with a non-empty `filePath`. Reconciliation in step 2 is what makes this work for legacy workers (Manuel Rabano on GIL specifically).
+- The export does **not** include passports today. The `worker.passportPath` is rendered on the worker profile but is not bundled into the customer Team SQEP. If passport inclusion is ever required, it must be a deliberate change with explicit customer approval — passports are sensitive personal data.
+- Failed fetches are skipped silently per existing behaviour; the rest of the zip continues.
+
+**Manual QA after deploy (Manuel Rabano on GIL):**
+1. Workforce → Manuel Rabano → upload a PT certificate. Reload — cert row shows download icon.
+2. Open any worker with an existing passport on file → confirm a small download icon appears next to the "Passport" header and the file opens in a new tab.
+3. Project Hub → GIL → click "Customer Portal" — the portal must open in a new tab, the project hub must remain on screen.
+4. On the portal, click "Download Team SQEP" — the resulting zip should contain `<ManuelRabano>/Certificates/` with at least the cert file uploaded in step 1.
+
+Files: `server/routes.ts` (helpers + read paths), `client/src/pages/WorkforceTable.tsx` (passport icon), `client/src/pages/ProjectHubDetail.tsx`, `client/src/pages/ProjectAllocation.tsx` (portal link target), `client/src/lib/sqep-pdf.ts` (Team SQEP zip).
+
 ### Weekly report PDF header (period + progress)
 - Period field uses the reporting **week** (`weekStart`–`weekEnd`) by default. Falls back to project span. **Never blank.**
 - Project Progress is computed from project span at the END of the reported week, clamped 0–100. When project dates are missing, displays `Schedule not available` instead of `126 of 126 days · 0% complete`.
@@ -530,6 +562,43 @@ Every summary card in the platform must be backed by a DB query. This table is t
 ## Changelog
 
 > Keep a running log of significant changes. Most recent first. Format: `YYYY-MM-DD | What changed | Why | Files touched`
+
+### 2026-04-27 (later, follow-up) — Worker Document → Customer Portal Team SQEP Workflow
+
+**Reported by:** RM Andre, after re-testing the Manuel Rabano flow end-to-end. Three additional issues:
+1. Uploaded passports could not be downloaded from the worker profile — the file was on disk and the DB column was set, but no download affordance existed on the card.
+2. Clicking the "Customer Portal" link on the project hub navigated the same tab, forcing the PM to use "Copy link" + manual paste in a new tab instead.
+3. Downloading the Team SQEP from the customer portal did not include Manuel Rabano's certificates folder, even after the PR #9 fix — because pre-existing rows still had `file_path = NULL` (the regression had been wiping pointers for weeks).
+
+**Root causes:**
+- **Passport download**: `WorkforceTable.tsx` rendered passport metadata (number / expiry) but had no `<a href={worker.passportPath}>` anywhere — the column was set but unreachable from the UI.
+- **Portal link direct-click**: `ProjectHubDetail.tsx` and `ProjectAllocation.tsx` used `<Link href="/portal/...">` from wouter's `useHashLocation` router. That produces a same-tab hash navigation; the PM's working view was being replaced by the customer portal. The "Copy link" button alongside built a different URL with `target="_blank"` semantics, which is why copy + paste worked.
+- **SQEP missing certs**: `client/src/lib/sqep-pdf.ts → downloadCustomerPack` correctly iterates `worker.documents` and fetches every entry with a `filePath`, but the portal API was returning the unmodified DB rows. For workers whose `documents.file_path` had been wiped (the PR #9 regression) the SQEP zip simply skipped them — even though the actual cert files were sitting on the persistent disk at `/data/uploads/<workerId>/`.
+
+**Fix (`server/routes.ts`):**
+- New read-only helpers `reconcileDocsWithDisk(workerId, docs)` and `reconcileWorkerFilePaths(worker)`. The first synthesises a `filePath` for any DB doc whose `file_path` is empty but where a matching file exists on disk, and appends a `fromDisk: true` synthetic entry for any `cert_*` file present on disk with no DB row at all. The second backfills `passportPath` / `profilePhotoPath` from disk when those columns are blank. Neither helper writes to the DB — the legacy contract that "the regression must be fixed without overwriting customer data" still holds.
+- Wired into `GET /api/workers/:id/full`, `GET /api/workers/:workerId/documents`, `GET /api/portal/:code`, and `GET /api/dashboard`.
+
+**Fix (frontend):**
+- `client/src/pages/WorkforceTable.tsx` — Passport block now renders next to a small download anchor (`data-testid="passport-download-${worker.id}"`) when `worker.passportPath` is set. The block also opens when only a passport file is on record (no number / expiry yet).
+- `client/src/pages/ProjectHubDetail.tsx` and `client/src/pages/ProjectAllocation.tsx` — replaced the wouter `<Link>` with a plain `<a target="_blank" rel="noopener noreferrer" href={`/#/portal/<code>?token=<portalAccessToken>`}>`. Same testids preserved (`project-customer-portal-link`, `share-customer-${code}`). The "Copy link" button is unchanged.
+
+**Coverage:**
+- `tests/smoke/worker-certificates.test.ts` — extended with five assertions covering the four reconciled read paths, the read-only contract on the helpers, the passport download anchor, the new-tab portal link on both pages, and the SQEP iteration over `worker.documents`.
+- `scripts/health-check.ts` — Section O extended with O4 (read paths reconcile docs with disk), O5a/O5b (portal links open in a new tab), O6 (passport download anchor present).
+- `PLATFORM_CONTEXT.md` — new "Worker document → portal Team SQEP workflow" subsection capturing the full chain and manual QA steps.
+
+**Caveats / what this PR deliberately does NOT do:**
+- No DB writes from any of the read paths. The orphaned rows are reconciled in-memory on every read. The user can still re-upload at their leisure, which will re-set `file_path` via the existing PR #9 cert upsert path.
+- **Passports are NOT included in the Team SQEP zip.** The customer pack contains an SQEP PDF and the worker's certificates folder only. Adding passports to the zip is a deliberate sensitive-data decision that requires explicit business sign-off and is out of scope for this fix.
+- Fetching cert files from disk relies on the renamed-on-upload filename convention (`<CleanName>_<CertType>_<Year>.<ext>`) or the legacy `<type>.<ext>`. Files saved with different naming conventions outside this code path may not be matched; the best signal in those cases remains a fresh re-upload.
+- The portal API still requires the project's `portal_access_token` query param. Public access to passports / certs is unchanged: a customer with a valid portal token who opens the SQEP zip can read everything inside, exactly as before.
+
+**Manual QA after deploy:**
+1. Workforce → Manuel Rabano → certificates tab. Upload a PT/PWT PDF. Reload — cert row shows download icon and dates if entered.
+2. Open any worker with `passport_path` set on the DB row. The "Passport" block on the profile card now has a small download icon next to the header. Click it — the file opens in a new tab.
+3. Project Hub → GIL → click "Customer Portal". Verify the portal opens in a **new tab** (the project hub must remain on screen). The "Copy link" button still copies the same URL for paste-elsewhere use.
+4. From the customer portal, click "Download Team SQEP" — the resulting zip must contain `<ManuelRabano>/Certificates/` with at least the cert files uploaded in step 1 (and any pre-existing cert files that physically exist on `/data/uploads/44/`).
 
 ### 2026-04-27 (later) — Worker Certificate Upload Persistence Fix
 

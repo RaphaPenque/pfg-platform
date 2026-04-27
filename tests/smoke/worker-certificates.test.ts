@@ -127,6 +127,150 @@ check("upsertDocument(workerId, type, name, data) is the only public shape", () 
   );
 });
 
+// ── I4: GET document/worker endpoints reconcile DB rows with disk ────────────
+// Some legacy doc rows have file_path = NULL (the regression PR #9 fixes), but
+// the file may still exist on the persistent disk under
+// /data/uploads/<workerId>/. The read paths must surface those files so
+// passports/certificates remain downloadable from the worker profile and end
+// up inside the customer portal Team SQEP export. The DB is never written to
+// from a GET path.
+section("GET worker/document routes reconcile docs with files on disk");
+
+check("server/routes.ts defines reconcileDocsWithDisk and reconcileWorkerFilePaths", () => {
+  assert.match(
+    ROUTES,
+    /function\s+reconcileDocsWithDisk\s*\(/,
+    "reconcileDocsWithDisk helper must exist (read-only disk → docs reconciliation)",
+  );
+  assert.match(
+    ROUTES,
+    /function\s+reconcileWorkerFilePaths\s*<.*>?\(|function\s+reconcileWorkerFilePaths\s*\(/,
+    "reconcileWorkerFilePaths helper must exist (passport/photo column backfill)",
+  );
+  // The reconciliation path must NEVER mutate the DB. Belt-and-braces guard:
+  // walk from the function declaration to the next top-level `function `
+  // declaration in the file and assert no storage write call appears.
+  const start = ROUTES.indexOf("function reconcileDocsWithDisk");
+  const next = ROUTES.indexOf("\nfunction ", start + 1);
+  const end = next === -1 ? start + 2000 : next;
+  const block = ROUTES.slice(start, end);
+  assert.doesNotMatch(
+    block,
+    /storage\.(update|create|insert|upsertDocument|deleteDocument|deleteWorker|updateWorker|createWorker)/,
+    "reconcileDocsWithDisk must not touch the database",
+  );
+});
+
+check("/api/workers/:id/full reconciles documents and worker file paths", () => {
+  const idx = ROUTES.indexOf('app.get("/api/workers/:id/full"');
+  assert.notStrictEqual(idx, -1, "route must exist");
+  const win = ROUTES.slice(idx, idx + 1500);
+  assert.match(win, /reconcileDocsWithDisk\(\s*worker\.id\s*,/, "must reconcile docs");
+  assert.match(win, /reconcileWorkerFilePaths\(\s*worker\s*\)/, "must reconcile worker file paths");
+});
+
+check("GET /api/workers/:workerId/documents reconciles with disk", () => {
+  const idx = ROUTES.indexOf('app.get("/api/workers/:workerId/documents"');
+  assert.notStrictEqual(idx, -1, "route must exist");
+  const win = ROUTES.slice(idx, idx + 800);
+  assert.match(win, /reconcileDocsWithDisk\(/, "must reconcile docs");
+});
+
+check("/api/portal/:code reconciles each assigned worker's documents with disk", () => {
+  const idx = ROUTES.indexOf('app.get("/api/portal/:code"');
+  assert.notStrictEqual(idx, -1, "portal route must exist");
+  const win = ROUTES.slice(idx, idx + 6000);
+  assert.match(
+    win,
+    /reconcileDocsWithDisk\(\s*wid\s*,/,
+    "portal endpoint must reconcile each worker's docs (so SQEP export can include cert files even if file_path was wiped)",
+  );
+});
+
+check("/api/dashboard reconciles worker documents and file paths", () => {
+  const idx = ROUTES.indexOf('app.get("/api/dashboard"');
+  assert.notStrictEqual(idx, -1, "dashboard route must exist");
+  const win = ROUTES.slice(idx, idx + 5000);
+  assert.match(win, /reconcileDocsWithDisk\(/, "dashboard must reconcile docs");
+  assert.match(win, /reconcileWorkerFilePaths\(/, "dashboard must reconcile worker file paths");
+});
+
+// ── I5: Worker profile UI shows a passport download affordance ───────────────
+section("Worker profile shows a passport download link when passportPath is present");
+
+check("WorkforceTable.tsx renders passport-download-${id} anchor when passportPath set", () => {
+  const TABLE = readFileSync(
+    path.resolve(__dirname, "../../client/src/pages/WorkforceTable.tsx"),
+    "utf8",
+  );
+  assert.match(
+    TABLE,
+    /data-testid=\{`passport-download-\$\{worker\.id\}`\}/,
+    "passport download anchor with stable testid must exist",
+  );
+  assert.match(
+    TABLE,
+    /worker\.passportPath \|\| worker\.passportNumber|worker\.passportExpiry \|\| worker\.passportNumber \|\| worker\.passportPath/,
+    "passport block must render when passportPath alone is present",
+  );
+});
+
+// ── I6: Customer portal link opens in a new tab ──────────────────────────────
+section("Customer portal direct-click opens in a new tab");
+
+check("ProjectHubDetail.tsx renders a target=_blank anchor with the hash URL", () => {
+  const PHD = readFileSync(
+    path.resolve(__dirname, "../../client/src/pages/ProjectHubDetail.tsx"),
+    "utf8",
+  );
+  // Must be a plain <a> with target=_blank and the hash URL — not <Link>.
+  const portalBlockIdx = PHD.indexOf("project-customer-portal-link");
+  assert.notStrictEqual(portalBlockIdx, -1, "portal anchor must exist");
+  // Look at the anchor element preceding the testid.
+  const window = PHD.slice(Math.max(0, portalBlockIdx - 500), portalBlockIdx + 200);
+  assert.match(window, /target="_blank"/, "must use target=_blank");
+  assert.match(window, /rel="noopener noreferrer"/, "must use rel=noopener noreferrer");
+  assert.match(
+    window,
+    /href=\{`\/#\/portal\/\$\{project\.code\}\?token=\$\{project\.portalAccessToken\}`\}/,
+    "must use the hash-routed portal URL with token",
+  );
+});
+
+check("ProjectAllocation.tsx Share-with-Customer link opens in a new tab", () => {
+  const PA = readFileSync(
+    path.resolve(__dirname, "../../client/src/pages/ProjectAllocation.tsx"),
+    "utf8",
+  );
+  const idx = PA.indexOf("share-customer-${card.project.code}");
+  assert.notStrictEqual(idx, -1, "share-customer anchor must exist");
+  const win = PA.slice(Math.max(0, idx - 500), idx + 200);
+  assert.match(win, /target="_blank"/, "must use target=_blank");
+  assert.match(
+    win,
+    /href=\{`\/#\/portal\/\$\{card\.project\.code\}\?token=\$\{card\.project\.portalAccessToken\}`\}/,
+    "must use the hash-routed portal URL with token",
+  );
+});
+
+// ── I7: SQEP customer pack walks documents.filePath and includes cert files ─
+section("Team SQEP export pulls every doc with a filePath into the worker's Certificates folder");
+
+check("downloadCustomerPack iterates worker.documents and fetches d.filePath", () => {
+  const SQEP = readFileSync(
+    path.resolve(__dirname, "../../client/src/lib/sqep-pdf.ts"),
+    "utf8",
+  );
+  assert.match(SQEP, /export async function downloadCustomerPack\(/, "function must exist");
+  const idx = SQEP.indexOf("downloadCustomerPack");
+  const win = SQEP.slice(idx, idx + 3000);
+  assert.match(win, /worker\.id/, "iterates workers");
+  assert.match(win, /\.documents/, "reads worker.documents");
+  assert.match(win, /Certificates/, "creates a Certificates folder per worker");
+  assert.match(win, /d\.filePath/, "skips entries without filePath");
+  assert.match(win, /fetch\(d\.filePath/, "fetches each cert file's URL");
+});
+
 if (process.exitCode) {
   console.error("\nFAIL");
   process.exit(process.exitCode);

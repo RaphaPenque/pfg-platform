@@ -1730,9 +1730,28 @@ function WorkerDetail({ worker }: { worker: DashboardWorker }) {
               })()}
 
               {/* Passport fields */}
-              {(worker.passportExpiry || worker.passportNumber) && (
+              {(worker.passportExpiry || worker.passportNumber || worker.passportPath) && (
                 <>
-                  <div className="text-[10px] font-bold uppercase tracking-wide mt-3 pt-3 border-t" style={{ color: "var(--pfg-navy)", borderColor: "hsl(var(--border))" }}>Passport</div>
+                  <div className="text-[10px] font-bold uppercase tracking-wide mt-3 pt-3 border-t flex items-center justify-between" style={{ color: "var(--pfg-navy)", borderColor: "hsl(var(--border))" }}>
+                    <span>Passport</span>
+                    {worker.passportPath && (
+                      <a
+                        href={worker.passportPath}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center justify-center w-5 h-5 rounded hover:opacity-80 transition"
+                        style={{ background: "hsl(var(--muted))" }}
+                        title="Download passport"
+                        data-testid={`passport-download-${worker.id}`}
+                      >
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--pfg-steel)" }}>
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                          <polyline points="7 10 12 15 17 10"/>
+                          <line x1="12" y1="15" x2="12" y2="3"/>
+                        </svg>
+                      </a>
+                    )}
+                  </div>
                   <div className="space-y-1 mt-1.5">
                     {worker.passportNumber && (
                       <div className="flex flex-col gap-0.5">
