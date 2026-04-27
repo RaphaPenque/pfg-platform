@@ -641,14 +641,14 @@ export function registerRoutes(server: Server, app: Express) {
       if (agg.pdfBase64) {
         const buf = Buffer.from(agg.pdfBase64, 'base64');
         res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename="${code}-weekly-report-wc-${report.weekCommencing}.pdf"`);
+        res.setHeader('Content-Disposition', `attachment; filename="${code}_weekly_report_wc_${report.weekCommencing}.pdf"`);
         res.setHeader('Content-Length', buf.length);
         return res.end(buf);
       }
       // Fallback: serve from disk if pdfPath exists
       if (report.pdfPath && fs.existsSync(report.pdfPath)) {
         res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename="${code}-weekly-report-wc-${report.weekCommencing}.pdf"`);
+        res.setHeader('Content-Disposition', `attachment; filename="${code}_weekly_report_wc_${report.weekCommencing}.pdf"`);
         return res.sendFile(report.pdfPath);
       }
       return res.status(404).json({ error: "PDF not yet generated" });
