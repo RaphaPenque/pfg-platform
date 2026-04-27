@@ -9,6 +9,13 @@
  *   GET  /api/weekly-ops/status?projectId=&weekCommencing=        — status for a project + week
  *   POST /api/weekly-ops/resend-supervisor-link                   — resend a single supervisor link (day|night)
  *   POST /api/weekly-ops/generate-weekly-report                   — generate + email weekly report (customer-facing)
+ *   POST /api/weekly-ops/generate-weekly-report-preview           — generate weekly report PDF + draft DB row, NO email
+ *
+ * FUTURE (not yet implemented):
+ *   POST /api/weekly-ops/approve-without-supervisor               — let a PM approve a timesheet
+ *     week even though no supervisor has submitted, e.g. when supervisor link delivery has
+ *     failed or the supervisor is unreachable. Should be gated to admin/PM, require an
+ *     audit-logged reason, and live next to the existing supervisor-resend flow above.
  *
  * NOTE: The send-customer-timesheets and supervisor sends ALWAYS hit live email.
  * The frontend gates the customer-facing actions behind explicit confirmations.
@@ -498,6 +505,61 @@ export function registerWeeklyOpsRoutes(
           LIMIT 1
         `);
         return res.json({ ok: true, weeklyReport: wrRes.rows[0] || null });
+      } catch (e: any) {
+        return res.status(500).json({ error: e.message || String(e) });
+      }
+    },
+  );
+
+  // ── POST /api/weekly-ops/generate-weekly-report-preview ─────────────────
+  // Internal preview only — generates PDF + writes draft weekly_reports row,
+  // does NOT email anyone. Targets an explicit weekCommencing so PMs can
+  // preview a chosen week (e.g. w/c 2026-04-20) regardless of which daily
+  // reports were most recently published.
+  // Body: { projectId, weekCommencing }
+  app.post(
+    "/api/weekly-ops/generate-weekly-report-preview",
+    requireAuth,
+    requireRole("admin", "project_manager", "resource_manager"),
+    async (req: Request, res: Response) => {
+      try {
+        const { projectId, weekCommencing } = req.body || {};
+        const pid = parseInt(String(projectId), 10);
+        if (!pid || isNaN(pid)) return res.status(400).json({ error: "projectId required" });
+
+        const wc = parseWeekCommencing(weekCommencing);
+
+        const { generateWeeklyReportPreview } = await import("./report-scheduler");
+        const projRes = await db.execute(sql`SELECT * FROM projects WHERE id = ${pid}`);
+        const project: any = projRes.rows[0];
+        if (!project) return res.status(404).json({ error: "Project not found" });
+
+        const result = await generateWeeklyReportPreview(project, wc);
+
+        const portalToken = project.portal_access_token;
+        const previewPortalUrl = portalToken
+          ? `${APP_URL}/#/portal/${project.code}?token=${portalToken}&preview=1`
+          : `${APP_URL}/#/portal/${project.code}?preview=1`;
+        const pdfUrl = `/api/portal/${project.code}/weekly-reports/${result.weeklyReportId}/pdf?preview=1${portalToken ? `&token=${portalToken}` : ""}`;
+
+        return res.json({
+          ok: true,
+          mode: "preview",
+          emailedCustomer: false,
+          weeklyReport: {
+            id: result.weeklyReportId,
+            status: result.status,
+            weekCommencing: result.weekStart,
+            weekEnding: result.weekEnd,
+            hasPdf: result.hasPdf,
+            publishedDailyReports: result.publishedDailyReports,
+          },
+          previewPortalUrl,
+          pdfUrl,
+          message: result.publishedDailyReports === 0
+            ? "Preview generated but no daily reports were published for this week — the report content will be empty."
+            : `Preview generated from ${result.publishedDailyReports} published daily report(s) for w/c ${result.weekStart}.`,
+        });
       } catch (e: any) {
         return res.status(500).json({ error: e.message || String(e) });
       }

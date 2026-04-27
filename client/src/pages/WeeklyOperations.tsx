@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, RefreshCw, Send, FileText, AlertTriangle, CheckCircle2, Clock, XCircle, Info } from "lucide-react";
+import { Loader2, RefreshCw, Send, FileText, AlertTriangle, CheckCircle2, Clock, XCircle, Info, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -124,7 +124,7 @@ type WeeklyOpsStatus = {
   assignments: { day: number; night: number; total: number; hasNightShift: boolean };
   weeklyReport: null | {
     id: number;
-    status: string;
+    status: string; // "draft" | "published"
     sentAt: string | null;
     hasPdf: boolean;
     hasAggregatedData: boolean;
@@ -222,6 +222,32 @@ export default function WeeklyOperations() {
     },
     onError: (err: any) => {
       toast({ title: "Failed to generate weekly report", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const previewMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/weekly-ops/generate-weekly-report-preview", {
+        projectId,
+        weekCommencing,
+      });
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: "Preview generated (no email sent)",
+        description:
+          data.message ||
+          `Draft weekly report saved for w/c ${data.weeklyReport?.weekCommencing || weekCommencing}.`,
+      });
+      qc.invalidateQueries({ queryKey: ["/api/weekly-ops/status", projectId, weekCommencing] });
+      // Open preview portal in a new tab so PM can inspect what the customer would see
+      if (data?.previewPortalUrl) {
+        window.open(data.previewPortalUrl, "_blank", "noopener,noreferrer");
+      }
+    },
+    onError: (err: any) => {
+      toast({ title: "Failed to generate preview", description: err.message, variant: "destructive" });
     },
   });
 
@@ -510,9 +536,11 @@ export default function WeeklyOperations() {
                 label="Weekly report generated &amp; sent"
                 detail={
                   status.weeklyReport?.sentAt
-                    ? fmtDateTime(status.weeklyReport.sentAt)
+                    ? `Sent ${fmtDateTime(status.weeklyReport.sentAt)} (status: ${status.weeklyReport.status})`
                     : status.weeklyReport
-                    ? `Report row exists (id ${status.weeklyReport.id}) but not sent.`
+                    ? status.weeklyReport.status === "draft"
+                      ? `Draft preview exists (id ${status.weeklyReport.id}) — not sent to customer.`
+                      : `Report row exists (id ${status.weeklyReport.id}, status: ${status.weeklyReport.status}) but not sent.`
                     : "No weekly report row yet."
                 }
                 testId="step-weekly-report"
@@ -561,6 +589,21 @@ export default function WeeklyOperations() {
                 {tw?.nightSupTokenExists ? "Resend night supervisor link" : "Send night supervisor link"}
               </Button>
               <Button
+                variant="outline"
+                size="sm"
+                disabled={previewMutation.isPending || generateMutation.isPending}
+                onClick={() => previewMutation.mutate()}
+                data-testid="action-generate-preview-report"
+                title="Generate a draft report PDF and portal preview for this week — does NOT email the customer."
+              >
+                {previewMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                ) : (
+                  <Eye className="w-4 h-4 mr-1.5" />
+                )}
+                Generate preview (no email)
+              </Button>
+              <Button
                 variant="default"
                 size="sm"
                 disabled={generateMutation.isPending || customerEmails.length === 0}
@@ -587,6 +630,12 @@ export default function WeeklyOperations() {
                 <strong>Resend supervisor link</strong> generates a fresh token and emails it to the
                 first Superintendent / Foreman matching the selected shift on this project. Any
                 previous link becomes invalid.
+              </div>
+              <div>
+                <strong>Generate preview (no email)</strong> builds the report PDF and saves a{" "}
+                <em>draft</em> weekly_reports row for the selected week. No emails are sent and
+                customers cannot see drafts on the live portal. The preview portal opens in a new
+                tab for internal review.
               </div>
               <div>
                 <strong>Generate &amp; send weekly report</strong> calls the existing report pipeline.
