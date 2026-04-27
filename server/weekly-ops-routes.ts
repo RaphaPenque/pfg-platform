@@ -154,7 +154,7 @@ export function registerWeeklyOpsRoutes(
           const r = await db.execute(sql`
             SELECT COUNT(*)::int  as cnt,
                    COUNT(DISTINCT worker_id)::int as workers,
-                   COALESCE(SUM(total_hours), 0) as total_hours
+                   COALESCE(SUM(CASE WHEN day_type = 'working' THEN total_hours ELSE 0 END), 0) as total_hours
             FROM timesheet_entries WHERE timesheet_week_id = ${tw.id}
           `);
           const row: any = r.rows[0] || {};

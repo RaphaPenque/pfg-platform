@@ -14,6 +14,7 @@ import {
   ChevronRight, AlertCircle, Loader2, Users, Calendar, FileText,
   X, Check, Info
 } from "lucide-react";
+import { sumPaidHours } from "@shared/timesheet-hours";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -546,7 +547,7 @@ function SupervisorGrid({ week, entries, userRole, onRefresh }: {
           </thead>
           <tbody>
             {sortedWorkers.map((worker, wi) => {
-              const totalHours = worker.entries.reduce((sum, e) => sum + (parseFloat(e.total_hours || "0") || 0), 0);
+              const totalHours = sumPaidHours(worker.entries);
               return (
                 <tr key={wi} style={{ borderBottom: "1px solid hsl(var(--border))" }}>
                   <td style={{ padding: "10px 12px", background: wi % 2 === 0 ? "hsl(var(--muted))" : "#fff" }}>
@@ -674,7 +675,7 @@ function PmApprovalPanel({ week, entries, onRefresh }: {
 
   // Summary stats
   const workerIds = Array.from(new Set(entries.map(e => e.worker_id)));
-  const totalHours = entries.reduce((sum, e) => sum + (parseFloat(e.total_hours || "0") || 0), 0);
+  const totalHours = sumPaidHours(entries);
   const mobCount = entries.filter(e => e.day_type === "mob" || e.day_type === "partial_mob").length;
   const demobCount = entries.filter(e => e.day_type === "demob" || e.day_type === "partial_demob").length;
   const sickCount = entries.filter(e => e.day_type === "absent_sick").length;

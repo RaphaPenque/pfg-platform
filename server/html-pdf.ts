@@ -6,6 +6,7 @@
 import { chromium } from "playwright";
 import * as fs from "fs";
 import * as path from "path";
+import { paidHours, sumPaidHours } from "../shared/timesheet-hours";
 
 /** Render an HTML string to a PDF file saved at outPath */
 export async function renderHtmlToPdf(
@@ -109,7 +110,7 @@ export async function generateTimesheetPdfHtml(tw: any, entries: any[], outPath:
         if (!entry) return `<td class="c-day rest" style="text-align:center;font-size:10px;">—</td>`;
         const cls = dayTypeClass(entry.day_type);
         const label = dayTypeLabel(entry.day_type);
-        const hrs = parseFloat(entry.total_hours || "0") || 0;
+        const hrs = paidHours(entry);
         total += hrs;
         if (cls) return `<td class="c-day ${cls}" style="text-align:center;font-size:10px;">${label}</td>`;
         const override = entry.is_override ? " override" : "";
@@ -138,8 +139,8 @@ export async function generateTimesheetPdfHtml(tw: any, entries: any[], outPath:
     <span style="display:block;font-size:9px;font-weight:400;color:rgba(255,255,255,0.5);margin-top:1px;">${fmtDate(d)}</span>
   </th>`).join("");
 
-  const dayGrandTotal = dayWorkers.reduce((s,w) => s + w.entries.reduce((ss,e) => ss + (parseFloat(e.total_hours||"0")||0), 0), 0);
-  const nightGrandTotal = nightWorkers.reduce((s,w) => s + w.entries.reduce((ss,e) => ss + (parseFloat(e.total_hours||"0")||0), 0), 0);
+  const dayGrandTotal = dayWorkers.reduce((s,w) => s + sumPaidHours(w.entries), 0);
+  const nightGrandTotal = nightWorkers.reduce((s,w) => s + sumPaidHours(w.entries), 0);
   const grandTotal = dayGrandTotal + nightGrandTotal;
 
   const approvalBlock = tw.approval_name ? `
