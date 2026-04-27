@@ -10,6 +10,7 @@ import { promisify } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { formatPeriod, computeProgress } from '../shared/report-period';
 
 const execFileAsync = promisify(execFile);
 
@@ -699,7 +700,23 @@ export async function generateWeeklyReportPdfHtml(data: ReportData): Promise<Buf
   const nDelays = data.delaysLog.length;
   const nComments = data.commentsEntries.length;
   const nTeam = data.teamMembers.length;
-  const pct = data.progressPct;
+  // Period label for the header — never blank: prefer the reporting week,
+  // fall back to project dates, and finally to "—".
+  const periodLabel = formatPeriod({
+    weekStart: data.weekStart,
+    weekEnd: data.weekEnd,
+    projectStart: data.startDate,
+    projectEnd: data.endDate,
+  }) || "—";
+  // Project progress is computed against the END of the reporting week so the
+  // header is consistent with what the customer is reading. The template
+  // previously hardcoded "126 of 126 days" — replaced with the real total.
+  const progress = computeProgress({
+    projectStart: data.startDate,
+    projectEnd: data.endDate,
+    weekEnd: data.weekEnd,
+  });
+  const pct = progress.available ? progress.percent : 0;
   const nRem = data.daysRemaining;
   const obsPos = (data as any).safetyObservations?.filter((o: any) => o.observationType==="positive").length || 0;
   const obsUnsafe = (data as any).safetyObservations?.filter((o: any) => o.observationType==="unsafe_condition").length || 0;
@@ -731,7 +748,7 @@ tr{page-break-inside:auto;break-inside:auto}
   <div style="margin-bottom:14px">
     <div style="font-size:11px;color:#9CA3AF;margin-bottom:3px">${data.customer} &middot; ${data.projectCode} &middot; ${data.siteName}</div>
     <div style="display:flex;gap:24px;font-size:12px;color:#6B7280;flex-wrap:wrap">
-      <span>Period &nbsp;<strong style="color:#374151">${sd(data.startDate)} &rarr; ${sd(data.endDate)}</strong></span>
+      <span>Period &nbsp;<strong style="color:#374151">${periodLabel}</strong></span>
       <span>PM &nbsp;<strong style="color:#374151">${data.pmName}</strong></span>
       <span>Contract &nbsp;<strong style="color:#374151">${data.contractType||"T&M"}</strong></span>
     </div>
@@ -740,7 +757,7 @@ tr{page-break-inside:auto;break-inside:auto}
   <div style="margin-bottom:16px">
     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
       <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:#6B7280">Project Progress</div>
-      <div style="font-size:12px;font-weight:700;color:#1a2744">${data.daysRemaining !== undefined ? (126-data.daysRemaining) : 0} of 126 days &nbsp;&middot;&nbsp; ${pct}% complete</div>
+      <div style="font-size:12px;font-weight:700;color:#1a2744">${progress.available ? `${progress.elapsedDays} of ${progress.totalDays} days &nbsp;&middot;&nbsp; ${pct}% complete` : 'Schedule not available'}</div>
     </div>
     <div style="height:4px;background:#E5E7EB;border-radius:2px"><div style="height:100%;width:${pct}%;background:#005E60;border-radius:2px"></div></div>
     <div style="display:flex;justify-content:space-between;font-size:10px;color:#9CA3AF;margin-top:3px"><span>Mobilisation</span><span>Outage Execution</span><span>Demob</span></div>
