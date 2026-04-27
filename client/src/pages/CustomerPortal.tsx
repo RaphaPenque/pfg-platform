@@ -412,19 +412,23 @@ function DelaysAccordion({ delays }: { delays: any[] }) {
 
 
 // ─── Weekly Reports Tab ──────────────────────────────────────────────────────
-function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs = [], publishedReports: portalReports = [], safetyData: portalSafetyData = {}, teamMembers: portalTeamMembers = [], portalToken = null }: { projectCode: string; color: string; project: any; standaloneConcernLogs?: any[]; publishedReports?: any[]; safetyData?: any; teamMembers?: any[]; portalToken?: string | null }) {
+function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs = [], publishedReports: portalReports = [], safetyData: portalSafetyData = {}, teamMembers: portalTeamMembers = [], portalToken = null, isPreview = false }: { projectCode: string; color: string; project: any; standaloneConcernLogs?: any[]; publishedReports?: any[]; safetyData?: any; teamMembers?: any[]; portalToken?: string | null; isPreview?: boolean }) {
   const [expanded, setExpanded] = React.useState<number | null>(null);
-  const tokenParam = portalToken ? `?token=${portalToken}` : '';
+  const qsParts: string[] = [];
+  if (portalToken) qsParts.push(`token=${portalToken}`);
+  if (isPreview) qsParts.push(`preview=1`);
+  const tokenParam = qsParts.length ? `?${qsParts.join('&')}` : '';
 
   const { data: reports = [], isLoading } = useQuery({
-    queryKey: [`/api/portal/${projectCode}/weekly-reports`, portalToken],
+    queryKey: [`/api/portal/${projectCode}/weekly-reports`, portalToken, isPreview],
     queryFn: async () => {
-      const res = await fetch(`/api/portal/${projectCode}/weekly-reports${tokenParam}`);
+      const res = await fetch(`/api/portal/${projectCode}/weekly-reports${tokenParam}`, { credentials: 'include' });
       if (!res.ok) throw new Error("Failed to load reports");
       return res.json() as Promise<Array<{
         id: number;
         weekCommencing: string;
         weekEnding: string;
+        status?: string;
         hasPdf: boolean;
         sentAt: string;
         aggregatedData: {
@@ -498,11 +502,15 @@ function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs =
   );
 
   return (
-    <div style={{ animation: "fadeIn 180ms ease-out" }}>
+    <div style={{ animation: "fadeIn 180ms ease-out" }} data-testid="weekly-reports-tab">
       <div style={{ marginBottom: 20 }}>
         <h2 style={{ fontSize: 16, fontWeight: 700, color: "#1a2744" }}>Weekly Project Reports</h2>
         <p style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>
-          Published every Sunday · {displayReports.length} week{displayReports.length !== 1 ? "s" : ""} available · PDF download on each report
+          {isPreview ? (
+            <>Internal preview mode · {displayReports.length} report{displayReports.length !== 1 ? "s" : ""} (drafts included) · PDF download on each report</>
+          ) : (
+            <>Published every Sunday · {displayReports.length} week{displayReports.length !== 1 ? "s" : ""} available · PDF download on each report</>
+          )}
         </p>
       </div>
 
@@ -510,6 +518,12 @@ function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs =
         {displayReports.map(report => {
           const isOpen = expanded === report.id;
           const { heading } = fmtWeek(report.weekCommencing, report.weekEnding);
+          const isDraft = (report as any).status === 'draft';
+          // Build PDF query string per-card so each card downloads its own report
+          const pdfQs: string[] = [];
+          if (portalToken) pdfQs.push(`token=${portalToken}`);
+          if (isPreview && isDraft) pdfQs.push(`preview=1`);
+          const pdfHref = `/api/portal/${projectCode}/weekly-reports/${report.id}/pdf${pdfQs.length ? `?${pdfQs.join('&')}` : ''}`;
           const d = report.aggregatedData || {};
           const delays = d.delays || [];
           // Merge stored comments with any standalone concern log entries for this week
@@ -524,16 +538,23 @@ function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs =
           const team = d.teamMembers || [];
 
           return (
-            <div key={report.id} style={{ background: "#fff", border: `1px solid ${isOpen ? color + "44" : "#E5E7EB"}`, borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", transition: "border-color 0.15s" }}>
+            <div key={report.id} data-testid={`report-card-${report.weekCommencing}`} data-report-id={report.id} data-report-status={isDraft ? 'draft' : 'published'} style={{ background: "#fff", border: `1px solid ${isOpen ? color + "44" : isDraft ? "#F5BD00" : "#E5E7EB"}`, borderRadius: 10, overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", transition: "border-color 0.15s" }}>
 
               {/* Header row */}
               <div
                 onClick={() => setExpanded(isOpen ? null : report.id)}
                 style={{ display: "flex", alignItems: "center", gap: 16, padding: "16px 20px", cursor: "pointer", userSelect: "none" }}
               >
-                <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#16A34A", flexShrink: 0 }} />
+                <div style={{ width: 8, height: 8, borderRadius: "50%", background: isDraft ? "#F5BD00" : "#16A34A", flexShrink: 0 }} />
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "#111827" }}>{heading}</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#111827", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span data-testid={`report-heading-${report.weekCommencing}`}>{heading}</span>
+                    {isDraft && (
+                      <span data-testid="report-draft-pill" style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: "#92400E", background: "#FEF3C7", border: "1px solid #FDE68A", padding: "2px 8px", borderRadius: 999 }}>
+                        Draft preview · not yet sent
+                      </span>
+                    )}
+                  </div>
                   <div style={{ fontSize: 11, color: "#9CA3AF", marginTop: 2 }}>
                     {tasks.length} task{tasks.length !== 1 ? "s" : ""} · {delays.length} delay{delays.length !== 1 ? "s" : ""} · {comments.length} comment{comments.length !== 1 ? "s" : ""}
                   </div>
@@ -542,7 +563,8 @@ function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs =
                   {/* Download PDF — show for real reports with PDF, or offer print for fallback */}
                   {report.hasPdf ? (
                     <a
-                      href={`/api/portal/${projectCode}/weekly-reports/${report.id}/pdf${tokenParam}`}
+                      href={pdfHref}
+                      data-testid={`report-pdf-${report.weekCommencing}`}
                       download
                       onClick={e => e.stopPropagation()}
                       style={{ fontSize: 11, fontWeight: 600, color: color, background: color + "15", padding: "4px 10px", borderRadius: 5, textDecoration: "none", display: "flex", alignItems: "center", gap: 4 }}
@@ -552,6 +574,7 @@ function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs =
                   ) : (
                     <a
                       href={`/api/portal/${projectCode}/weekly-reports/print?wc=${report.weekCommencing}${portalToken ? `&token=${portalToken}` : ''}`}
+                      data-testid={`report-pdf-${report.weekCommencing}`}
                       target="_blank"
                       rel="noreferrer"
                       onClick={e => e.stopPropagation()}
@@ -711,6 +734,20 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
     if (hashQ === -1) return null;
     const qs = new URLSearchParams(hash.slice(hashQ + 1));
     return qs.get('token');
+  }, [params.projectCode]);
+
+  // Detect preview=1 — internal PM preview mode (also requires a valid pfg_session cookie on the server side)
+  const isPreview = useMemo(() => {
+    const qIndex = params.projectCode.indexOf('?');
+    if (qIndex !== -1) {
+      const qs = new URLSearchParams(params.projectCode.slice(qIndex + 1));
+      if (qs.get('preview') === '1') return true;
+    }
+    const hash = window.location.hash;
+    const hashQ = hash.indexOf('?');
+    if (hashQ === -1) return false;
+    const qs = new URLSearchParams(hash.slice(hashQ + 1));
+    return qs.get('preview') === '1';
   }, [params.projectCode]);
 
   // Strip token from projectCode if wouter included it
@@ -938,13 +975,24 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
                     {customer}
                   </span>
                 )}
-                {/* Reporting week badge */}
-                <span
-                  className="ml-auto text-[11px] font-bold px-3 py-1 rounded-full whitespace-nowrap"
-                  style={{ background: "#F5BD00", color: "#1A1D23", letterSpacing: "0.03em" }}
-                >
-                  REPORTING WEEK: {reportingWeek}
-                </span>
+                {/* Reporting week badge — switches to PREVIEW MODE when ?preview=1 */}
+                {isPreview ? (
+                  <span
+                    data-testid="preview-mode-banner"
+                    className="ml-auto text-[11px] font-bold px-3 py-1 rounded-full whitespace-nowrap"
+                    style={{ background: "#FEF3C7", color: "#92400E", border: "1px solid #FDE68A", letterSpacing: "0.03em" }}
+                    title="Internal PM preview — drafts visible. Open the Project Reports tab to view the draft week."
+                  >
+                    PREVIEW MODE — DRAFTS VISIBLE
+                  </span>
+                ) : (
+                  <span
+                    className="ml-auto text-[11px] font-bold px-3 py-1 rounded-full whitespace-nowrap"
+                    style={{ background: "#F5BD00", color: "#1A1D23", letterSpacing: "0.03em" }}
+                  >
+                    REPORTING WEEK: {reportingWeek}
+                  </span>
+                )}
               </div>
 
               <div className="flex items-center gap-3 flex-wrap" style={{ color: color }}>
@@ -1314,7 +1362,7 @@ export default function CustomerPortal({ params }: { params: { projectCode: stri
 
         {/* ════════════════ TAB 2: PROJECT REPORTS ════════════════ */}
         {activeTab === "reports" && (
-          <WeeklyReportsTab projectCode={projectCode} color={color} project={project} standaloneConcernLogs={standaloneConcernLogs} publishedReports={publishedReports} safetyData={safetyData} teamMembers={teamMembers} portalToken={portalToken} />
+          <WeeklyReportsTab projectCode={projectCode} color={color} project={project} standaloneConcernLogs={standaloneConcernLogs} publishedReports={publishedReports} safetyData={safetyData} teamMembers={teamMembers} portalToken={portalToken} isPreview={isPreview} />
         )}
 
         {/* ════════════════ TAB 3: HEALTH & SAFETY ════════════════ */}

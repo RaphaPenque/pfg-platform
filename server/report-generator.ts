@@ -643,7 +643,19 @@ export async function generateWeeklyReportPdfHtml(data: ReportData): Promise<Buf
     return `<div style="border:1px solid #E5E7EB;border-radius:6px;padding:10px 14px;border-top:2px solid ${accent}"><div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#9CA3AF;margin-bottom:4px;white-space:nowrap">${label}</div><div style="font-size:17px;font-weight:700;color:${accent};line-height:1">${value}</div><div style="font-size:11px;color:#9CA3AF;margin-top:3px">${sub}</div></div>`;
   }
 
-  // Safety obs rows
+  // HTML escape for free-text fields rendered inside table cells, so quotes/angle
+  // brackets/ampersands don't break layout or get swallowed silently.
+  function esc(s: string): string {
+    return String(s ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  // Safety obs rows — allow long descriptions to wrap fully across multiple
+  // lines instead of truncating at 100 chars (PDF was cutting mid-sentence).
   const obsRows = (data as any).safetyObservations?.map((o: any, i: number) => {
     const typeMap: Record<string,string> = {positive:"Positive",unsafe_condition:"Unsafe",negative:"Negative",stop_work:"Stop Work"};
     const colorMap: Record<string,string> = {positive:"#15803D",unsafe_condition:"#B45309",negative:"#DC2626",stop_work:"#DC2626"};
@@ -651,14 +663,14 @@ export async function generateWeeklyReportPdfHtml(data: ReportData): Promise<Buf
     const lbl = typeMap[t] || t;
     const tc = colorMap[t] || "#374151";
     const bg = i%2===0 ? "#F9FAFB" : "#fff";
-    const desc = ((o.description||"") as string).substring(0,100) + ((o.description||"").length > 100 ? "..." : "");
-    return `<tr style="background:${bg}"><td style="color:#6B7280;font-size:12px;white-space:nowrap">${sd(o.observationDate||"")}</td><td style="color:${tc};font-weight:600;font-size:12px">${lbl}</td><td style="color:#6B7280;font-size:12px">${o.locationOnSite||""}</td><td style="font-size:12px">${desc}</td></tr>`;
+    const desc = esc(o.description || "");
+    return `<tr style="background:${bg}"><td style="color:#6B7280;font-size:12px;white-space:nowrap;vertical-align:top">${sd(o.observationDate||"")}</td><td style="color:${tc};font-weight:600;font-size:12px;vertical-align:top">${lbl}</td><td style="color:#6B7280;font-size:12px;vertical-align:top">${esc(o.locationOnSite||"")}</td><td style="font-size:12px;vertical-align:top;word-break:break-word;overflow-wrap:break-word;white-space:normal;line-height:1.45">${desc}</td></tr>`;
   }).join("") || "";
 
   // TBT rows
   const tbtRows = (data as any).toolboxTalks?.map((t: any, i: number) => {
     const bg = i%2===0 ? "#F9FAFB" : "#fff";
-    return `<tr style="background:${bg}"><td style="color:#6B7280;font-size:12px;white-space:nowrap">${sd(t.reportDate||"")}</td><td style="font-size:12px">${t.topic||""}</td><td style="text-align:right;color:#6B7280;font-size:12px">${t.attendeeCount||""}</td></tr>`;
+    return `<tr style="background:${bg}"><td style="color:#6B7280;font-size:12px;white-space:nowrap;vertical-align:top">${sd(t.reportDate||"")}</td><td style="font-size:12px;vertical-align:top">${esc(t.topic||"")}</td><td style="text-align:right;color:#6B7280;font-size:12px;vertical-align:top">${esc(String(t.attendeeCount||""))}</td></tr>`;
   }).join("") || "";
 
   // Delays rows
@@ -666,19 +678,19 @@ export async function generateWeeklyReportPdfHtml(data: ReportData): Promise<Buf
     const bg = i%2===0 ? "#F9FAFB" : "#fff";
     const resp = (d as any).responsibility || "";
     const dur = d.duration ? `${d.duration}${(d as any).durationUnit||"h"}` : "";
-    return `<tr style="background:${bg}"><td style="color:#6B7280;font-size:12px;white-space:nowrap">${sd((d as any).date||"")} &middot; ${dur}</td><td style="color:#6B7280;font-size:12px">${resp}</td><td style="font-size:12px">${d.description||""}</td></tr>`;
+    return `<tr style="background:${bg}"><td style="color:#6B7280;font-size:12px;white-space:nowrap;vertical-align:top">${sd((d as any).date||"")} &middot; ${esc(dur)}</td><td style="color:#6B7280;font-size:12px;vertical-align:top">${esc(resp)}</td><td style="font-size:12px;vertical-align:top">${esc(d.description||"")}</td></tr>`;
   }).join("");
 
   // Comments
   const commentsHtml = data.commentsEntries.map(c => {
-    const paras = c.entry.split("\n").filter((p: string) => p.trim()).map((p: string) => `<p style="margin:0 0 5px 0">${p}</p>`).join("");
+    const paras = c.entry.split("\n").filter((p: string) => p.trim()).map((p: string) => `<p style="margin:0 0 5px 0">${esc(p)}</p>`).join("");
     return `<div style="padding:12px 0;border-bottom:1px solid #F3F4F6;display:grid;grid-template-columns:44px 1fr;gap:14px"><div style="font-size:10px;font-weight:700;color:#005E60;text-transform:uppercase;padding-top:2px">${sd(c.date)}</div><div style="font-size:12px;color:#374151;line-height:1.55">${paras}</div></div>`;
   }).join("");
 
   // Team rows
   const teamRows = data.teamMembers.map((m, i) => {
     const bg = i%2===0 ? "#F9FAFB" : "#fff";
-    return `<tr style="background:${bg}"><td style="font-weight:500;font-size:12px">${m.name}</td><td style="color:#6B7280;font-size:12px">${m.role}</td><td style="color:#6B7280;font-size:12px">${m.shift}</td><td style="color:#6B7280;font-size:12px;white-space:nowrap">${sd(m.startDate)}</td><td style="color:#6B7280;font-size:12px;white-space:nowrap">${sd(m.endDate)}</td></tr>`;
+    return `<tr style="background:${bg}"><td style="font-weight:500;font-size:12px;vertical-align:top">${esc(m.name)}</td><td style="color:#6B7280;font-size:12px;vertical-align:top">${esc(m.role)}</td><td style="color:#6B7280;font-size:12px;vertical-align:top">${esc(m.shift)}</td><td style="color:#6B7280;font-size:12px;white-space:nowrap;vertical-align:top">${sd(m.startDate)}</td><td style="color:#6B7280;font-size:12px;white-space:nowrap;vertical-align:top">${sd(m.endDate)}</td></tr>`;
   }).join("");
 
   const nObs = (data as any).safetyObservations?.length || data.safetyData.observations;
@@ -702,8 +714,10 @@ export async function generateWeeklyReportPdfHtml(data: ReportData): Promise<Buf
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:'Inter',sans-serif;background:#fff;color:#1F2937;font-size:12.5px;-webkit-font-smoothing:antialiased;line-height:1.5;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 .wrap{max-width:720px;margin:0 auto;padding:32px 40px}
-td{padding:8px 12px;border-bottom:1px solid #F3F4F6;vertical-align:top}
-@media print{@page{size:A4;margin:14mm 16mm}body{font-size:11.5px}.wrap{padding:0;max-width:none}}
+td{padding:8px 12px;border-bottom:1px solid #F3F4F6;vertical-align:top;word-break:break-word;overflow-wrap:break-word}
+table{table-layout:fixed;width:100%}
+tr{page-break-inside:auto;break-inside:auto}
+@media print{@page{size:A4;margin:14mm 16mm}body{font-size:11.5px}.wrap{padding:0;max-width:none}tr{page-break-inside:auto;break-inside:auto}}
 </style>
 </head>
 <body>
@@ -736,7 +750,7 @@ td{padding:8px 12px;border-bottom:1px solid #F3F4F6;vertical-align:top}
     ${kpi("Team on Site", String(nTeam), "active personnel this week", "#1a2744")}
     ${kpi("Incidents / LTIs", String(data.safetyData.incidents), "zero lost-time injuries", data.safetyData.incidents>0 ? "#DC2626" : "#15803D")}
     ${kpi("Safety Obs.", String(nObs), `${obsPos} pos &middot; ${obsUnsafe} unsafe &middot; ${obsNeg} neg`, obsUnsafe>0 ? "#D97706" : "#15803D")}
-    ${kpi("Delays", String(nDelays), "all external, agreed w/ customer", nDelays>0 ? "#D97706" : "#15803D")}
+    ${kpi("Delays (this week)", String(nDelays), "external, agreed w/ customer", nDelays>0 ? "#D97706" : "#15803D")}
     ${kpi("Toolbox Talks", String(nTbts), "pre-shift briefings this week", "#1a2744")}
   </div>
 
@@ -751,7 +765,7 @@ td{padding:8px 12px;border-bottom:1px solid #F3F4F6;vertical-align:top}
     ${commentsHtml || '<div style="padding:14px 0;color:#9CA3AF;font-size:12px">No comments logged this week.</div>'}
   </div>
 
-  ${stitle("Delays Log", nDelays+" entries &middot; all external, agreed with customer")}
+  ${stitle("Delays Log (this week)", nDelays+" entr"+(nDelays===1?"y":"ies")+" &middot; external, agreed with customer")}
   ${delaysRows ? tbl([["Date &middot; Duration","110px"],["Responsibility","100px"],["Description",""]], delaysRows) : '<p style="font-size:12px;color:#9CA3AF;padding:8px 0">No delays recorded this week.</p>'}
 
   ${stitle("Personnel on Site", nTeam+" workers")}
