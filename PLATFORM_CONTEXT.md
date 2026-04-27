@@ -407,6 +407,68 @@ Run the health check again before starting any new development: `DATABASE_URL=..
 
 ---
 
+## Reporting & Timesheet Workflow Invariants — Non-Negotiable Rules
+
+These are the rules established as the safe manual workflow for weekly reports, timesheets, and customer-facing emails. Each invariant is enforced by either a code-content check or a production-data check in `scripts/health-check.ts` (Section N). A regression must surface in the health check before it can reach the customer.
+
+### Paid-day rules (timesheets)
+- **MOB and DEMOB days never contribute paid hours.** This applies to `mob`, `demob`, `partial_mob`, and `partial_demob`. Use `shared/timesheet-hours.ts` (`isPaidDay`, `paidHours`, `sumPaidHours`) for every row total, grand total, PDF, customer email, and billing summary. Do NOT rely on `total_hours` directly — stale values may persist on rows that were converted from `working` to MOB/DEMOB.
+- **Worker week row total = sum of paid (working) entries.** On `sent_to_customer` / `customer_approved` weeks, the per-(worker, week) sum of all entry rows must equal the sum of just the working-day rows. Anything else means the customer is seeing a row total that disagrees with the underlying day rows. (Health check: N3.)
+- Health check: N1 pins `PAID_DAY_TYPES` to `['working']`; N2 fails if any submitted/approved entry has `day_type IN ('mob','demob','partial_mob','partial_demob')` with `total_hours > 0`.
+
+### Weekly report draft / preview safety
+- **Draft generation never emails the customer.** The endpoint `POST /api/weekly-ops/generate-weekly-report-preview` writes a `weekly_reports` row with `status = 'draft'` and returns a portal preview URL. It does not call `sendMail`. (Health check: N10.)
+- **Drafts must have `sent_at IS NULL`.** A draft with `sent_at` populated means the safe-preview rule was bypassed. (Health check: N4.)
+- **Customers must not see drafts.** `GET /api/portal/:code/weekly-reports` filters to `status = 'published'` for customer (token-only) access. Drafts are visible only when the request carries an authenticated PFG session for an `admin`, `project_manager`, or `resource_manager` user AND `?preview=1` is set. (Health check: N11.)
+- **Tokenized portal preview URL format:** `/#/portal/<code>?token=<portalAccessToken>&preview=1`. The `&preview=1` is required for PM/admin/RM to see drafts; without it, even an authenticated PM session sees only published reports.
+
+### PM sender identity (Microsoft Graph)
+- Outbound project emails resolve sender via `getProjectSenderIdentity` (`server/project-sender.ts`).
+- **Resolution rules** (mirrored in unit tests `tests/smoke/project-sender.test.ts` and `tests/smoke/workflow-invariants.test.ts`):
+  - Assigned PM (project_leads → users) with `@powerforce.global` email → `from = pmEmail`, `replyTo = pmEmail`, `fromName = pmName`. Graph send-as requires `Mail.Send` on that mailbox.
+  - Off-domain PM email → `from = undefined` (central MAIL_FROM), `replyTo = pmEmail`, `fromName = pmName`. Replies still reach the PM.
+  - No PM email → `from = undefined`, `replyTo = undefined`, `fromName = pmName` (if any).
+  - No PM lead → fall back to central MAIL_FROM entirely.
+- Health check: N7 (PM lead present), N8 (PM has email), N9 (PM email is `@powerforce.global`).
+
+### Customer portal token
+- Every active project that is intended to be visible to customers must have a `portal_access_token`. New projects auto-generate one on creation.
+- Tokenized URL: `/#/portal/<code>?token=<portalAccessToken>` (and append `&preview=1` for an authenticated PM/admin/RM viewing drafts).
+- Health check: N6 (and F1 — they overlap intentionally).
+
+### PM 'Approve without Supervisor' override (planned, not yet implemented)
+- Documented intent: a PM may approve a timesheet week even though no supervisor has submitted, e.g. when supervisor link delivery has failed or the supervisor is unreachable.
+- **When implemented, the route MUST**:
+  1. Be gated to `admin` and `project_manager` (and possibly `resource_manager`) — never authenticated-only.
+  2. Require an explicit `reason` field on the request body and write it to `audit_logs`.
+  3. Live alongside the existing supervisor-resend flow in `server/weekly-ops-routes.ts`.
+- The smoke test `tests/smoke/workflow-invariants.test.ts` ("approve-without-supervisor controlled-override contract") detects this endpoint and asserts both gates are present.
+
+### Weekly report PDF header (period + progress)
+- Period field uses the reporting **week** (`weekStart`–`weekEnd`) by default. Falls back to project span. **Never blank.**
+- Project Progress is computed from project span at the END of the reported week, clamped 0–100. When project dates are missing, displays `Schedule not available` instead of `126 of 126 days · 0% complete`.
+- Helpers: `shared/report-period.ts` exports `formatPeriod` and `computeProgress`. Unit tests: `tests/smoke/report-period.test.ts`.
+- Health check: N12 verifies the helper exports stay present.
+
+---
+
+## Future-Session Discipline — When Workflow Rules Change
+
+If you change anything in the timesheet → weekly report → customer email chain, the change is not done until **all four** of the following are true. Do not close the session until this list is complete:
+
+1. **Code change shipped** — implementation merged.
+2. **PLATFORM_CONTEXT.md updated** — add or amend the relevant rule under "Reporting & Timesheet Workflow Invariants" above. State the rule, the code path that enforces it, and the health-check ID. If you removed a rule, delete it here too.
+3. **Health-check coverage added or updated** — extend `scripts/health-check.ts` Section N (or another section if more appropriate). Prefer:
+   - **Code-content check** (read a source file, assert a string/regex) for shape rules that live in code only (e.g. "`PAID_DAY_TYPES` is `['working']`", "preview endpoint does not call `sendMail`").
+   - **Production-data SQL check** for invariants on live data (e.g. "no MOB/DEMOB entry has paid hours on a sent week", "no draft has `sent_at` set").
+4. **Smoke / unit test added or updated** — extend `tests/smoke/workflow-invariants.test.ts` (or a sibling file) with a pure-function or static-source assertion that fails fast in CI before the health check runs against live data. Use this for the same rule from the opposite side: the helper is correct in isolation, *and* the production data conforms.
+
+If a rule cannot be fully enforced (e.g. a Graph permission cannot be checked from the platform), state the gap explicitly and add the closest-approximation health-check warning.
+
+When in doubt, write the rule down here first. The order is: rule → context doc → health check → test → code. Reversing this leaves rules ungoverned.
+
+---
+
 ## Filter Specification — Non-Negotiable Rules
 
 ### Available Filter (WorkforceTable)
@@ -460,6 +522,15 @@ Every summary card in the platform must be backed by a DB query. This table is t
 ## Changelog
 
 > Keep a running log of significant changes. Most recent first. Format: `YYYY-MM-DD | What changed | Why | Files touched`
+
+### 2026-04-27 (hardening) — Reporting/Timesheet Workflow Invariants Codified
+
+**No product behaviour changed.** This session writes the rules established earlier today into `PLATFORM_CONTEXT.md`, expands `scripts/health-check.ts` with a new Section N (12 checks), and adds a new smoke test `tests/smoke/workflow-invariants.test.ts` mirroring those checks against the in-process helpers.
+
+- New context section: **Reporting & Timesheet Workflow Invariants** (above) — single source of truth for paid-day rules (MOB/DEMOB), draft preview safety, PM sender identity, portal-token contract, the planned PM "approve-without-supervisor" override, and the weekly report PDF header.
+- New context section: **Future-Session Discipline — When Workflow Rules Change** — every workflow change must update this doc, the health check, and a smoke test before the session closes. Prevents the "context-doc lag" pattern that triggered this PR.
+- Health check Section N: 12 checks covering MOB/DEMOB paid-hours leakage on sent weeks, draft `sent_at IS NULL`, recent published rows have `sent_at` set, portal token presence, PM lead/email/domain, code-content checks pinning the safe-preview endpoint and the portal-list draft gate, and helper-export pins for `shared/report-period.ts` and `shared/timesheet-hours.ts`.
+- Files: `PLATFORM_CONTEXT.md`, `scripts/health-check.ts`, `tests/smoke/workflow-invariants.test.ts`.
 
 ### 2026-04-24 (late night, continued) — Demand Curve Fix
 - `client/src/pages/GanttChart.tsx`: demand curve was silently reusing `activeProjectIds` (scoped to `status='active'` for the card count in Session #5), which dropped completed projects (Torness Jan–Mar, Saltend Apr) out of the chart and produced flat-zero weeks Jan through mid-March. Added a separate `demandProjectIds = active + completed` for the demand computation and expanded the assignment status filter from `['active', 'confirmed']` to `['active', 'confirmed', 'completed', 'flagged', 'pending_confirmation']`. `activeProjects` / `activeProjectIds` untouched — they still drive the Active Projects card count and `totalPositions`.

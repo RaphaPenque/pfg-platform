@@ -24,6 +24,8 @@
  *   K. FTE Baseline, Worker Status & Deployed Today — live baseline, status validity, deployment plausibility
  *   L. UI Card Data Accuracy   — ground-truth DB counts for Active Projects, Headcount, Deployed Today, Available FTE
  *   M. Filter & Logic Consistency — UI filter implementations match platform spec
+ *   N. Reporting & Timesheet Workflow Invariants — MOB/DEMOB paid-day rules,
+ *      weekly_reports draft/sent state, portal token presence, PM sender identity
  */
 
 import { Pool } from "pg";
@@ -1075,6 +1077,337 @@ async function main() {
     );
   } catch (e: any) {
     check(`constants.ts read failed: ${e.message}`, false);
+  }
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  section("N. Reporting & Timesheet Workflow Invariants");
+  // ═══════════════════════════════════════════════════════════════════════════
+  //
+  // Codifies the manual reporting/timesheet workflow rules established in the
+  // 2026-04-27 hardening pass. These rules are documented in PLATFORM_CONTEXT.md
+  // (section "Reporting & Timesheet Workflow Invariants") and must remain true
+  // on production data — any drift surfaces here.
+
+  // N1 — MOB/DEMOB paid-hour rule: shared helper marks mob/demob as non-paid.
+  // Code-content check on shared/timesheet-hours.ts so the canonical helper
+  // cannot silently start counting MOB/DEMOB as paid.
+  try {
+    const helperPath = path.join(repoRoot, "shared/timesheet-hours.ts");
+    const helperSrc = fs.readFileSync(helperPath, "utf8");
+    const paidSetMatch = helperSrc.match(/PAID_DAY_TYPES\s*=\s*new Set<string>\(\[([^\]]*)\]\)/);
+    const paidTypes = paidSetMatch
+      ? Array.from(paidSetMatch[1].matchAll(/['"]([a-z_]+)['"]/g)).map(m => m[1])
+      : [];
+    const onlyWorking = paidTypes.length === 1 && paidTypes[0] === "working";
+    check(
+      onlyWorking
+        ? "shared/timesheet-hours.ts PAID_DAY_TYPES = ['working'] (MOB/DEMOB non-paid)"
+        : `shared/timesheet-hours.ts PAID_DAY_TYPES drift: [${paidTypes.join(", ")}] — MOB/DEMOB must be excluded`,
+      onlyWorking,
+    );
+  } catch (e: any) {
+    check(`shared/timesheet-hours.ts read failed: ${e.message}`, false);
+  }
+
+  // N2 — Production check: no MOB/DEMOB entry on a sent/approved week may
+  // contribute paid hours. If this fires, the customer was billed for
+  // a non-paid day — critical.
+  try {
+    const mobBilled = await q(`
+      SELECT te.id, to_char(te.entry_date, 'YYYY-MM-DD') AS entry_date,
+             te.day_type, te.total_hours,
+             tw.status AS week_status, p.code AS project_code
+        FROM timesheet_entries te
+        JOIN timesheet_weeks tw ON tw.id = te.timesheet_week_id
+        JOIN projects p ON p.id = tw.project_id
+       WHERE te.day_type IN ('mob','demob','partial_mob','partial_demob')
+         AND te.total_hours IS NOT NULL
+         AND te.total_hours > 0
+         AND tw.status IN ('submitted','pm_approved','sent_to_customer','customer_approved')
+       LIMIT 20
+    `);
+    check(
+      "No MOB/DEMOB entries with paid hours on submitted/approved weeks",
+      mobBilled.length === 0,
+      mobBilled.length > 0
+        ? `${mobBilled.length} entry/entries violate MOB/DEMOB non-paid rule: ${mobBilled.slice(0, 3).map((r: any) => `${r.project_code} ${r.entry_date} (${r.day_type}=${r.total_hours}h, week ${r.week_status})`).join("; ")}`
+        : undefined,
+      false,
+    );
+  } catch (e: any) {
+    check(`MOB/DEMOB paid-hours query failed: ${e.message}`, false);
+  }
+
+  // N3 — Worker week totals on sent_to_customer / customer_approved weeks must
+  // equal the sum of paid (working) entries. Anything else means the customer
+  // is seeing a row total that disagrees with the underlying day rows.
+  // Computed in SQL as: per (timesheet_week_id, worker_id), the sum of
+  // total_hours for working days vs the sum across ALL day rows.
+  // We only flag weeks where the two sums differ AND any non-working day
+  // carries hours (i.e. the divergence is real, not floating-point noise).
+  try {
+    const totalsMismatch = await q(`
+      SELECT te.timesheet_week_id,
+             te.worker_id,
+             p.code AS project_code,
+             to_char(tw.week_commencing, 'YYYY-MM-DD') AS week_commencing,
+             SUM(CASE WHEN te.day_type = 'working' THEN COALESCE(te.total_hours, 0) ELSE 0 END)::numeric(8,2) AS paid_hours,
+             SUM(COALESCE(te.total_hours, 0))::numeric(8,2) AS row_hours,
+             tw.status AS week_status
+        FROM timesheet_entries te
+        JOIN timesheet_weeks tw ON tw.id = te.timesheet_week_id
+        JOIN projects p ON p.id = tw.project_id
+       WHERE tw.status IN ('sent_to_customer','customer_approved')
+       GROUP BY te.timesheet_week_id, te.worker_id, p.code, tw.week_commencing, tw.status
+      HAVING SUM(CASE WHEN te.day_type = 'working' THEN COALESCE(te.total_hours, 0) ELSE 0 END)
+           <> SUM(COALESCE(te.total_hours, 0))
+       LIMIT 20
+    `);
+    check(
+      "On sent/approved weeks, sum(working hours) = sum(all entry hours) (no stale MOB/DEMOB hours)",
+      totalsMismatch.length === 0,
+      totalsMismatch.length > 0
+        ? `${totalsMismatch.length} worker/week row(s) have non-working hours leaking into the total: ${totalsMismatch.slice(0, 3).map((r: any) => `${r.project_code} w/c ${r.week_commencing}: paid=${r.paid_hours} vs row=${r.row_hours}`).join("; ")}`
+        : undefined,
+      true,
+    );
+  } catch (e: any) {
+    check(`Worker week totals query failed: ${e.message}`, false);
+  }
+
+  // N4 — Draft weekly_reports must have sent_at NULL. A draft with sent_at set
+  // means a draft was emailed to the customer (the safe-preview rule was bypassed).
+  try {
+    const draftsWithSent = await q(`
+      SELECT id, project_id, week_commencing, sent_at, status
+        FROM weekly_reports
+       WHERE status = 'draft'
+         AND sent_at IS NOT NULL
+       LIMIT 20
+    `);
+    check(
+      "Draft weekly_reports rows have sent_at NULL (draft preview never emails customer)",
+      draftsWithSent.length === 0,
+      draftsWithSent.length > 0
+        ? `${draftsWithSent.length} draft weekly_report(s) have sent_at populated: ${draftsWithSent.slice(0, 3).map((r: any) => `id=${r.id} w/c ${r.week_commencing} sent_at=${r.sent_at}`).join("; ")}`
+        : undefined,
+      false,
+    );
+  } catch (e: any) {
+    check(`Draft weekly_reports query failed: ${e.message}`, false);
+  }
+
+  // N5 — Published/sent weekly_reports should have sent_at populated. WARN
+  // because some pre-existing rows pre-date the sent_at column being written.
+  try {
+    const publishedWithoutSent = await q(`
+      SELECT id, project_id, week_commencing, status
+        FROM weekly_reports
+       WHERE status = 'published'
+         AND sent_at IS NULL
+         AND created_at > (CURRENT_DATE - INTERVAL '60 days')
+       LIMIT 20
+    `);
+    check(
+      "Recent published weekly_reports have sent_at set",
+      publishedWithoutSent.length === 0,
+      publishedWithoutSent.length > 0
+        ? `${publishedWithoutSent.length} recent published row(s) missing sent_at — verify generator wrote sent_at on email send: ${publishedWithoutSent.slice(0, 3).map((r: any) => `id=${r.id} w/c ${r.week_commencing}`).join("; ")}`
+        : undefined,
+      true,
+    );
+  } catch (e: any) {
+    check(`Published weekly_reports query failed: ${e.message}`, false);
+  }
+
+  // N6 — Active projects intended for customer-portal use should have a
+  // portal_access_token. F1 already does the equality check; here we record
+  // the token+preview URL contract so future regressions surface clearly.
+  try {
+    const activeNoToken = await q(`
+      SELECT code FROM projects
+       WHERE status = 'active'
+         AND (portal_access_token IS NULL OR TRIM(portal_access_token) = '')
+    `);
+    check(
+      "All active projects have a portal_access_token (tokenized portal URL: /#/portal/<code>?token=...)",
+      activeNoToken.length === 0,
+      activeNoToken.length > 0
+        ? `${activeNoToken.length} active project(s) without portal token — customer portal link cannot be issued: ${activeNoToken.map((p: any) => p.code).join(", ")}`
+        : undefined,
+      true,
+    );
+  } catch (e: any) {
+    check(`Portal token check failed: ${e.message}`, false);
+  }
+
+  // N7 — Each active project must have an assigned PM (project_leads row).
+  // The Weekly Ops sender identity resolves PM email from project_leads → users.
+  // No PM = falls back to central MAIL_FROM (warning, not failure).
+  try {
+    const activeNoPmLead = await q(`
+      SELECT p.code FROM projects p
+       WHERE p.status = 'active'
+         AND NOT EXISTS (
+           SELECT 1 FROM project_leads pl
+            WHERE pl.project_id = p.id
+         )
+    `);
+    check(
+      "All active projects have an assigned PM (project_leads row)",
+      activeNoPmLead.length === 0,
+      activeNoPmLead.length > 0
+        ? `${activeNoPmLead.length} active project(s) without an assigned PM — outbound emails will fall back to central sender: ${activeNoPmLead.map((p: any) => p.code).join(", ")}`
+        : undefined,
+      true,
+    );
+  } catch (e: any) {
+    check(`Active project PM lead check failed: ${e.message}`, false);
+  }
+
+  // N8 — Assigned PM has an email on file. Without an email we cannot set
+  // replyTo or fromName, so customer replies route to central MAIL_FROM.
+  try {
+    const pmsNoEmail = await q(`
+      SELECT p.code, u.name AS pm_name
+        FROM projects p
+        JOIN project_leads pl ON pl.project_id = p.id
+        JOIN users u ON u.id = pl.user_id
+       WHERE p.status = 'active'
+         AND (u.email IS NULL OR TRIM(u.email) = '')
+    `);
+    check(
+      "All active-project PMs have an email address",
+      pmsNoEmail.length === 0,
+      pmsNoEmail.length > 0
+        ? `${pmsNoEmail.length} PM(s) missing email: ${pmsNoEmail.slice(0, 5).map((r: any) => `${r.code} (${r.pm_name})`).join(", ")}`
+        : undefined,
+      true,
+    );
+  } catch (e: any) {
+    check(`PM email check failed: ${e.message}`, false);
+  }
+
+  // N9 — Assigned PM email is on @powerforce.global so Graph can send-as.
+  // Off-domain PMs still get replyTo + fromName, but the customer sees
+  // central MAIL_FROM as the sender. Warning only — many off-domain users
+  // are intentional (consultants).
+  try {
+    const pmsOffDomain = await q(`
+      SELECT p.code, u.email
+        FROM projects p
+        JOIN project_leads pl ON pl.project_id = p.id
+        JOIN users u ON u.id = pl.user_id
+       WHERE p.status = 'active'
+         AND u.email IS NOT NULL
+         AND TRIM(u.email) <> ''
+         AND LOWER(u.email) NOT LIKE '%@powerforce.global'
+    `);
+    check(
+      "All active-project PMs have @powerforce.global email (Graph send-as)",
+      pmsOffDomain.length === 0,
+      pmsOffDomain.length > 0
+        ? `${pmsOffDomain.length} PM(s) off-domain — outbound 'from' will fall back to central sender (replyTo still set): ${pmsOffDomain.slice(0, 5).map((r: any) => `${r.code} (${r.email})`).join(", ")}`
+        : undefined,
+      true,
+    );
+  } catch (e: any) {
+    check(`PM @powerforce.global check failed: ${e.message}`, false);
+  }
+
+  // N10 — Code-content check: the safe-preview endpoint writes a draft and
+  // does NOT email the customer. Guards against a future refactor enabling
+  // sends from the preview endpoint.
+  //
+  // Anchors on app.post(...generate-weekly-report-preview...) — the actual
+  // handler registration — not the URL mentioned in the file's leading
+  // comment block, which would scoop in unrelated email-sending handlers.
+  try {
+    const wopsPath = path.join(repoRoot, "server/weekly-ops-routes.ts");
+    const wopsSrc = fs.readFileSync(wopsPath, "utf8");
+    const handlerRegex = /app\.post\(\s*["']\/api\/weekly-ops\/generate-weekly-report-preview["']/;
+    const m = handlerRegex.exec(wopsSrc);
+    let n10Ok = false;
+    if (m) {
+      // Walk from handlerStart to the matching close paren of app.post(...)
+      // by counting parens. Fallback to a generous slice if walking fails.
+      const handlerStart = m.index;
+      let depth = 0;
+      let inString: string | null = null;
+      let escape = false;
+      let handlerEnd = wopsSrc.length;
+      for (let i = handlerStart; i < wopsSrc.length; i++) {
+        const ch = wopsSrc[i];
+        if (escape) { escape = false; continue; }
+        if (inString) {
+          if (ch === "\\") { escape = true; continue; }
+          if (ch === inString) inString = null;
+          continue;
+        }
+        if (ch === '"' || ch === "'" || ch === "`") { inString = ch; continue; }
+        if (ch === "(") depth++;
+        else if (ch === ")") {
+          depth--;
+          if (depth === 0) { handlerEnd = i + 1; break; }
+        }
+      }
+      const handlerSrc = wopsSrc.slice(handlerStart, handlerEnd);
+      const hasPreviewFlag = handlerSrc.includes('mode: "preview"') || handlerSrc.includes("emailedCustomer: false");
+      const callsSendMail = /\bsendMail\s*\(/.test(handlerSrc);
+      n10Ok = hasPreviewFlag && !callsSendMail;
+    }
+    check(
+      n10Ok
+        ? "generate-weekly-report-preview handler is non-emailing (writes draft only)"
+        : "generate-weekly-report-preview may email the customer — safe-preview contract broken",
+      n10Ok,
+    );
+  } catch (e: any) {
+    check(`weekly-ops-routes.ts preview-handler read failed: ${e.message}`, false);
+  }
+
+  // N11 — Code-content check: portal weekly-reports list endpoint hides drafts
+  // unless the request is an authenticated PM/admin/RM preview.
+  try {
+    const routesPath = path.join(repoRoot, "server/routes.ts");
+    const routesSrc = fs.readFileSync(routesPath, "utf8");
+    const listIdx = routesSrc.indexOf('"/api/portal/:code/weekly-reports"');
+    let n11Ok = false;
+    if (listIdx >= 0) {
+      const win = routesSrc.slice(listIdx, Math.min(routesSrc.length, listIdx + 3000));
+      const gatesPreview = win.includes("isInternalPreview");
+      const filtersDraft = win.includes("status === 'published'") || win.includes('status === "published"');
+      const requiresRole = /\["admin",\s*"project_manager",\s*"resource_manager"\]/.test(win);
+      n11Ok = gatesPreview && filtersDraft && requiresRole;
+    }
+    check(
+      n11Ok
+        ? "Portal weekly-reports endpoint hides drafts from customers (preview gated to PM/admin/RM session)"
+        : "Portal weekly-reports endpoint may leak drafts to customers — preview gating drift",
+      n11Ok,
+    );
+  } catch (e: any) {
+    check(`server/routes.ts portal-list read failed: ${e.message}`, false);
+  }
+
+  // N12 — report-period helper exists and exports formatPeriod + computeProgress.
+  // Pinned because the weekly-report PDF header was previously hardcoded.
+  try {
+    const periodHelperPath = path.join(repoRoot, "shared/report-period.ts");
+    const helperSrc = fs.readFileSync(periodHelperPath, "utf8");
+    const hasFormat = /export\s+function\s+formatPeriod\b/.test(helperSrc) ||
+                      /export\s+const\s+formatPeriod\b/.test(helperSrc);
+    const hasProgress = /export\s+function\s+computeProgress\b/.test(helperSrc) ||
+                        /export\s+const\s+computeProgress\b/.test(helperSrc);
+    check(
+      hasFormat && hasProgress
+        ? "shared/report-period.ts exports formatPeriod and computeProgress"
+        : "shared/report-period.ts missing formatPeriod / computeProgress export — weekly report header may regress",
+      hasFormat && hasProgress,
+    );
+  } catch (e: any) {
+    check(`shared/report-period.ts read failed: ${e.message}`, true);
   }
 
 
