@@ -1430,7 +1430,7 @@ async function main() {
     let n13Ok = false;
     let n13Detail = "approve-without-supervisor endpoint not found";
     if (idx >= 0) {
-      const handler = wopsSrc.slice(idx, Math.min(wopsSrc.length, idx + 8000));
+      const handler = wopsSrc.slice(idx, Math.min(wopsSrc.length, idx + 12000));
       const roleGate =
         /requireRole\s*\(\s*"admin"\s*,\s*"project_manager"\s*,\s*"resource_manager"\s*\)/.test(handler);
       const requiresReason = /reason/i.test(handler) && /evidence/i.test(handler);
@@ -1442,7 +1442,32 @@ async function main() {
       const statusGuard =
         /allowedFrom/.test(handler) && /draft/.test(handler) && /submitted/.test(handler);
       const noEmail = !/sendMail\s*\(/.test(handler);
-      n13Ok = roleGate && requiresReason && requiresAcks && auditWrite && statusGuard && noEmail;
+      const calendarDateCheck = /not a valid calendar date/.test(handler);
+      const lengthCaps =
+        /REASON_MAX/.test(handler) && /EVIDENCE_MAX/.test(handler);
+      const customerSignoffRefuse =
+        /Override approval is not supported on projects with customer_signoff_required=false/.test(handler);
+      const conditionalUpdate =
+        /UPDATE timesheet_weeks/.test(handler) &&
+        /status IN \('draft','submitted'\)/.test(handler) &&
+        /day_sup_submitted_at IS NULL/.test(handler) &&
+        /night_sup_submitted_at IS NULL/.test(handler) &&
+        /pm_approve_override_at IS NULL/.test(handler) &&
+        /rowCount\s*!==\s*1/.test(handler);
+      const ipUserAgent =
+        /ip:\s*reqIp/.test(handler) && /userAgent:\s*reqUserAgent/.test(handler);
+      n13Ok =
+        roleGate &&
+        requiresReason &&
+        requiresAcks &&
+        auditWrite &&
+        statusGuard &&
+        noEmail &&
+        calendarDateCheck &&
+        lengthCaps &&
+        customerSignoffRefuse &&
+        conditionalUpdate &&
+        ipUserAgent;
       if (!n13Ok) {
         const missing = [];
         if (!roleGate) missing.push("role-gate");
@@ -1451,12 +1476,17 @@ async function main() {
         if (!auditWrite) missing.push("audit-log");
         if (!statusGuard) missing.push("status-guard(draft/submitted)");
         if (!noEmail) missing.push("no-customer-email");
+        if (!calendarDateCheck) missing.push("calendar-date-validation");
+        if (!lengthCaps) missing.push("reason/evidence-length-caps");
+        if (!customerSignoffRefuse) missing.push("customer_signoff_required=false-refuse");
+        if (!conditionalUpdate) missing.push("conditional-UPDATE+rowCount-check");
+        if (!ipUserAgent) missing.push("audit-ip+user-agent");
         n13Detail = `override handler missing: ${missing.join(", ")}`;
       }
     }
     check(
       n13Ok
-        ? "Approve-without-supervisor override endpoint enforces role / reason / evidence / dual-ack / audit / status-guard / no-customer-email"
+        ? "Approve-without-supervisor override endpoint enforces role / reason / evidence / dual-ack / audit / status-guard / no-customer-email / calendar-date / length-caps / customer-signoff guard / conditional UPDATE / ip+user-agent"
         : `Approve-without-supervisor override endpoint failed contract — ${n13Detail}`,
       n13Ok,
     );

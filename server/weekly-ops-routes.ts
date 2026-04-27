@@ -622,16 +622,29 @@ export function registerWeeklyOpsRoutes(
   //   4. Explicit acknowledgement — `acknowledgeNoSupervisor === true` AND
   //      `acknowledgeCustomerSendSeparate === true`. The UI maps these to two
   //      checkboxes in the confirmation modal.
-  //   5. Status guards — only allow override from `draft` or `submitted`. We
-  //      refuse on `pm_approved`, `sent_to_customer`, `customer_approved`, and
-  //      `recalled` to keep the override away from any state where the
+  //   5. Status guards — only allow override from `draft` or `submitted`.
+  //      `draft` covers the common case (no supervisor link sent / not yet
+  //      submitted). `submitted` is preserved because the platform marks a
+  //      week as `submitted` once entries exist even when no supervisor has
+  //      attested — see the supervisor token flow in server/timesheet-routes.
+  //      We refuse on `pm_approved`, `sent_to_customer`, `customer_approved`,
+  //      and `recalled` to keep the override away from any state where the
   //      customer is already in the loop or where a recall is in flight.
   //   6. Customer send remains separate — this endpoint NEVER calls sendMail
   //      and the resulting status is exactly the same as a normal PM approval
-  //      (`pm_approved`, or `customer_approved` when sign-off is disabled).
+  //      (`pm_approved`). We refuse the override entirely with HTTP 409 when
+  //      `customer_signoff_required = false` because the normal approve route
+  //      generates customer-facing PDFs on direct transition to
+  //      `customer_approved`; mirroring that here would either silently leave
+  //      the week without outputs or duplicate non-trivial PDF generation.
   //   7. Audit payload — userId, action="timesheet.approve_override", entityType
   //      "timesheet_week", entityId, project + week, previous status, resulting
-  //      status, list of missing supervisors (day/night), reason, evidence.
+  //      status, list of missing supervisors (day/night), reason, evidence,
+  //      and request IP / user-agent when available.
+  //   8. Concurrency — the UPDATE is a single conditional statement keyed on
+  //      id + status + no-supervisor-submission + no-existing-override, so two
+  //      concurrent overrides cannot both win. We verify rowCount === 1 before
+  //      writing the audit log.
   //
   // Body: {
   //   projectId: number,
@@ -658,8 +671,18 @@ export function registerWeeklyOpsRoutes(
 
         const pid = parseInt(String(projectId), 10);
         if (!pid || isNaN(pid)) return res.status(400).json({ error: "projectId required" });
-        if (!weekCommencing || !/^\d{4}-\d{2}-\d{2}$/.test(String(weekCommencing))) {
+        const wcStr = String(weekCommencing || "");
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(wcStr)) {
           return res.status(400).json({ error: "weekCommencing (YYYY-MM-DD) required" });
+        }
+        // Reject calendar-invalid dates (e.g. 2026-02-30) before any DB call so
+        // the user gets a 400 instead of a Postgres 500.
+        const wcDate = new Date(wcStr + "T00:00:00Z");
+        if (
+          isNaN(wcDate.getTime()) ||
+          wcDate.toISOString().substring(0, 10) !== wcStr
+        ) {
+          return res.status(400).json({ error: "weekCommencing is not a valid calendar date" });
         }
         const reasonClean = typeof reason === "string" ? reason.trim() : "";
         const evidenceClean = typeof evidence === "string" ? evidence.trim() : "";
@@ -668,9 +691,22 @@ export function registerWeeklyOpsRoutes(
             error: "reason is required and must be at least 10 characters explaining why supervisor submission is unavailable",
           });
         }
+        // Cap reason / evidence to bound audit-log PII surface and abuse risk.
+        const REASON_MAX = 1000;
+        const EVIDENCE_MAX = 500;
+        if (reasonClean.length > REASON_MAX) {
+          return res.status(400).json({
+            error: `reason must be ${REASON_MAX} characters or fewer`,
+          });
+        }
         if (evidenceClean.length < 3) {
           return res.status(400).json({
             error: "evidence is required (ticket id, email subject, phone log, or short note describing supervisor unreachability)",
+          });
+        }
+        if (evidenceClean.length > EVIDENCE_MAX) {
+          return res.status(400).json({
+            error: `evidence must be ${EVIDENCE_MAX} characters or fewer`,
           });
         }
         if (acknowledgeNoSupervisor !== true) {
@@ -747,19 +783,37 @@ export function registerWeeklyOpsRoutes(
           });
         }
 
-        // Resolve resulting status — same rule as the normal approve route.
+        // Resolve resulting status. The normal approve route generates the
+        // customer-facing PDFs when it transitions a week directly to
+        // `customer_approved` (i.e. when `customer_signoff_required = false`).
+        // Mirroring that PDF-generation path here is non-trivial and would be
+        // easy to silently drift from the canonical implementation, so we
+        // refuse the override entirely in that configuration. Operators on
+        // those projects must use the normal approval flow once supervisor
+        // submission is restored.
         const cfgRes = await db.execute(sql`
           SELECT customer_signoff_required FROM timesheet_config WHERE project_id = ${pid}
         `);
         const cfg: any = cfgRes.rows[0];
         const requiresSignoff = cfg?.customer_signoff_required !== false;
-        const newStatus = requiresSignoff ? "pm_approved" : "customer_approved";
+        if (!requiresSignoff) {
+          return res.status(409).json({
+            error:
+              "Override approval is not supported on projects with customer_signoff_required=false. " +
+              "The normal approve route generates customer-facing PDFs on direct transition to customer_approved; " +
+              "use the standard approval flow once supervisor submission is restored.",
+          });
+        }
+        const newStatus = "pm_approved";
 
-        // Update the week. We deliberately do NOT touch supervisor token /
-        // submission columns — we want it to stay obvious in the data that no
-        // supervisor submitted. The override is captured in audit_logs and in
-        // the `pm_approve_override_*` columns added below.
-        await db.execute(sql`
+        // Atomic conditional UPDATE — the WHERE clause re-asserts every guard
+        // we just checked (status in allowed set, no supervisor submission, no
+        // existing override marker). Two concurrent overrides racing against
+        // the same row will see exactly one rowCount=1 and one rowCount=0; the
+        // loser bails before touching the audit log so we never double-audit.
+        // We deliberately do NOT touch supervisor token / submission columns —
+        // we want it to stay obvious in the data that no supervisor submitted.
+        const updateRes = await db.execute(sql`
           UPDATE timesheet_weeks
           SET status = ${newStatus},
               pm_approved_at = NOW(),
@@ -768,9 +822,28 @@ export function registerWeeklyOpsRoutes(
               pm_approve_override_at = NOW(),
               pm_approve_override_by = ${req.user!.id}
           WHERE id = ${tw.id}
+            AND status IN ('draft','submitted')
+            AND day_sup_submitted_at IS NULL
+            AND night_sup_submitted_at IS NULL
+            AND pm_approve_override_at IS NULL
         `);
+        if ((updateRes as any).rowCount !== 1) {
+          return res.status(409).json({
+            error:
+              "Override could not be applied — the week's state changed (concurrent supervisor submission, prior override, or status transition). Reload Weekly Ops and try again.",
+          });
+        }
 
         // Audit log — the canonical record of who/when/why for this override.
+        // Captured AFTER the conditional UPDATE confirms it actually applied.
+        const reqIp =
+          (typeof req.ip === "string" && req.ip) ||
+          (typeof (req as any).socket?.remoteAddress === "string"
+            ? (req as any).socket.remoteAddress
+            : null) ||
+          null;
+        const reqUserAgent =
+          typeof req.headers["user-agent"] === "string" ? req.headers["user-agent"] : null;
         await storage.createAuditLog({
           userId: req.user!.id,
           action: "timesheet.approve_override",
@@ -799,6 +872,8 @@ export function registerWeeklyOpsRoutes(
               id: req.user!.id,
               email: req.user!.email,
               role: req.user!.role,
+              ip: reqIp,
+              userAgent: reqUserAgent,
             },
           },
         });

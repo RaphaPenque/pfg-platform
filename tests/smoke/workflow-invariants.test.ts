@@ -125,7 +125,7 @@ async function readHandler(): Promise<string | null> {
     from = next + marker.length;
   }
   if (idx < 0) return null;
-  return src.slice(idx, Math.min(src.length, idx + 8000));
+  return src.slice(idx, Math.min(src.length, idx + 12000));
 }
 
 await check("approve-without-supervisor endpoint exists and is role-gated to PM/admin/RM", async () => {
@@ -169,6 +169,61 @@ await check("override handler refuses inappropriate states and never emails cust
   // No email — the override is approval-only.
   assert.ok(!/sendMail\s*\(/.test(handler!),
     "override handler must NOT call sendMail — customer send remains a separate action");
+});
+
+await check("override handler validates weekCommencing as a real calendar date", async () => {
+  const handler = await readHandler();
+  assert.ok(handler, "override endpoint missing");
+  // Regex alone allows 2026-02-30; the handler must additionally round-trip
+  // the date through `new Date(...)` and reject impossible calendar values
+  // before any DB call so callers get a 400 instead of a Postgres 500.
+  assert.ok(/not a valid calendar date/.test(handler!),
+    "override must reject calendar-invalid weekCommencing with an explicit 400");
+});
+
+await check("override handler caps reason and evidence length server-side", async () => {
+  const handler = await readHandler();
+  assert.ok(handler, "override endpoint missing");
+  assert.ok(/REASON_MAX/.test(handler!) && /EVIDENCE_MAX/.test(handler!),
+    "override must declare REASON_MAX / EVIDENCE_MAX caps to bound audit-log PII surface");
+});
+
+await check("override handler refuses when customer_signoff_required=false", async () => {
+  const handler = await readHandler();
+  assert.ok(handler, "override endpoint missing");
+  // We deliberately refuse the override on projects where the normal approve
+  // route would transition directly to customer_approved (and generate the
+  // customer PDFs). Mirroring that PDF-generation path here is non-trivial
+  // and would silently drift; the override is only for pm_approved projects.
+  assert.ok(/customer_signoff_required=false|customer_signoff_required = false/.test(handler!),
+    "override must reference the customer_signoff_required=false guard");
+  assert.ok(/Override approval is not supported on projects with customer_signoff_required=false/.test(handler!),
+    "override must refuse customer_signoff_required=false with a clear 409 message");
+});
+
+await check("override applies the status change with a single conditional UPDATE", async () => {
+  const handler = await readHandler();
+  assert.ok(handler, "override endpoint missing");
+  // The UPDATE must re-assert every guard in its WHERE clause and the
+  // handler must check rowCount === 1 so two concurrent overrides cannot
+  // both succeed and both write an audit log.
+  assert.ok(/UPDATE timesheet_weeks/.test(handler!),
+    "override must update timesheet_weeks");
+  assert.ok(/status IN \('draft','submitted'\)/.test(handler!),
+    "conditional UPDATE must re-assert allowed source statuses");
+  assert.ok(/day_sup_submitted_at IS NULL/.test(handler!) && /night_sup_submitted_at IS NULL/.test(handler!),
+    "conditional UPDATE must re-assert no supervisor submission");
+  assert.ok(/pm_approve_override_at IS NULL/.test(handler!),
+    "conditional UPDATE must guard against an existing override marker");
+  assert.ok(/rowCount\s*!==\s*1/.test(handler!),
+    "handler must verify rowCount === 1 before writing audit log (concurrency / double-audit guard)");
+});
+
+await check("override audit metadata records request IP and user-agent when available", async () => {
+  const handler = await readHandler();
+  assert.ok(handler, "override endpoint missing");
+  assert.ok(/ip:\s*reqIp/.test(handler!) && /userAgent:\s*reqUserAgent/.test(handler!),
+    "override audit metadata must include actor.ip and actor.userAgent");
 });
 
 }

@@ -343,8 +343,6 @@ export default function WeeklyOperations() {
     (tw.status === "draft" || tw.status === "submitted") &&
     !tw.daySupSubmittedAt &&
     !tw.nightSupSubmittedAt &&
-    ((status?.assignments.day ?? 0) > 0 && !tw.daySupSubmittedAt) ===
-      ((status?.assignments.day ?? 0) > 0 && !tw.daySupSubmittedAt) &&
     (
       ((status?.assignments.day ?? 0) > 0 && !tw.daySupSubmittedAt) ||
       (hasNightShift && !tw.nightSupSubmittedAt)
@@ -901,6 +899,10 @@ export default function WeeklyOperations() {
         onOpenChange={(open) => {
           if (!open && !overrideApproveMutation.isPending) {
             setOverrideOpen(false);
+            setOverrideReason("");
+            setOverrideEvidence("");
+            setAckNoSupervisor(false);
+            setAckCustomerSeparate(false);
           }
         }}
       >
@@ -938,6 +940,7 @@ export default function WeeklyOperations() {
                 id="override-reason"
                 className="w-full border rounded-md px-3 py-2 text-sm bg-white"
                 rows={3}
+                maxLength={1000}
                 placeholder="e.g. Day supervisor on annual leave from 22 Apr; covering foreman has not received the link despite three resends."
                 value={overrideReason}
                 onChange={(e) => setOverrideReason(e.target.value)}
@@ -957,6 +960,7 @@ export default function WeeklyOperations() {
                 id="override-evidence"
                 type="text"
                 className="w-full border rounded-md px-3 py-2 text-sm bg-white"
+                maxLength={500}
                 placeholder="e.g. INC-1042, Outlook thread 'GRTY supervisor unreachable', phone log 25 Apr 14:20"
                 value={overrideEvidence}
                 onChange={(e) => setOverrideEvidence(e.target.value)}
@@ -1017,7 +1021,13 @@ export default function WeeklyOperations() {
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setOverrideOpen(false)}
+              onClick={() => {
+                setOverrideOpen(false);
+                setOverrideReason("");
+                setOverrideEvidence("");
+                setAckNoSupervisor(false);
+                setAckCustomerSeparate(false);
+              }}
               disabled={overrideApproveMutation.isPending}
               data-testid="override-cancel"
             >
