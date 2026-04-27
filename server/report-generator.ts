@@ -625,12 +625,13 @@ export async function generateWeeklyReportPdfHtml(data: ReportData): Promise<Buf
     return p.length === 3 ? `${parseInt(p[2])} ${months[parseInt(p[1])]}` : d;
   }
 
-  function th(h: string, w = ""): string {
-    return `<th style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#9CA3AF;padding:7px 12px;text-align:left;border-bottom:1px solid #E5E7EB;background:#F9FAFB${w ? ";width:"+w : ""}">${h}</th>`;
+  function th(h: string, w = "", align: "left" | "right" = "left"): string {
+    const pad = align === "right" ? "7px 14px 7px 6px" : "7px 12px";
+    return `<th style="font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.06em;color:#9CA3AF;padding:${pad};text-align:${align};border-bottom:1px solid #E5E7EB;background:#F9FAFB${w ? ";width:"+w : ""}">${h}</th>`;
   }
 
-  function tbl(headers: [string,string][], rows: string): string {
-    const ths = headers.map(([h,w]) => th(h,w)).join("");
+  function tbl(headers: Array<[string,string] | [string,string,"left"|"right"]>, rows: string): string {
+    const ths = headers.map((c) => th(c[0], c[1], (c[2] as "left"|"right") || "left")).join("");
     return `<table style="width:100%;border-collapse:collapse;border:1px solid #E5E7EB;border-radius:6px;overflow:hidden"><thead><tr>${ths}</tr></thead><tbody>${rows}</tbody></table>`;
   }
 
@@ -670,7 +671,7 @@ export async function generateWeeklyReportPdfHtml(data: ReportData): Promise<Buf
   // TBT rows
   const tbtRows = (data as any).toolboxTalks?.map((t: any, i: number) => {
     const bg = i%2===0 ? "#F9FAFB" : "#fff";
-    return `<tr style="background:${bg}"><td style="color:#6B7280;font-size:12px;white-space:nowrap;vertical-align:top">${sd(t.reportDate||"")}</td><td style="font-size:12px;vertical-align:top">${esc(t.topic||"")}</td><td style="text-align:right;color:#6B7280;font-size:12px;vertical-align:top">${esc(String(t.attendeeCount||""))}</td></tr>`;
+    return `<tr style="background:${bg}"><td style="color:#6B7280;font-size:12px;white-space:nowrap;vertical-align:top">${sd(t.reportDate||"")}</td><td style="font-size:12px;vertical-align:top">${esc(t.topic||"")}</td><td style="text-align:right;color:#6B7280;font-size:12px;vertical-align:top;padding-right:14px">${esc(String(t.attendeeCount||""))}</td></tr>`;
   }).join("") || "";
 
   // Delays rows
@@ -758,7 +759,7 @@ tr{page-break-inside:auto;break-inside:auto}
   ${obsRows ? tbl([["Date","60px"],["Type","110px"],["Location","100px"],["Observation",""]], obsRows) : '<p style="font-size:12px;color:#9CA3AF;padding:8px 0">No safety observations recorded.</p>'}
 
   ${stitle("Toolbox Talks", nTbts+" this week")}
-  ${tbtRows ? tbl([["Date","60px"],["Topic",""],["Attendees","70px"]], tbtRows) : '<p style="font-size:12px;color:#9CA3AF;padding:8px 0">No toolbox talks recorded.</p>'}
+  ${tbtRows ? tbl([["Date","60px"],["Topic",""],["Attendees","90px","right"]], tbtRows) : '<p style="font-size:12px;color:#9CA3AF;padding:8px 0">No toolbox talks recorded.</p>'}
 
   ${stitle("Comments &amp; Concerns", nComments+" entries this week")}
   <div style="border:1px solid #E5E7EB;border-radius:6px;padding:0 14px">

@@ -524,6 +524,7 @@ function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs =
           if (portalToken) pdfQs.push(`token=${portalToken}`);
           if (isPreview && isDraft) pdfQs.push(`preview=1`);
           const pdfHref = `/api/portal/${projectCode}/weekly-reports/${report.id}/pdf${pdfQs.length ? `?${pdfQs.join('&')}` : ''}`;
+          const pdfFilename = `${projectCode}_weekly_report_wc_${report.weekCommencing}.pdf`;
           const d = report.aggregatedData || {};
           const delays = d.delays || [];
           // Merge stored comments with any standalone concern log entries for this week
@@ -565,7 +566,7 @@ function WeeklyReportsTab({ projectCode, color, project, standaloneConcernLogs =
                     <a
                       href={pdfHref}
                       data-testid={`report-pdf-${report.weekCommencing}`}
-                      download
+                      download={pdfFilename}
                       onClick={e => e.stopPropagation()}
                       style={{ fontSize: 11, fontWeight: 600, color: color, background: color + "15", padding: "4px 10px", borderRadius: 5, textDecoration: "none", display: "flex", alignItems: "center", gap: 4 }}
                     >
