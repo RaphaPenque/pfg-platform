@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
+import WeeklyOpsWorkflowCard from "@/components/WeeklyOpsWorkflowCard";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -536,6 +537,23 @@ export default function WeeklyOperations() {
               </div>
             </div>
           </Card>
+
+          {/* Workflow status card — single-glance summary of stage,
+              customer exposure, override context, next safe action, and
+              compact step progress. Reusable so other surfaces (project hub,
+              dashboard) can adopt it later. */}
+          <WeeklyOpsWorkflowCard
+            projectCode={status.project.code}
+            projectName={status.project.name}
+            weekCommencing={status.weekCommencing}
+            weekEnding={status.weekEnding}
+            timesheetWeek={tw ?? null}
+            hasNightShift={hasNightShift}
+            dayAssignments={status.assignments.day}
+            nightAssignments={status.assignments.night}
+            customerEmailsCount={customerEmails.length}
+            weeklyReport={status.weeklyReport}
+          />
 
           {/* Warnings */}
           {status.warnings.length > 0 && (
