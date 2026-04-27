@@ -636,19 +636,27 @@ export function registerRoutes(server: Server, app: Express) {
         report = reports.find(r => r.status === 'published') || reports[0];
       }
       if (!report) return res.status(404).json({ error: "Report not found" });
+
+      // Build a descriptive filename so a draft download is visibly different
+      // from a sent customer-facing PDF (PMs accumulate these locally during
+      // review). Pattern: <CODE>_weekly_report_wc_<YYYY-MM-DD>[_DRAFT].pdf
+      const isDraft = report.status === "draft";
+      const filenameSafeProject = code.replace(/[^A-Za-z0-9_-]/g, "");
+      const filename = `${filenameSafeProject}_weekly_report_wc_${report.weekCommencing}${isDraft ? "_DRAFT" : ""}.pdf`;
+
       // Try base64 from aggregated_data first (no filesystem needed)
       const agg = (report.aggregatedData as any) || {};
       if (agg.pdfBase64) {
         const buf = Buffer.from(agg.pdfBase64, 'base64');
         res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename="${code}_weekly_report_wc_${report.weekCommencing}.pdf"`);
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         res.setHeader('Content-Length', buf.length);
         return res.end(buf);
       }
       // Fallback: serve from disk if pdfPath exists
       if (report.pdfPath && fs.existsSync(report.pdfPath)) {
         res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename="${code}_weekly_report_wc_${report.weekCommencing}.pdf"`);
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
         return res.sendFile(report.pdfPath);
       }
       return res.status(404).json({ error: "PDF not yet generated" });

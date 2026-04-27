@@ -49,6 +49,18 @@ export interface MailOptions {
   text?: string;
   /** Optional sender — must be a valid @powerforce.global mailbox. Defaults to MAIL_FROM env var. */
   from?: string;
+  /**
+   * Optional display name shown next to the From: address.
+   * Useful when the actual mailbox is the central MAIL_FROM but the message is logically
+   * from a specific PM — set this to the PM's name so recipients see "Jane Doe via Powerforce".
+   */
+  fromName?: string;
+  /**
+   * Optional reply-to address. Used as a fallback when we cannot truly send AS the PM
+   * (e.g. because the PM mailbox isn't provisioned for Mail.Send) — replies still reach
+   * the right person even if the From address is the central mailbox.
+   */
+  replyTo?: string | string[];
   /** Optional file attachments (base64-encoded). */
   attachments?: Array<{
     name: string;
@@ -66,7 +78,14 @@ export async function sendMail(opts: MailOptions): Promise<boolean> {
 
   // ── Dev / missing credentials fallback ──────────────────────────
   if (!CLIENT_ID || !TENANT_ID || !CLIENT_SECRET) {
+    const devSender = (opts.from && opts.from.endsWith('@powerforce.global')) ? opts.from : MAIL_FROM;
+    const devFromLabel = opts.fromName ? `${opts.fromName} <${devSender}>` : devSender;
     console.log("[email:dev] Would send email:");
+    console.log(`  From:    ${devFromLabel}`);
+    if (opts.replyTo) {
+      const rt = Array.isArray(opts.replyTo) ? opts.replyTo.join(", ") : opts.replyTo;
+      console.log(`  ReplyTo: ${rt}`);
+    }
     console.log(`  To:      ${recipients.join(", ")}`);
     console.log(`  Subject: ${opts.subject}`);
     console.log(`  Body:    ${opts.text || opts.html.replace(/<[^>]+>/g, "").substring(0, 200)}`);
@@ -79,9 +98,33 @@ export async function sendMail(opts: MailOptions): Promise<boolean> {
     return false;
   }
 
+  // Use specified sender or fall back to default MAIL_FROM.
+  // We only impersonate a different mailbox when the requested address is on our own
+  // domain — otherwise Graph would reject the call.
+  const sender = (opts.from && opts.from.endsWith('@powerforce.global')) ? opts.from : MAIL_FROM;
+  const isImpersonatingPm = sender !== MAIL_FROM;
+
+  // Build replyTo array. When we couldn't truly send AS the PM (sender fell back to
+  // MAIL_FROM but caller asked for a PM from address), set replyTo to the requested
+  // PM email so replies still reach them.
+  const replyToList: string[] = [];
+  if (opts.replyTo) {
+    if (Array.isArray(opts.replyTo)) replyToList.push(...opts.replyTo);
+    else replyToList.push(opts.replyTo);
+  }
+  if (!isImpersonatingPm && opts.from && opts.from !== MAIL_FROM) {
+    if (!replyToList.includes(opts.from)) replyToList.push(opts.from);
+  }
+
+  const fromObj = opts.fromName
+    ? { emailAddress: { address: sender, name: opts.fromName } }
+    : { emailAddress: { address: sender } };
+
   const message = {
     message: {
       subject: opts.subject,
+      from: fromObj,
+      sender: fromObj,
       body: {
         contentType: "HTML",
         content: opts.html,
@@ -89,6 +132,9 @@ export async function sendMail(opts: MailOptions): Promise<boolean> {
       toRecipients: recipients.map((addr) => ({
         emailAddress: { address: addr },
       })),
+      ...(replyToList.length > 0 ? {
+        replyTo: replyToList.map((addr) => ({ emailAddress: { address: addr } })),
+      } : {}),
       ...(opts.attachments && opts.attachments.length > 0 ? {
         attachments: opts.attachments.map(a => ({
           "@odata.type": "#microsoft.graph.fileAttachment",
@@ -100,9 +146,6 @@ export async function sendMail(opts: MailOptions): Promise<boolean> {
     },
     saveToSentItems: true,
   };
-
-  // Use specified sender or fall back to default MAIL_FROM
-  const sender = (opts.from && opts.from.endsWith('@powerforce.global')) ? opts.from : MAIL_FROM;
 
   try {
     const res = await fetch(
