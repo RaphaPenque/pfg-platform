@@ -3,6 +3,7 @@ import type { Server } from "http";
 import { storage, db, pool } from "./storage";
 import { sql } from "drizzle-orm";
 import { registerTimesheetRoutes, buildTimesheetEntries, checkTimesheetReminders } from "./timesheet-routes";
+import { registerWeeklyOpsRoutes } from "./weekly-ops-routes";
 import { insertWorkerSchema, insertProjectSchema, insertAssignmentSchema, insertDocumentSchema, insertOemTypeSchema, insertRoleSlotSchema, insertWorkExperienceSchema } from "@shared/schema";
 import type { User, WorkExperience } from "@shared/schema";
 import { sendMail, magicLinkEmail, welcomeEmail, confirmationEmail, confirmationResultEmail } from "./email";
@@ -2848,6 +2849,9 @@ export function registerRoutes(server: Server, app: Express) {
 
   // ── Timesheet Module routes ──────────────────────────────────────────────
   registerTimesheetRoutes(app, requireAuth, requireRole);
+
+  // ── Weekly Operations PM panel routes ────────────────────────────────────
+  registerWeeklyOpsRoutes(app, requireAuth, requireRole);
 
   // Manually trigger weekly report generation for a specific project
   app.post("/api/internal/generate-weekly-report", requireAuth, requireRole("admin"), async (req: Request, res: Response) => {

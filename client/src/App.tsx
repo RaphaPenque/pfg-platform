@@ -19,6 +19,7 @@ import ConfirmAssignment from "./pages/ConfirmAssignment";
 import MilestoneApprovalPage from "./pages/MilestoneApprovalPage";
 import TimesheetApprovalPage from "./pages/TimesheetApprovalPage";
 import TimesheetSupervisorPage from "./pages/TimesheetSupervisorPage";
+import WeeklyOperations from "./pages/WeeklyOperations";
 import NotFound from "./pages/not-found";
 import { LogOut, Loader2 } from "lucide-react";
 
@@ -43,6 +44,7 @@ const tabs = [
   { id: "projects", label: "Project Hub", path: "/projects" },
   { id: "gantt", label: "Gantt Chart", path: "/gantt" },
   { id: "schedule", label: "Person Schedule", path: "/schedule" },
+  { id: "weekly-ops", label: "Weekly Ops", path: "/weekly-ops", roles: ["admin", "project_manager", "resource_manager"] as string[] },
 ];
 
 function AppHeader() {
@@ -96,6 +98,7 @@ function AppHeader() {
 
       <nav className="bg-white border-b flex px-6 gap-0 no-print" style={{ borderColor: "hsl(var(--border))" }}>
         {tabs.map((tab) => {
+          if ((tab as any).roles && !(tab as any).roles.includes(user?.role)) return null;
           const isActive = location === tab.path || (tab.path === "/" && location === "");
           return (
             <Link key={tab.id} href={tab.path}>
@@ -159,6 +162,7 @@ function MainLayout() {
           <Route path="/projects/:code">{(params) => <ProjectHubDetail params={params} />}</Route>
           <Route path="/gantt" component={GanttChart} />
           <Route path="/schedule" component={PersonSchedule} />
+          <Route path="/weekly-ops" component={WeeklyOperations} />
           <Route path="/admin/payroll-rules" component={PayrollRules} />
           <Route path="/admin/users" component={UserManagement} />
           <Route component={NotFound} />
