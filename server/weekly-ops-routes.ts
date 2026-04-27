@@ -10,12 +10,9 @@
  *   POST /api/weekly-ops/resend-supervisor-link                   — resend a single supervisor link (day|night)
  *   POST /api/weekly-ops/generate-weekly-report                   — generate + email weekly report (customer-facing)
  *   POST /api/weekly-ops/generate-weekly-report-preview           — generate weekly report PDF + draft DB row, NO email
- *
- * FUTURE (not yet implemented):
- *   POST /api/weekly-ops/approve-without-supervisor               — let a PM approve a timesheet
- *     week even though no supervisor has submitted, e.g. when supervisor link delivery has
- *     failed or the supervisor is unreachable. Should be gated to admin/PM, require an
- *     audit-logged reason, and live next to the existing supervisor-resend flow above.
+ *   POST /api/weekly-ops/approve-without-supervisor               — controlled override approval; PM/admin/RM only,
+ *                                                                   requires reason + evidence + acknowledgement,
+ *                                                                   writes audit_logs row, NEVER emails the customer.
  *
  * NOTE: The send-customer-timesheets and supervisor sends ALWAYS hit live email.
  * The frontend gates the customer-facing actions behind explicit confirmations.
@@ -26,7 +23,7 @@
 import { type Express, type Request, type Response } from "express";
 import { sql } from "drizzle-orm";
 import crypto from "crypto";
-import { db } from "./storage";
+import { db, storage } from "./storage";
 import { sendMail } from "./email";
 import { buildSupervisorTimesheetEmail } from "./timesheet-routes";
 import { getProjectSenderIdentity } from "./project-sender";
@@ -141,7 +138,9 @@ export function registerWeeklyOpsRoutes(
                  customer_approved_at, recalled_at, day_sup_token, day_sup_name,
                  day_sup_submitted_at, night_sup_token, night_sup_name,
                  night_sup_submitted_at, customer_token, token_expires_at,
-                 token_used_at, billing_pdf_path, timesheet_pdf_path
+                 token_used_at, billing_pdf_path, timesheet_pdf_path,
+                 pm_approve_override_at, pm_approve_override_by,
+                 pm_approve_override_reason, pm_approve_override_evidence
           FROM timesheet_weeks
           WHERE project_id = ${projectId} AND week_commencing = ${weekCommencing}::date
           LIMIT 1
@@ -359,6 +358,18 @@ export function registerWeeklyOpsRoutes(
                 hasTimesheetPdf: !!tw.timesheet_pdf_path,
                 customerTokenExists: !!tw.customer_token,
                 customerTokenExpiresAt: tw.token_expires_at,
+                // Override approval surface — non-null only when this week was
+                // approved via the PM 'approve without supervisor' route. The
+                // UI labels the state as Override Approval rather than a
+                // normal PM approval.
+                overrideApproval: tw.pm_approve_override_at
+                  ? {
+                      at: tw.pm_approve_override_at,
+                      byUserId: tw.pm_approve_override_by,
+                      reason: tw.pm_approve_override_reason,
+                      evidence: tw.pm_approve_override_evidence,
+                    }
+                  : null,
               }
             : null,
           entries,
@@ -588,6 +599,227 @@ export function registerWeeklyOpsRoutes(
           message: result.publishedDailyReports === 0
             ? "Preview generated but no daily reports were published for this week — the report content will be empty."
             : `Preview generated from ${result.publishedDailyReports} published daily report(s) for w/c ${result.weekStart}.`,
+        });
+      } catch (e: any) {
+        return res.status(500).json({ error: e.message || String(e) });
+      }
+    },
+  );
+
+  // ── POST /api/weekly-ops/approve-without-supervisor ─────────────────────
+  // Controlled override: an authorised PM/admin/RM approves a timesheet week
+  // even though no supervisor has submitted (e.g. supervisor link delivery
+  // failed or supervisor is unreachable).
+  //
+  // Hard rules — every one is enforced below; the smoke test
+  // (tests/smoke/workflow-invariants.test.ts) and health check (Section N13)
+  // assert these gates remain in place:
+  //   1. Role gate — admin / project_manager / resource_manager only.
+  //   2. Reason — non-empty, written to audit_logs.metadata.reason.
+  //   3. Evidence — non-empty reference (ticket / email subject / phone log /
+  //      "supervisor unreachable since YYYY-MM-DD"). Free-text; we deliberately
+  //      do not add file uploads here — uploads are a larger, separate change.
+  //   4. Explicit acknowledgement — `acknowledgeNoSupervisor === true` AND
+  //      `acknowledgeCustomerSendSeparate === true`. The UI maps these to two
+  //      checkboxes in the confirmation modal.
+  //   5. Status guards — only allow override from `draft` or `submitted`. We
+  //      refuse on `pm_approved`, `sent_to_customer`, `customer_approved`, and
+  //      `recalled` to keep the override away from any state where the
+  //      customer is already in the loop or where a recall is in flight.
+  //   6. Customer send remains separate — this endpoint NEVER calls sendMail
+  //      and the resulting status is exactly the same as a normal PM approval
+  //      (`pm_approved`, or `customer_approved` when sign-off is disabled).
+  //   7. Audit payload — userId, action="timesheet.approve_override", entityType
+  //      "timesheet_week", entityId, project + week, previous status, resulting
+  //      status, list of missing supervisors (day/night), reason, evidence.
+  //
+  // Body: {
+  //   projectId: number,
+  //   weekCommencing: "YYYY-MM-DD",
+  //   reason: string,                     // non-empty
+  //   evidence: string,                   // non-empty
+  //   acknowledgeNoSupervisor: true,      // must be literal true
+  //   acknowledgeCustomerSendSeparate: true,
+  // }
+  app.post(
+    "/api/weekly-ops/approve-without-supervisor",
+    requireAuth,
+    requireRole("admin", "project_manager", "resource_manager"),
+    async (req: Request, res: Response) => {
+      try {
+        const {
+          projectId,
+          weekCommencing,
+          reason,
+          evidence,
+          acknowledgeNoSupervisor,
+          acknowledgeCustomerSendSeparate,
+        } = req.body || {};
+
+        const pid = parseInt(String(projectId), 10);
+        if (!pid || isNaN(pid)) return res.status(400).json({ error: "projectId required" });
+        if (!weekCommencing || !/^\d{4}-\d{2}-\d{2}$/.test(String(weekCommencing))) {
+          return res.status(400).json({ error: "weekCommencing (YYYY-MM-DD) required" });
+        }
+        const reasonClean = typeof reason === "string" ? reason.trim() : "";
+        const evidenceClean = typeof evidence === "string" ? evidence.trim() : "";
+        if (reasonClean.length < 10) {
+          return res.status(400).json({
+            error: "reason is required and must be at least 10 characters explaining why supervisor submission is unavailable",
+          });
+        }
+        if (evidenceClean.length < 3) {
+          return res.status(400).json({
+            error: "evidence is required (ticket id, email subject, phone log, or short note describing supervisor unreachability)",
+          });
+        }
+        if (acknowledgeNoSupervisor !== true) {
+          return res.status(400).json({
+            error: "acknowledgeNoSupervisor must be true — confirm you understand no supervisor submission is on file",
+          });
+        }
+        if (acknowledgeCustomerSendSeparate !== true) {
+          return res.status(400).json({
+            error: "acknowledgeCustomerSendSeparate must be true — confirm the customer send remains a separate manual step",
+          });
+        }
+
+        // Locate timesheet_week + project context.
+        const twRes = await db.execute(sql`
+          SELECT tw.id, tw.status, tw.day_sup_token, tw.day_sup_submitted_at, tw.day_sup_name,
+                 tw.night_sup_token, tw.night_sup_submitted_at, tw.night_sup_name,
+                 tw.pm_approved_at, tw.sent_to_customer_at, tw.customer_approved_at,
+                 tw.recalled_at, tw.project_id, tw.week_commencing,
+                 p.name as project_name, p.code as project_code
+          FROM timesheet_weeks tw
+          JOIN projects p ON p.id = tw.project_id
+          WHERE tw.project_id = ${pid} AND tw.week_commencing = ${weekCommencing}::date
+          LIMIT 1
+        `);
+        const tw: any = twRes.rows[0];
+        if (!tw) {
+          return res.status(404).json({
+            error: "Timesheet week does not exist for this project / week. Build the week before overriding.",
+          });
+        }
+
+        const previousStatus: string = String(tw.status || "");
+        const allowedFrom = new Set(["draft", "submitted"]);
+        if (!allowedFrom.has(previousStatus)) {
+          return res.status(409).json({
+            error: `Override not allowed from status '${previousStatus}'. Override approval only applies when the week is still draft or submitted — never after PM approval, customer send, customer approval, or recall.`,
+            previousStatus,
+          });
+        }
+
+        // Reject if at least one supervisor has actually submitted — at that
+        // point the normal PM approval path is the correct flow.
+        if (tw.day_sup_submitted_at || tw.night_sup_submitted_at) {
+          return res.status(409).json({
+            error: "A supervisor submission is already on file for this week. Use the normal PM approval flow.",
+          });
+        }
+
+        // Determine which shifts had assignments active in the week, to record
+        // which supervisor submission(s) were actually missing.
+        const weekEnding = isoDate(addDays(new Date(weekCommencing + "T00:00:00Z"), 6));
+        const shiftRes = await db.execute(sql`
+          SELECT COUNT(*) FILTER (WHERE LOWER(shift) LIKE 'night%')::int as night,
+                 COUNT(*) FILTER (WHERE LOWER(shift) LIKE 'day%')::int   as day
+          FROM assignments
+          WHERE project_id = ${pid}
+            AND status NOT IN ('cancelled','declined','removed')
+            AND (start_date IS NULL OR start_date <= ${weekEnding})
+            AND (end_date   IS NULL OR end_date   >= ${weekCommencing})
+        `);
+        const shiftRow: any = shiftRes.rows[0] || { day: 0, night: 0 };
+        const dayShiftActive = Number(shiftRow.day || 0) > 0;
+        const nightShiftActive = Number(shiftRow.night || 0) > 0;
+
+        const missingSupervisors: string[] = [];
+        if (dayShiftActive && !tw.day_sup_submitted_at) missingSupervisors.push("day");
+        if (nightShiftActive && !tw.night_sup_submitted_at) missingSupervisors.push("night");
+        if (missingSupervisors.length === 0) {
+          // Defensive: should not happen given the submitted-at guard above,
+          // but if we ever get here there is no override to perform.
+          return res.status(409).json({
+            error: "No missing supervisor submissions detected for this week. Use the normal PM approval flow.",
+          });
+        }
+
+        // Resolve resulting status — same rule as the normal approve route.
+        const cfgRes = await db.execute(sql`
+          SELECT customer_signoff_required FROM timesheet_config WHERE project_id = ${pid}
+        `);
+        const cfg: any = cfgRes.rows[0];
+        const requiresSignoff = cfg?.customer_signoff_required !== false;
+        const newStatus = requiresSignoff ? "pm_approved" : "customer_approved";
+
+        // Update the week. We deliberately do NOT touch supervisor token /
+        // submission columns — we want it to stay obvious in the data that no
+        // supervisor submitted. The override is captured in audit_logs and in
+        // the `pm_approve_override_*` columns added below.
+        await db.execute(sql`
+          UPDATE timesheet_weeks
+          SET status = ${newStatus},
+              pm_approved_at = NOW(),
+              pm_approve_override_reason = ${reasonClean},
+              pm_approve_override_evidence = ${evidenceClean},
+              pm_approve_override_at = NOW(),
+              pm_approve_override_by = ${req.user!.id}
+          WHERE id = ${tw.id}
+        `);
+
+        // Audit log — the canonical record of who/when/why for this override.
+        await storage.createAuditLog({
+          userId: req.user!.id,
+          action: "timesheet.approve_override",
+          entityType: "timesheet_week",
+          entityId: tw.id,
+          entityName: `${tw.project_code} w/c ${weekCommencing}`,
+          changes: {
+            status: { from: previousStatus, to: newStatus },
+          },
+          metadata: {
+            projectId: pid,
+            projectCode: tw.project_code,
+            projectName: tw.project_name,
+            weekCommencing,
+            previousStatus,
+            resultingStatus: newStatus,
+            missingSupervisors,
+            reason: reasonClean,
+            evidence: evidenceClean,
+            acknowledgement: {
+              noSupervisor: true,
+              customerSendSeparate: true,
+            },
+            requiresCustomerSignoff: requiresSignoff,
+            actor: {
+              id: req.user!.id,
+              email: req.user!.email,
+              role: req.user!.role,
+            },
+          },
+        });
+
+        const updated = await db.execute(sql`
+          SELECT id, status, pm_approved_at, pm_approve_override_at,
+                 pm_approve_override_by, pm_approve_override_reason,
+                 pm_approve_override_evidence
+          FROM timesheet_weeks WHERE id = ${tw.id}
+        `);
+
+        // NOTE: This route deliberately does NOT call sendMail or any customer
+        // send pipeline. Customer send remains a separate, explicit action.
+        return res.json({
+          ok: true,
+          mode: "override_approval",
+          emailedCustomer: false,
+          previousStatus,
+          newStatus,
+          missingSupervisors,
+          timesheetWeek: updated.rows[0] || null,
         });
       } catch (e: any) {
         return res.status(500).json({ error: e.message || String(e) });

@@ -599,6 +599,17 @@ export async function runSchemaUpdates() {
     await db.execute(sql`ALTER TABLE timesheet_weeks ADD COLUMN IF NOT EXISTS night_sup_name text`);
     console.log('Supervisor token columns added to timesheet_weeks (if not exists)');
 
+    // ── PM 'Approve without Supervisor' override columns ─────────────────────
+    // Surface the override directly on the timesheet_week row so the UI can
+    // label the resulting state as an exception approval. The full audit
+    // payload (who/when/why/evidence/missing supervisors/previous status)
+    // lives in audit_logs (action = 'timesheet.approve_override').
+    await db.execute(sql`ALTER TABLE timesheet_weeks ADD COLUMN IF NOT EXISTS pm_approve_override_at timestamptz`);
+    await db.execute(sql`ALTER TABLE timesheet_weeks ADD COLUMN IF NOT EXISTS pm_approve_override_by integer`);
+    await db.execute(sql`ALTER TABLE timesheet_weeks ADD COLUMN IF NOT EXISTS pm_approve_override_reason text`);
+    await db.execute(sql`ALTER TABLE timesheet_weeks ADD COLUMN IF NOT EXISTS pm_approve_override_evidence text`);
+    console.log('Override approval columns added to timesheet_weeks (if not exists)');
+
     console.log("Schema updates applied.");
   } catch (e: any) {
     console.error("Schema update error:", e.message);
