@@ -509,6 +509,49 @@ Files: `server/routes.ts` (helpers + read paths), `client/src/pages/WorkforceTab
 
 ---
 
+### Weekly Ops workflow status card (UX clarity, added 2026-04-27)
+
+The Weekly Ops page (`client/src/pages/WeeklyOperations.tsx`) now renders a single-glance **Workflow status card** above the existing warnings + checklist. The card is a thin renderer over pure derivations in `shared/weekly-ops-workflow.ts`; the renderer lives at `client/src/components/WeeklyOpsWorkflowCard.tsx`.
+
+The card surfaces five things — every one is required and every one is invariant:
+
+1. **Stage chip** — the authoritative key, derived from `timesheet_weeks.status` plus override/recall markers. Stages: `not_built`, `draft`, `awaiting_supervisor`, `supervisor_submitted`, `pm_approved`, `pm_approved_override`, `sent_to_customer`, `customer_approved`, `recalled`. Stage tone is colour AND icon AND label so the card never relies on hue alone.
+2. **Customer-exposure boundary** — always visible, prominent, two states only:
+   - `Not sent to customer` (amber, EyeOff icon) for every stage EXCEPT `sent_to_customer` and `customer_approved`. **PM approval (with or without override) is NEVER customer-facing.**
+   - `Customer-facing — sent` / `Customer-facing — approved` (blue, Mail icon) for the two terminal stages.
+   The PR #10 wording (`Sending is a separate, explicit action.`) is reproduced verbatim so a PM glancing at the card cannot mistake approval for sending.
+3. **Override evidence summary** — only when `stage === pm_approved_override`. Shows reason, evidence reference, and re-states that the customer has not been emailed.
+4. **Next safe action** — single-sentence, four tones (`info`, `warn`, `blocked`, `done`). Blocked specifically when stage is `pm_approved` / `pm_approved_override` AND `customerEmailsCount === 0`.
+5. **Compact progress list** — built / day-link / day-submit / [night-link / night-submit | night-skip] / pm / sent / approved / report. First pending step is marked `current`. Recalled stage regresses the `pm` step to `current`.
+
+Hard rules pinned by `tests/smoke/weekly-ops-workflow-card.test.ts` (and inherently by the type system since the helpers are typed):
+- `isCustomerFacing` returns true for exactly two stages: `sent_to_customer` and `customer_approved`.
+- `STAGE_META.pm_approved_override.description` must contain the phrase `Customer has NOT been emailed`.
+- `pm_approved_override.tone === "amber"` and `pm_approved.tone === "success"` so the two are visually distinct.
+- `deriveNextAction` returns tone `blocked` for any PM-approved variant with zero customer emails.
+- `deriveNextAction` returns tone `info` with "Generate & send" for any PM-approved variant WITH customer emails — the override does NOT auto-send.
+- The `pm` step in `deriveSteps` is labelled `PM approved — OVERRIDE` for the override stage, otherwise `PM approved`.
+
+UI affordances pinned by component test ids (used by Playwright / future component tests): `weekly-ops-workflow-card`, `workflow-stage-badge` (carries `data-stage`), `workflow-customer-exposure` (carries `data-customer-facing`), `workflow-override-badge`, `workflow-recalled-badge`, `workflow-override-evidence`, `workflow-next-action` (carries `data-tone`), `workflow-progress-list`, `workflow-step-{id}` (carries `data-step-state`).
+
+**Manual QA expectations** (after deploy):
+1. Weekly Ops → pick a `customer_approved` week → card shows `Customer-facing — approved` (blue Mail icon) and a `done` next-safe-action.
+2. Pick a `pm_approved` week with customer emails on file → card shows `PM approved — ready to send` (green chip), `Not sent to customer` (amber EyeOff), and next-safe-action `Generate & send the weekly report to the customer`.
+3. Pick a `pm_approved` week on a project with NO customer emails → card shows the same green chip but next-safe-action goes `blocked` with the wording `no customer-facing emails`.
+4. Pick an override-approved week → card shows the amber override chip, the `OVERRIDE` PM step, and the audit summary block with reason + evidence.
+5. Pick a `sent_to_customer` week → customer-exposure flips to blue `Customer-facing — sent`, next-safe-action says "Waiting on customer approval".
+6. Pick a recalled week → recalled badge shown, PM step regresses to `current`, next-safe-action tells PM to edit + re-approve.
+
+Files:
+- `shared/weekly-ops-workflow.ts` — pure derivations (stage, next-action, customer exposure, steps, stage meta).
+- `client/src/components/WeeklyOpsWorkflowCard.tsx` — JSX renderer.
+- `client/src/pages/WeeklyOperations.tsx` — wires the card in immediately above the warnings card; existing headline + checklist + actions panels are preserved unchanged so the per-stage timestamps and manual triggers stay intact.
+- `tests/smoke/weekly-ops-workflow-card.test.ts` — 25 static-source / pure-function assertions guarding stage, customer-exposure, next-action, and step derivations.
+
+This card is **UX-only**. No backend behaviour changes; no new fields on the status payload; the existing `/api/weekly-ops/status` shape is reused as-is. No customer-send path is touched.
+
+---
+
 ## Future-Session Discipline — When Workflow Rules Change
 
 If you change anything in the timesheet → weekly report → customer email chain, the change is not done until **all four** of the following are true. Do not close the session until this list is complete:
@@ -579,6 +622,26 @@ Every summary card in the platform must be backed by a DB query. This table is t
 ## Changelog
 
 > Keep a running log of significant changes. Most recent first. Format: `YYYY-MM-DD | What changed | Why | Files touched`
+
+### 2026-04-27 (later, follow-up #3) — Weekly Ops Workflow Status Card (UX clarity)
+
+**Background:** PMs working from the Weekly Ops page had to read a stack of timestamps and warnings to figure out what stage a week was in, whether the customer had been emailed, and what the next safe action was. Override-approved weeks were even harder to read — the badge was tucked next to the headline. PR #10 codified the override but did not give it a single-glance home.
+
+**Implemented:**
+- New shared module `shared/weekly-ops-workflow.ts` — pure derivations (`deriveStage`, `deriveNextAction`, `deriveCustomerExposure`, `deriveSteps`, `isCustomerFacing`, `STAGE_META`).
+- New reusable component `client/src/components/WeeklyOpsWorkflowCard.tsx` — JSX-only renderer over the pure derivations. Surfaces stage chip, customer-exposure boundary (always visible), override evidence summary (when applicable), next-safe-action panel, and a compact progress list.
+- Wired into `client/src/pages/WeeklyOperations.tsx` between the headline card and the warnings card. Existing timeline checklist, draft panel, stats, and manual action buttons preserved unchanged.
+
+**Coverage:**
+- New smoke test `tests/smoke/weekly-ops-workflow-card.test.ts` — 25 static-source / pure-function assertions covering stage derivation for every server-emitted status, the customer-exposure boundary (only `sent_to_customer` and `customer_approved` are customer-facing), override stage wording (`Customer has NOT been emailed`), next-safe-action blocking when no customer emails on file, and progress-list step transitions.
+- `PLATFORM_CONTEXT.md` — new "Weekly Ops workflow status card" subsection under Reporting & Timesheet Workflow Invariants pins the rules.
+
+**Caveats / what this PR deliberately does NOT do:**
+- No backend / API change. The card derives everything from the existing `/api/weekly-ops/status` payload.
+- No mutation of timesheet workflow behaviour. The override approval path (PR #10) is unchanged; the card just makes it easier to read.
+- No customer-send path touched. Customer send remains a separate, explicit Weekly Ops action.
+- No changes to the existing checklist / actions panels — they still carry the per-step timestamps and manual triggers PMs use today.
+- Health-check Section N is unchanged. The card invariants are protected by the new smoke test (pure helpers + static source) which runs faster than the live-data health checks.
 
 ### 2026-04-27 (later, follow-up #2b) — Approve-without-Supervisor Override hardening (code review)
 
