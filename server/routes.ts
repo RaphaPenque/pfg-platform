@@ -539,22 +539,49 @@ export function registerRoutes(server: Server, app: Express) {
   });
 
   // ── GET /api/portal/:code/weekly-reports — list published weekly reports ──
+  // Pass ?preview=1 (with a valid PFG session cookie) to also include draft
+  // weekly reports. Drafts NEVER leak via portal-token-only access.
   app.get("/api/portal/:code/weekly-reports", async (req: Request, res: Response) => {
     try {
       const code = req.params.code.toUpperCase();
       const allProjects = await storage.getProjects();
       const project = allProjects.find(p => p.code === code);
       if (!project) return res.status(404).json({ error: "Project not found" });
-      if (project.portalAccessToken) {
+
+      // Detect internal PM/admin preview mode
+      const wantsPreview = String(req.query.preview || "") === "1";
+      let isInternalPreview = false;
+      if (wantsPreview) {
+        const sessionToken = (req as any).cookies?.pfg_session;
+        if (sessionToken) {
+          const session = await storage.getSessionByToken(sessionToken);
+          if (session) {
+            const user = await storage.getUserById(session.userId);
+            if (
+              user &&
+              user.isActive &&
+              ["admin", "project_manager", "resource_manager"].includes(user.role)
+            ) {
+              isInternalPreview = true;
+            }
+          }
+        }
+      }
+
+      // Standard portal-token gate (skip when internal preview is authorised)
+      if (!isInternalPreview && project.portalAccessToken) {
         const supplied = (req.query.token as string) || req.headers['x-portal-token'] as string;
         if (!supplied || supplied !== project.portalAccessToken) return res.status(401).json({ error: "Invalid or missing portal access token" });
       }
       const reports = await storage.getWeeklyReportsByProject(project.id);
-      const published = reports.filter(r => r.status === 'published');
-      res.json(published.map(r => ({
+      const visible = isInternalPreview
+        ? reports.filter(r => r.status === 'published' || r.status === 'draft')
+        : reports.filter(r => r.status === 'published');
+      res.json(visible.map(r => ({
         id: r.id,
         weekCommencing: r.weekCommencing,
         weekEnding: r.weekEnding,
+        status: r.status,
         hasPdf: !!(((r.aggregatedData as any) || {}).pdfBase64) || (!!r.pdfPath && fs.existsSync(r.pdfPath)),
         aggregatedData: r.aggregatedData,
         sentAt: r.sentAt,
@@ -565,6 +592,8 @@ export function registerRoutes(server: Server, app: Express) {
   });
 
   // ── GET /api/portal/:code/weekly-reports/:id/pdf — stream pre-stored PDF ──
+  // Pass ?preview=1 with a valid PFG session cookie to retrieve a draft report
+  // PDF; otherwise drafts are 404 to outside callers.
   app.get("/api/portal/:code/weekly-reports/:id/pdf", async (req: Request, res: Response) => {
     try {
       const code = req.params.code.toUpperCase();
@@ -572,9 +601,40 @@ export function registerRoutes(server: Server, app: Express) {
       const allProjects = await storage.getProjects();
       const project = allProjects.find(p => p.code === code);
       if (!project) return res.status(404).json({ error: "Project not found" });
+
+      // Internal preview (PM session) may fetch draft PDFs by id.
+      const wantsPreview = String(req.query.preview || "") === "1";
+      let isInternalPreview = false;
+      if (wantsPreview) {
+        const sessionToken = (req as any).cookies?.pfg_session;
+        if (sessionToken) {
+          const session = await storage.getSessionByToken(sessionToken);
+          if (session) {
+            const user = await storage.getUserById(session.userId);
+            if (
+              user &&
+              user.isActive &&
+              ["admin", "project_manager", "resource_manager"].includes(user.role)
+            ) {
+              isInternalPreview = true;
+            }
+          }
+        }
+      }
+
       const reports = await storage.getWeeklyReportsByProject(project.id);
-      // Match by id, or fall back to most recent published report for this project
-      const report = (id > 0 ? reports.find(r => r.id === id) : null) || reports.find(r => r.status === 'published') || reports[0];
+      // Match by id (drafts allowed only in internal preview), else fall back
+      // to the most recent published report.
+      let report: any = null;
+      if (id > 0) {
+        const candidate = reports.find(r => r.id === id);
+        if (candidate && (candidate.status === 'published' || isInternalPreview)) {
+          report = candidate;
+        }
+      }
+      if (!report) {
+        report = reports.find(r => r.status === 'published') || reports[0];
+      }
       if (!report) return res.status(404).json({ error: "Report not found" });
       // Try base64 from aggregated_data first (no filesystem needed)
       const agg = (report.aggregatedData as any) || {};

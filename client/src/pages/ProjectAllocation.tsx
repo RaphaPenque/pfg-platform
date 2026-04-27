@@ -274,12 +274,28 @@ function ProjectCard({ card, onClick, effectiveStatus }: { card: ProjectCardData
       </div>
 
       <div className="px-5 py-2.5 flex justify-end" style={{ borderTop: "1px solid hsl(var(--border))" }}>
-        <Link href={`/portal/${card.project.code}`} onClick={(e: React.MouseEvent) => e.stopPropagation()} data-testid={`share-customer-${card.project.code}`}>
-          <span className="flex items-center gap-1 text-[11px] font-semibold hover:underline" style={{ color: "var(--pfg-steel)" }}>
+        {card.project.portalAccessToken ? (
+          <Link
+            href={`/portal/${card.project.code}?token=${card.project.portalAccessToken}`}
+            onClick={(e: React.MouseEvent) => e.stopPropagation()}
+            data-testid={`share-customer-${card.project.code}`}
+          >
+            <span className="flex items-center gap-1 text-[11px] font-semibold hover:underline" style={{ color: "var(--pfg-steel)" }}>
+              <ExternalLink className="w-3 h-3" />
+              Share with Customer
+            </span>
+          </Link>
+        ) : (
+          <span
+            className="flex items-center gap-1 text-[11px] font-semibold opacity-60 cursor-not-allowed"
+            style={{ color: "var(--pfg-steel)" }}
+            title="No portal access token on this project"
+            data-testid={`share-customer-${card.project.code}-disabled`}
+          >
             <ExternalLink className="w-3 h-3" />
-            Share with Customer
+            Share with Customer (no token)
           </span>
-        </Link>
+        )}
       </div>
     </div>
   );

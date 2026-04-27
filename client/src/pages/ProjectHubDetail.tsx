@@ -1345,11 +1345,44 @@ export default function ProjectHubDetail({ params }: { params: { code: string } 
               Cancel Project
             </button>
           )}
-          <Link href={`/portal/${project.code}`}>
-            <span className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg border transition-colors hover:bg-black/5" style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-steel)" }}>
-              Customer Portal <ExternalLink className="w-3 h-3" />
+          {project.portalAccessToken ? (
+            <>
+              <Link href={`/portal/${project.code}?token=${project.portalAccessToken}`}>
+                <span
+                  className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg border transition-colors hover:bg-black/5"
+                  style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-steel)" }}
+                  data-testid="project-customer-portal-link"
+                >
+                  Customer Portal <ExternalLink className="w-3 h-3" />
+                </span>
+              </Link>
+              <button
+                type="button"
+                onClick={() => {
+                  const url = `${window.location.origin}/#/portal/${project.code}?token=${project.portalAccessToken}`;
+                  navigator.clipboard?.writeText(url).then(
+                    () => toast({ title: "Portal link copied", description: url }),
+                    () => toast({ title: "Could not copy", description: url, variant: "destructive" }),
+                  );
+                }}
+                className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg border transition-colors hover:bg-black/5"
+                style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-steel)" }}
+                data-testid="project-customer-portal-copy"
+                title="Copy customer portal URL with token"
+              >
+                Copy link
+              </button>
+            </>
+          ) : (
+            <span
+              className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg border opacity-60 cursor-not-allowed"
+              style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-steel)" }}
+              data-testid="project-customer-portal-disabled"
+              title="No portal access token on this project — generate one in Admin"
+            >
+              Customer Portal (no token)
             </span>
-          </Link>
+          )}
         </div>
       </div>
 

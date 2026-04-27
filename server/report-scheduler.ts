@@ -349,6 +349,283 @@ export async function sendReportForProject(
   console.log(`[report-scheduler] ${isFinal ? 'FINAL' : 'Weekly'} report sent for ${project.code} to ${toAddresses.join(', ')}`);
 }
 
+// ── Internal preview generator (no email send) ──
+//
+// Builds the weekly report PDF and aggregated_data exactly as the customer-facing
+// pipeline would, but writes the row to weekly_reports with status='draft' and
+// sentAt=NULL. Targets a specific weekCommencing (Monday, ISO date) so PMs can
+// preview a chosen week regardless of which daily reports are most recent.
+//
+// Customer recipients are NEVER contacted by this function.
+export async function generateWeeklyReportPreview(
+  project: any,
+  weekCommencingISO: string,
+): Promise<{
+  weeklyReportId: number;
+  weekStart: string;
+  weekEnd: string;
+  publishedDailyReports: number;
+  hasPdf: boolean;
+  pdfPath: string | null;
+  status: 'draft' | 'published';
+}> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekCommencingISO)) {
+    throw new Error(`weekCommencing must be ISO YYYY-MM-DD; got ${weekCommencingISO}`);
+  }
+  const weekStart = weekCommencingISO;
+  const weekEnd = (() => {
+    const d = new Date(weekStart + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + 6);
+    return toISO(d);
+  })();
+
+  const allReports = await storage.getDailyReports(project.id);
+  const published = allReports.filter((r: any) => r.publishedToPortal);
+  const weekReports = published.filter(
+    (r: any) => r.reportDate >= weekStart && r.reportDate <= weekEnd,
+  );
+
+  // Don't bail when there are no published reports — preview should still
+  // produce a PDF (possibly empty) so PMs can see what the customer would see.
+  // We DO refuse if the project has no published reports at all AND no
+  // existing weekly_report row, since the PDF would be entirely blank.
+  // Caller can react to publishedDailyReports === 0 in the response.
+
+  const pmUser = await getPmUser(project.id);
+  const pmName = pmUser?.name || 'Powerforce Global Project Management';
+
+  const [assignments, allWorkers, allToolboxTalks, allSafetyObs, allIncidents, allComments] =
+    await Promise.all([
+      storage.getAssignmentsByProject(project.id),
+      storage.getWorkers(),
+      storage.getToolboxTalks(project.id),
+      storage.getSafetyObservations(project.id),
+      storage.getIncidentReports(project.id),
+      storage.getCommentsLog(project.id),
+    ]);
+
+  const workerMap = Object.fromEntries((allWorkers as any[]).map((w: any) => [w.id, w]));
+  const activeAssignments = (assignments as any[]).filter((a: any) =>
+    ['active', 'confirmed', 'pending_confirmation', 'flagged'].includes(a.status || ''),
+  );
+  const teamMembers = activeAssignments
+    .filter((a: any) => {
+      const aStart = a.startDate || '';
+      const aEnd = a.endDate || '9999-12-31';
+      return aStart <= weekEnd && aEnd >= weekStart;
+    })
+    .map((a: any) => {
+      const w = (workerMap as any)[a.workerId];
+      return {
+        name: (w?.name || `Worker ${a.workerId}`).replace(/\s*\([^)]*\)/g, '').trim(),
+        role: a.role || '',
+        shift: a.shift || '',
+        startDate: a.startDate || '',
+        endDate: a.endDate || '',
+      };
+    });
+
+  const reportDelays = weekReports.flatMap((r: any) =>
+    Array.isArray(r.delaysLog)
+      ? r.delaysLog.map((d: any) => ({ ...d, date: r.reportDate || r.date || '' }))
+      : [],
+  );
+  const weekReportIds = new Set(weekReports.map((r: any) => r.id));
+  const reportComments = (allComments as any[]).filter((c: any) => {
+    if (c.reportId && weekReportIds.has(c.reportId)) return true;
+    const d = c.logDate || c.enteredAt?.slice(0, 10) || '';
+    return d >= weekStart && d <= weekEnd;
+  });
+
+  const now = new Date();
+  const projEnd = project.endDate ? new Date(project.endDate + 'T00:00:00Z') : null;
+  const projStart = project.startDate ? new Date(project.startDate + 'T00:00:00Z') : null;
+  const totalDays =
+    projStart && projEnd
+      ? Math.max(1, Math.round((projEnd.getTime() - projStart.getTime()) / 86400000))
+      : 1;
+  const elapsedDays = projStart
+    ? Math.round((now.getTime() - projStart.getTime()) / 86400000)
+    : 0;
+  const daysRemaining = projEnd
+    ? Math.max(0, Math.round((projEnd.getTime() - now.getTime()) / 86400000))
+    : 0;
+
+  const OEM_COLOURS: Record<string, string> = {
+    'GE Vernova': '#005E60',
+    'Mitsubishi Power': '#E60012',
+    'Siemens Energy': '#009999',
+    'Arabelle Solutions': '#FE5716',
+    'Alstom': '#0066CC',
+    'Ansaldo Energia': '#003399',
+    'Sulzer': '#1D59AF',
+  };
+  const oemColour = OEM_COLOURS[project.customer || ''] || '#1A1D23';
+
+  const reportData = {
+    projectName: project.name || '',
+    projectCode: project.code || '',
+    customer: project.customer || '',
+    siteName: project.siteName || '',
+    startDate: project.startDate || '',
+    endDate: project.endDate || '',
+    contractType: project.contractType || 'T&M',
+    shiftPattern: project.shift || 'Day & Night',
+    weekStart,
+    weekEnd,
+    pmName,
+    completedTasks: [],
+    delaysLog: reportDelays,
+    commentsEntries: reportComments
+      .filter((c: any) => (c.entry || '').trim())
+      .map((c: any) => ({
+        date: c.enteredAt
+          ? new Date(c.enteredAt).toLocaleDateString('en-GB', {
+              day: 'numeric',
+              month: 'short',
+              timeZone: 'UTC',
+            })
+          : '',
+        entry: c.entry || '',
+        userName: '',
+      })),
+    teamMembers,
+    safetyData: {
+      toolboxTalks: (allToolboxTalks as any[]).filter(
+        (t: any) => (t.reportDate || '') >= weekStart && (t.reportDate || '') <= weekEnd,
+      ).length,
+      observations: (allSafetyObs as any[]).filter(
+        (o: any) => (o.observationDate || '') >= weekStart && (o.observationDate || '') <= weekEnd,
+      ).length,
+      nearMisses: (allIncidents as any[]).filter(
+        (i: any) =>
+          i.incidentType === 'near_miss' &&
+          (i.incidentDate || '') >= weekStart &&
+          (i.incidentDate || '') <= weekEnd,
+      ).length,
+      incidents: (allIncidents as any[]).filter(
+        (i: any) =>
+          i.incidentType !== 'near_miss' &&
+          (i.incidentDate || '') >= weekStart &&
+          (i.incidentDate || '') <= weekEnd,
+      ).length,
+    },
+    safetyObservations: (allSafetyObs as any[]).filter(
+      (o: any) => (o.observationDate || '') >= weekStart && (o.observationDate || '') <= weekEnd,
+    ),
+    toolboxTalks: (allToolboxTalks as any[]).filter(
+      (t: any) => (t.reportDate || '') >= weekStart && (t.reportDate || '') <= weekEnd,
+    ),
+    daysRemaining,
+    activeTeam: teamMembers.length,
+    progressPct: Math.round((elapsedDays / totalDays) * 100),
+    oemColour,
+    isFinalReport: false,
+  };
+
+  let pdfBuffer: Buffer | null = null;
+  try {
+    pdfBuffer = await generateWeeklyReportPdfHtml(reportData as any);
+  } catch (pdfErr: any) {
+    console.warn(
+      `[report-scheduler:preview] PDF generation skipped (${pdfErr.message?.slice(0, 80)})`,
+    );
+  }
+
+  const filename = `${project.code}-preview-w-c-${weekStart}.pdf`;
+  let pdfPath: string | null = null;
+  if (pdfBuffer) {
+    try {
+      const reportDir = path.join(UPLOAD_ROOT, 'reports', project.code);
+      fs.mkdirSync(reportDir, { recursive: true });
+      pdfPath = path.join(reportDir, filename);
+      fs.writeFileSync(pdfPath, pdfBuffer);
+    } catch (writeErr: any) {
+      console.warn(
+        `[report-scheduler:preview] Could not write PDF to disk (${writeErr.message?.slice(0, 80)}) — keeping in DB only`,
+      );
+      pdfPath = null;
+    }
+  }
+
+  const aggregatedData: any = {
+    weekStart,
+    weekEnd,
+    delays: reportDelays,
+    comments: reportComments
+      .filter((c: any) => (c.entry || '').trim())
+      .map((c: any) => ({
+        date: c.logDate || c.enteredAt?.slice(0, 10) || '',
+        entry: c.entry || '',
+        userName: (c as any).userName || '',
+      })),
+    tasks: weekReports.flatMap((r: any) =>
+      Array.isArray(r.completedTasks) ? r.completedTasks : [],
+    ),
+    safetyStats: reportData.safetyData,
+    toolboxTalks: reportData.toolboxTalks,
+    safetyObservations: reportData.safetyObservations,
+    teamMembers,
+    daysRemaining,
+    progressPct: reportData.progressPct,
+    previewGeneratedAt: new Date().toISOString(),
+  };
+  if (pdfBuffer && !pdfPath) {
+    // No filesystem available — store base64 in aggregated_data so the
+    // existing /api/portal/:code/weekly-reports/:id/pdf path can serve it.
+    aggregatedData.pdfBase64 = pdfBuffer.toString('base64');
+  }
+
+  const existing = await storage.getWeeklyReportByWeek(project.id, weekStart);
+  let weeklyReportId: number;
+  let finalStatus: 'draft' | 'published';
+  if (existing) {
+    // Preview never overwrites a row that has already been sent to the customer.
+    // It also never downgrades a 'published' status — drafts only update drafts.
+    if (existing.sentAt || existing.status === 'published') {
+      console.log(
+        `[report-scheduler:preview] ${project.code}: w/c ${weekStart} already published/sent — refreshing aggregated_data + pdfPath but keeping status='${existing.status}'`,
+      );
+      finalStatus = existing.status as any;
+    } else {
+      finalStatus = 'draft';
+    }
+    await storage.updateWeeklyReport(existing.id, {
+      status: finalStatus,
+      pdfPath,
+      aggregatedData,
+      // Don't touch sentAt — preview must never claim the row was sent.
+    });
+    weeklyReportId = existing.id;
+  } else {
+    const created = await storage.createWeeklyReport({
+      projectId: project.id,
+      weekCommencing: weekStart,
+      weekEnding: weekEnd,
+      status: 'draft',
+      pdfPath,
+      aggregatedData,
+      sentAt: null as any,
+    });
+    weeklyReportId = (created as any).id;
+    finalStatus = 'draft';
+  }
+
+  console.log(
+    `[report-scheduler:preview] ${project.code} w/c ${weekStart} — status=${finalStatus}, pdf=${!!pdfBuffer}, dailyReports=${weekReports.length}`,
+  );
+
+  return {
+    weeklyReportId,
+    weekStart,
+    weekEnd,
+    publishedDailyReports: weekReports.length,
+    hasPdf: !!pdfBuffer,
+    pdfPath,
+    status: finalStatus,
+  };
+}
+
 // ── Final email template ──
 function buildFinalEmailHtml(
   projectName: string,

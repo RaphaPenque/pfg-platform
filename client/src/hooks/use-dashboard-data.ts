@@ -107,6 +107,7 @@ export interface DashboardProject {
   scopeOfWork: string | null;
   timesheetSignatoryName: string | null;
   timesheetSignatoryEmail: string | null;
+  portalAccessToken: string | null;
 }
 
 export interface RoleSlotPeriod {
