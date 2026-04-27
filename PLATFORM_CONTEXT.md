@@ -623,6 +623,39 @@ Every summary card in the platform must be backed by a DB query. This table is t
 
 > Keep a running log of significant changes. Most recent first. Format: `YYYY-MM-DD | What changed | Why | Files touched`
 
+### 2026-04-27 (evening) — Production QA: PR #10 Override + PR #12 Workflow Status Card
+
+**Status:** Both PR #10 (PM 'Approve without Supervisor' controlled override) and PR #12 (Weekly Ops workflow status card) are merged, deployed, and have passed production QA. No regressions observed; no customer-facing emails were sent during QA.
+
+**PR #10 production QA (Approve without Supervisor override):**
+- Project: GNT / GE ST Gent Belgium. Week id: 875. Week commencing: 2026-04-20.
+- Operator approved the override with explicit acknowledgement of both gates (no supervisor submission on file; customer send remains a separate explicit action).
+- Status transitioned `draft` → `pm_approved` strictly via the override path. Supervisor submission columns left untouched as designed (missing supervisor remains visible in the data for audit reconstruction).
+- Audit log row recorded: `audit_logs.id = 2267`, `action = "timesheet.approve_override"`, `entity_type = "timesheet_week"`. Reason and evidence captured; both acknowledgements captured in metadata; actor recorded.
+- Customer send remained isolated. Post-QA DB checks on the affected week confirmed:
+  - `sent_to_customer_at IS NULL`
+  - `customer_approved_at IS NULL`
+  - `recalled_at IS NULL`
+  - `weekly_reports` row count for `project_id = 9`, week `2026-04-20` is `0` (no draft, no published — generation is a separate explicit Weekly Ops action and was not triggered).
+
+**PR #12 production QA (Weekly Ops Workflow Status Card):**
+- PR URL: https://github.com/RaphaPenque/pfg-platform/pull/12
+- Merge commit: `1571b802dad30dd5eadaf34ffbf6041d320208fb`
+- QA target: GNT week 875 (the same override-approved week from the PR #10 QA above).
+- Card observations:
+  - Workflow status card visible at the top of the Weekly Ops page above the existing warnings and checklist panels.
+  - Stage chip rendered the override variant (`pm_approved_override`) with the amber tone and the "OVERRIDE" label on the PM step.
+  - Override evidence summary block visible with reason and evidence inline, re-stating that the customer has not been emailed.
+  - Customer-exposure boundary correctly read `Not sent to customer` (amber EyeOff) — confirming PM approval (with or without override) is NEVER customer-facing.
+  - Existing checklist on the Weekly Ops page intact; per-stage timestamps and manual triggers unchanged.
+- No weekly report generation, no customer send, no emails dispatched during the QA pass.
+
+**Next build item:**
+- **Reports tab workflow card.** With the Timesheet workflow card now done (PR #12), the next piece is the equivalent single-glance workflow card for the Reports tab — same single-source-of-truth pattern (pure derivations + thin renderer + smoke test pinning the rules), surfacing draft / published / sent-to-customer states and the customer-exposure boundary.
+
+**Security note (re-affirmed — applies every session):**
+- Do NOT paste production database secrets or connection strings into chat, commits, PRs, issues, or any other artifact that is checked in or shared. The Render Postgres password should be rotated once the current production work is stable, if not already done.
+
 ### 2026-04-27 (later, follow-up #3) — Weekly Ops Workflow Status Card (UX clarity)
 
 **Background:** PMs working from the Weekly Ops page had to read a stack of timestamps and warnings to figure out what stage a week was in, whether the customer had been emailed, and what the next safe action was. Override-approved weeks were even harder to read — the badge was tucked next to the headline. PR #10 codified the override but did not give it a single-glance home.
