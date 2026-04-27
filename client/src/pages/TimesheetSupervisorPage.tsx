@@ -8,6 +8,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Loader2 } from "lucide-react";
+import { sumPaidHours } from "@shared/timesheet-hours";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -257,7 +258,7 @@ function WorkerCard({
   isLocked: boolean;
   onPatch: (id: number, patch: object) => void;
 }) {
-  const totalHours = entries.reduce((sum, e) => sum + (parseFloat(e.total_hours || "0") || 0), 0);
+  const totalHours = sumPaidHours(entries);
 
   return (
     <div style={{
@@ -330,7 +331,7 @@ function DesktopTableRow({
   onPatch: (id: number, patch: object) => void;
   isOdd: boolean;
 }) {
-  const totalHours = entries.reduce((sum, e) => sum + (parseFloat(e.total_hours || "0") || 0), 0);
+  const totalHours = sumPaidHours(entries);
   return (
     <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
       <td style={{ padding: "10px 12px", background: isOdd ? "#fafafa" : "#fff", verticalAlign: "top" }}>

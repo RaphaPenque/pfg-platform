@@ -6,6 +6,7 @@
 
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { paidHours, sumPaidHours } from "@shared/timesheet-hours";
 
 interface TimesheetEntry {
   id: number; worker_id: number; worker_name: string; worker_role: string;
@@ -96,7 +97,7 @@ function WorkerRow({ worker, entries, weekDates, idx }: { worker: { name: string
         if (!entry) return <td key={dateStr} style={{ textAlign:"center", padding:"7px 6px", border:"1px solid #E5E7EB", background:bg, fontSize:10, color:"#D1D5DB" }}>—</td>;
         const cls = dayTypeClass(entry.day_type);
         const label = dayTypeLabel(entry.day_type);
-        const hrs = parseFloat(entry.total_hours || "0") || 0;
+        const hrs = paidHours(entry);
         total += hrs;
 
         const cellStyles: Record<string, React.CSSProperties> = {
@@ -272,7 +273,7 @@ export default function TimesheetApprovalPage({ params }: { params: { token: str
                       <tr style={{ background:"#EEF1F7" }}>
                         <td colSpan={8} style={{ padding:"8px 14px", fontSize:10, textTransform:"uppercase", letterSpacing:"0.08em", fontWeight:700, color:"#1a2744", borderTop:"2px solid #1a2744" }}>Day Shift Total</td>
                         <td style={{ textAlign:"right", padding:"8px 10px", fontWeight:800, color:"#1a2744", fontSize:13, borderTop:"2px solid #1a2744" }}>
-                          {dayWorkers.reduce((s,w) => s + w.entries.reduce((ss,e) => ss + (parseFloat(e.total_hours||"0")||0), 0), 0).toFixed(1)}h
+                          {dayWorkers.reduce((s,w) => s + sumPaidHours(w.entries), 0).toFixed(1)}h
                         </td>
                       </tr>
                     </tbody>
@@ -298,7 +299,7 @@ export default function TimesheetApprovalPage({ params }: { params: { token: str
                       <tr style={{ background:"#EEF1F7" }}>
                         <td colSpan={8} style={{ padding:"8px 14px", fontSize:10, textTransform:"uppercase", letterSpacing:"0.08em", fontWeight:700, color:"#1a2744", borderTop:"2px solid #1a2744" }}>Night Shift Total</td>
                         <td style={{ textAlign:"right", padding:"8px 10px", fontWeight:800, color:"#1a2744", fontSize:13, borderTop:"2px solid #1a2744" }}>
-                          {nightWorkers.reduce((s,w) => s + w.entries.reduce((ss,e) => ss + (parseFloat(e.total_hours||"0")||0), 0), 0).toFixed(1)}h
+                          {nightWorkers.reduce((s,w) => s + sumPaidHours(w.entries), 0).toFixed(1)}h
                         </td>
                       </tr>
                     </tbody>

@@ -12,6 +12,7 @@ import path from "path";
 import { sendMail } from "./email";
 import { generateTimesheetPdfHtml } from "./html-pdf";
 import { getProjectSenderIdentity, buildSenderIdentityFromPm } from "./project-sender";
+import { isPaidDay, paidHours } from "../shared/timesheet-hours";
 
 const APP_URL = process.env.APP_URL || "https://pfg-platform.onrender.com";
 const UPLOAD_ROOT = process.env.UPLOAD_ROOT || "/data/uploads";
@@ -416,15 +417,20 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
 
         const { time_in, time_out, day_type, supervisor_note, unpaid_break_minutes } = req.body;
         const breakMin = unpaid_break_minutes ?? entry.unpaid_break_minutes ?? 60;
-        const tIn = time_in !== undefined ? time_in : entry.time_in;
-        const tOut = time_out !== undefined ? time_out : entry.time_out;
-        const totalHours = (tIn && tOut) ? calcTotalHours(tIn, tOut, breakMin) : null;
+        const effectiveDayType = day_type ?? entry.day_type;
+        // Only working days carry paid time. MOB / DEMOB / rest / sick / absent
+        // must always be stored with no time_in/time_out and total_hours = NULL,
+        // even when the supervisor leaves prior shift times in the row.
+        const dayIsPaid = isPaidDay(effectiveDayType);
+        const tIn = dayIsPaid ? (time_in !== undefined ? time_in : entry.time_in) : null;
+        const tOut = dayIsPaid ? (time_out !== undefined ? time_out : entry.time_out) : null;
+        const totalHours = (dayIsPaid && tIn && tOut) ? calcTotalHours(tIn, tOut, breakMin) : null;
 
         const r = await db.execute(sql`
           UPDATE timesheet_entries SET
             time_in = ${tIn ?? null},
             time_out = ${tOut ?? null},
-            day_type = ${day_type ?? entry.day_type},
+            day_type = ${effectiveDayType},
             supervisor_note = ${supervisor_note ?? entry.supervisor_note},
             unpaid_break_minutes = ${breakMin},
             total_hours = ${totalHours},
@@ -1261,9 +1267,9 @@ async function generateTimesheetPdf(tw: any, entries: any[], outPath: string): P
 
       if (entry) {
         const dtLabel = formatDayType(entry.day_type);
-        if (entry.day_type === "working" && entry.time_in && entry.time_out) {
+        const hrs = paidHours(entry);
+        if (isPaidDay(entry.day_type) && entry.time_in && entry.time_out) {
           page.drawText(`${entry.time_in?.substring(0, 5) || ""}–${entry.time_out?.substring(0, 5) || ""}`, { x: colX + 2, y: curY - 14, size: 7, font: fontReg, color: TEXT });
-          const hrs = parseFloat(entry.total_hours) || 0;
           totalHours += hrs;
           page.drawText(`${hrs.toFixed(1)}h`, { x: colX + 2, y: curY - 24, size: 7, font: fontBold, color: NAVY });
         } else {
@@ -1359,13 +1365,14 @@ async function generateBillingSummaryPdf(tw: any, entries: any[], outPath: strin
     }
     const rg = roleMap.get(role)!;
     rg.workers.add(String(e.worker_id));
-    if (e.total_hours) rg.totalHours += parseFloat(e.total_hours) || 0;
+    const hrs = paidHours(e);
+    rg.totalHours += hrs;
     if (e.day_type === "mob" || e.day_type === "partial_mob") rg.mobDays++;
     if (e.day_type === "demob" || e.day_type === "partial_demob") rg.demobDays++;
     if (e.day_type === "rest_day") rg.restDays++;
     if (e.day_type === "absent_sick") rg.sickDays++;
     if (e.day_type === "absent_unauthorised") rg.absentDays++;
-    grandTotalHours += parseFloat(e.total_hours) || 0;
+    grandTotalHours += hrs;
     if (e.day_type === "mob" || e.day_type === "partial_mob") grandMob++;
     if (e.day_type === "demob" || e.day_type === "partial_demob") grandDemob++;
   }
