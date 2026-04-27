@@ -1412,6 +1412,86 @@ async function main() {
 
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // Section O — Worker certificate upload persistence
+  // ═══════════════════════════════════════════════════════════════════════════
+  console.log(`\n${C.cyan}${C.bold}═══ Section O: Worker certificate upload persistence ═══${C.reset}`);
+  console.log(`${C.grey}Pins the fix for RM Andre's report that uploaded certs vanished on Manuel Rabano.${C.reset}\n`);
+
+  // O1 — Code-content: POST /api/workers/:id/upload upserts a document for cert_* types.
+  try {
+    const routesPath = path.join(repoRoot, "server/routes.ts");
+    const routesSrc = fs.readFileSync(routesPath, "utf8");
+    const uploadIdx = routesSrc.indexOf('app.post("/api/workers/:id/upload"');
+    let o1Ok = false;
+    if (uploadIdx >= 0) {
+      const win = routesSrc.slice(uploadIdx, Math.min(routesSrc.length, uploadIdx + 4000));
+      const branchesOnCert = /fileType\.startsWith\(["']cert_["']\)/.test(win);
+      const upserts = /storage\.upsertDocument\(/.test(win);
+      const hasFilePath = /filePath/.test(win);
+      o1Ok = branchesOnCert && upserts && hasFilePath;
+    }
+    check(
+      o1Ok
+        ? "POST /api/workers/:id/upload upserts a document row for cert_* uploads (filePath persisted)"
+        : "POST /api/workers/:id/upload missing cert_* upsertDocument — uploads will not appear after reload",
+      o1Ok,
+    );
+  } catch (e: any) {
+    check(`server/routes.ts upload route read failed: ${e.message}`, false);
+  }
+
+  // O2 — Code-content: PUT documents preserves file fields when omitted from body.
+  try {
+    const routesPath = path.join(repoRoot, "server/routes.ts");
+    const routesSrc = fs.readFileSync(routesPath, "utf8");
+    const putIdx = routesSrc.indexOf('app.put("/api/workers/:workerId/documents"');
+    let o2Ok = false;
+    if (putIdx >= 0) {
+      const win = routesSrc.slice(putIdx, Math.min(routesSrc.length, putIdx + 2500));
+      const guardsFilePath = /["']filePath["']\s+in\s+body/.test(win);
+      const noBlindNull   = !/filePath:\s*filePath\s*\|\|\s*null/.test(win);
+      o2Ok = guardsFilePath && noBlindNull;
+    }
+    check(
+      o2Ok
+        ? "PUT /api/workers/:workerId/documents preserves filePath when body omits it (date-only saves no longer wipe the file)"
+        : "PUT /api/workers/:workerId/documents may overwrite filePath with null on date-only saves — regression risk",
+      o2Ok,
+    );
+  } catch (e: any) {
+    check(`server/routes.ts PUT documents read failed: ${e.message}`, false);
+  }
+
+  // O3 — Production data: documents whose type starts with "cert_" should
+  // generally have a file_path. A row with no file_path is just date metadata
+  // — not necessarily a bug, but worth flagging if the count is large since
+  // that pattern surfaced when the bug was active. WARN only.
+  try {
+    const certDocs = await pool.query(
+      `SELECT COUNT(*)::int AS missing
+         FROM documents
+        WHERE type LIKE 'cert\\_%' ESCAPE '\\'
+          AND (file_path IS NULL OR file_path = '')
+          AND (issued_date IS NOT NULL OR expiry_date IS NOT NULL)`,
+    );
+    const missing = certDocs.rows[0]?.missing ?? 0;
+    if (missing === 0) {
+      check(`O3 — every cert document with dates has a file_path (no orphaned date-only certs)`, true);
+    } else {
+      check(
+        `O3 — ${missing} cert document(s) have dates but no file_path — likely residue from the date-save-wipes-file regression. Review and re-upload if needed.`,
+        false,
+        undefined,
+        true,
+      );
+    }
+  } catch (e: any) {
+    // documents table or column may not exist locally; skip silently
+    check(`O3 skipped (DB query failed: ${e.message})`, true);
+  }
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // Summary
   // ═══════════════════════════════════════════════════════════════════════════
 

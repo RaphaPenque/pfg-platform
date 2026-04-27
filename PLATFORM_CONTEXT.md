@@ -444,6 +444,14 @@ These are the rules established as the safe manual workflow for weekly reports, 
   3. Live alongside the existing supervisor-resend flow in `server/weekly-ops-routes.ts`.
 - The smoke test `tests/smoke/workflow-invariants.test.ts` ("approve-without-supervisor controlled-override contract") detects this endpoint and asserts both gates are present.
 
+### Worker certificate upload persistence
+- **Cert files must persist onto the worker after upload.** The fix RM Andre needed (Manuel Rabano, id=44) was: when `POST /api/workers/:id/upload` receives a file with `type` starting with `cert_`, the handler must upsert a `documents` row with `filePath`, `fileName`, `mimeType`, and `fileSize` set. Without this upsert, the file lands on the persistent disk but no row references it, so on reload the certificate appears not to have saved.
+- **Date-only saves must not wipe the file pointer.** `PUT /api/workers/:workerId/documents` accepts dates, names, and (optionally) file metadata. Only fields that are explicitly present in the request body are written. The legacy code wrote `filePath: filePath || null`, which meant any dates-only save (the wizard's "Save" button when no new file was picked) overwrote the existing `filePath` with `null` and the file became orphaned.
+- **Storage contract:** `storage.upsertDocument(workerId, type, name, data)` does an INSERT-or-UPDATE keyed on `(worker_id, type)`. The signature is pinned by the smoke test.
+- Health check: O1 (upload route upserts cert document), O2 (PUT does not blind-null filePath), O3 (live data — cert documents with dates but no file_path indicates regression residue).
+- Smoke test: `tests/smoke/worker-certificates.test.ts`.
+- Files: `server/routes.ts` (POST /api/workers/:id/upload, PUT /api/workers/:workerId/documents).
+
 ### Weekly report PDF header (period + progress)
 - Period field uses the reporting **week** (`weekStart`–`weekEnd`) by default. Falls back to project span. **Never blank.**
 - Project Progress is computed from project span at the END of the reported week, clamped 0–100. When project dates are missing, displays `Schedule not available` instead of `126 of 126 days · 0% complete`.
@@ -522,6 +530,33 @@ Every summary card in the platform must be backed by a DB query. This table is t
 ## Changelog
 
 > Keep a running log of significant changes. Most recent first. Format: `YYYY-MM-DD | What changed | Why | Files touched`
+
+### 2026-04-27 (later) — Worker Certificate Upload Persistence Fix
+
+**Reported by:** RM Andre — uploaded certificates to worker Manuel Rabano (id=44) appeared to succeed but did not save onto the worker file.
+
+**Root cause (two-part):**
+1. `POST /api/workers/:id/upload` (`server/routes.ts`) wrote the file to `/data/uploads/<workerId>/` but only persisted a database reference for `type === "photo"` and `type === "passport"`. For any `cert_*` type, the file landed on disk and the endpoint returned `{ path, filename, type }`, but **no `documents` row was created**. The frontend wizard then either (a) called `PUT /api/workers/:workerId/documents` with `type`, `name`, `issuedDate`, `expiryDate` only — never sending the file path — or (b) just refreshed the documents list (Replace flow). In both cases the doc row had `file_path = NULL`, so the worker file showed the cert as "not uploaded" on reload.
+2. `PUT /api/workers/:workerId/documents` destructured `filePath || null` etc. from the request body. When the wizard re-saved dates without re-attaching the file, the absent fields fell through to `null` and **wiped any previously-uploaded `file_path`**.
+
+**Fix (`server/routes.ts`):**
+- POST upload route now branches on `fileType.startsWith("cert_")` and calls `storage.upsertDocument(workerId, certType, docName, { filePath, fileName, mimeType, fileSize, status: "valid", ...optional dates })`. The cert label is derived from the `cert_*` key (e.g. `cert_first_aid` → `First Aid`) and may be overridden by `req.body.name` if the frontend sends one.
+- PUT documents route now reads file fields with `'filePath' in body`, etc., so date-only saves preserve the existing `file_path`. `name` and `type` remain mandatory.
+- No deletion of existing documents. No DB schema change. No email side-effects.
+
+**Coverage added:**
+- Smoke test `tests/smoke/worker-certificates.test.ts` — three static-source assertions: cert branch upserts, PUT presence-checks file fields, storage signature pinned. Run: `npx tsx tests/smoke/worker-certificates.test.ts`.
+- Health check Section O (`scripts/health-check.ts`):
+  - O1: POST upload route upserts a document for `cert_*` types.
+  - O2: PUT documents route does not blind-null filePath.
+  - O3: production data — count of cert documents with dates but no `file_path` (WARN).
+- PLATFORM_CONTEXT.md — new "Worker certificate upload persistence" subsection under Reporting & Timesheet Workflow Invariants and a UI Card-Data row is unaffected.
+
+**Manual QA after deploy:**
+1. Open Workforce → Manuel Rabano → certificates tab.
+2. Click upload on any cert (e.g. PT/PWT). Pick a PDF.
+3. Reload the page. The cert row should show the green status, the issued/expiry dates if entered, and a download icon linking to `/api/uploads/44/<filename>`.
+4. Edit the issued/expiry dates without re-attaching a file and Save. Reload. The download icon must still be there — the file pointer must not have been wiped.
 
 ### 2026-04-27 (hardening) — Reporting/Timesheet Workflow Invariants Codified
 

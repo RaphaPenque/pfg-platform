@@ -1620,19 +1620,25 @@ export function registerRoutes(server: Server, app: Express) {
   });
 
   // Upsert a certificate/document for a worker (insert or update by workerId + type)
+  // IMPORTANT: only fields explicitly present in the request body are written.
+  // The dates form is saved separately from the file upload (which goes through
+  // /api/workers/:id/upload). If we unconditionally set filePath/fileName to
+  // null when those keys are absent from the body, saving date-only changes
+  // will wipe the previously-uploaded file reference — the regression that
+  // surfaced as "RM Andre uploaded a cert and it didn't save".
   app.put("/api/workers/:workerId/documents", async (req: Request, res: Response) => {
     const workerId = parseInt(req.params.workerId);
-    const { type, name, issuedDate, expiryDate, filePath, fileName, mimeType, fileSize } = req.body;
+    const body = req.body ?? {};
+    const { type, name } = body;
     if (!type || !name) return res.status(400).json({ error: "type and name required" });
-    const doc = await storage.upsertDocument(workerId, type, name, {
-      issuedDate: issuedDate || null,
-      expiryDate: expiryDate || null,
-      filePath: filePath || null,
-      fileName: fileName || null,
-      mimeType: mimeType || null,
-      fileSize: fileSize || null,
-      status: "valid",
-    });
+    const data: Record<string, unknown> = { status: "valid" };
+    if ("issuedDate" in body) data.issuedDate = body.issuedDate || null;
+    if ("expiryDate" in body) data.expiryDate = body.expiryDate || null;
+    if ("filePath"   in body) data.filePath   = body.filePath   || null;
+    if ("fileName"   in body) data.fileName   = body.fileName   || null;
+    if ("mimeType"   in body) data.mimeType   = body.mimeType   || null;
+    if ("fileSize"   in body) data.fileSize   = body.fileSize   || null;
+    const doc = await storage.upsertDocument(workerId, type, name, data);
     res.json(doc);
   });
 
@@ -2519,6 +2525,28 @@ export function registerRoutes(server: Server, app: Express) {
       await storage.updateWorker(parseInt(workerId), { profilePhotoPath: filePath });
     } else if (fileType === "passport") {
       await storage.updateWorker(parseInt(workerId), { passportPath: filePath });
+    } else if (fileType.startsWith("cert_")) {
+      // Persist the cert file onto the worker's document row so it shows up in
+      // the workforce table after a reload. Without this upsert, the file lands
+      // on disk but no `documents` row references it — the user-reported "I
+      // uploaded a certificate but it didn't save" symptom.
+      const certLabel = fileType.replace(/^cert_/, "").replace(/_/g, " ");
+      const humanLabel = certLabel.replace(/\b\w/g, (l) => l.toUpperCase());
+      const docName = (req.body?.name && String(req.body.name).trim()) || humanLabel;
+      const docData: Record<string, unknown> = {
+        filePath,
+        fileName: finalFilename,
+        mimeType: req.file.mimetype || null,
+        fileSize: req.file.size ?? null,
+        status: "valid",
+      };
+      if (req.body?.issuedDate) docData.issuedDate = req.body.issuedDate;
+      if (req.body?.expiryDate) docData.expiryDate = req.body.expiryDate;
+      try {
+        await storage.upsertDocument(parseInt(workerId), fileType, docName, docData);
+      } catch (e) {
+        console.error("[upload] cert upsert error:", e);
+      }
     }
 
     res.json({ path: filePath, filename: finalFilename, type: fileType });
