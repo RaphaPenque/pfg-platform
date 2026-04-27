@@ -11,6 +11,7 @@ import fs from "fs";
 import path from "path";
 import { sendMail } from "./email";
 import { generateTimesheetPdfHtml } from "./html-pdf";
+import { getProjectSenderIdentity, buildSenderIdentityFromPm } from "./project-sender";
 
 const APP_URL = process.env.APP_URL || "https://pfg-platform.onrender.com";
 const UPLOAD_ROOT = process.env.UPLOAD_ROOT || "/data/uploads";
@@ -629,8 +630,19 @@ export function registerTimesheetRoutes(app: Express, requireAuth: any, requireR
 
         const approvalUrl = `${APP_URL}/#/timesheet-approval/${rawToken}`;
         const firstName = signatoryName.split(" ")[0];
+
+        // Resolve project PM as sender — customer-facing approval email should
+        // come FROM the project's assigned PM (or display their name + replyTo).
+        const projectSender = await getProjectSenderIdentity(tw.project_id);
+        if (projectSender.warnings.length > 0) {
+          console.log(`[timesheet:send-to-customer] sender: ${projectSender.warnings.join("; ")}`);
+        }
+
         const sent = await sendMail({
           to: signatoryEmail,
+          from: projectSender.from,
+          fromName: projectSender.fromName,
+          replyTo: projectSender.replyTo,
           subject: `Timesheet approval required — ${proj?.name || "Project"} (w/c ${tw.week_commencing})`,
           html: buildCustomerApprovalEmail(firstName, proj?.name || "Project", tw.week_commencing, approvalUrl),
         });
@@ -1428,8 +1440,17 @@ export async function autoSendToCustomer(tw: any): Promise<void> {
   if (signatoryEmail) {
     const approvalUrl = `${APP_URL}/#/timesheet-approval/${rawToken}`;
     const firstName = signatoryName.split(' ')[0];
+
+    const projectSender = await getProjectSenderIdentity(tw.project_id);
+    if (projectSender.warnings.length > 0) {
+      console.log(`[timesheet:autoSendToCustomer] sender: ${projectSender.warnings.join('; ')}`);
+    }
+
     await sendMail({
       to: signatoryEmail,
+      from: projectSender.from,
+      fromName: projectSender.fromName,
+      replyTo: projectSender.replyTo,
       subject: `Timesheet approval required — ${tw.project_name || tw.project_code} (w/c ${tw.week_commencing})`,
       html: buildCustomerApprovalEmail(firstName, tw.project_name || tw.project_code, tw.week_commencing, approvalUrl),
     });
@@ -1505,8 +1526,12 @@ export async function checkTimesheetReminders() {
           WHERE id = ${tw.id}
         `);
         const approvalUrl = `${APP_URL}/#/timesheet-approval/${rawToken}`;
+        const projectSender = await getProjectSenderIdentity(tw.project_id);
         await sendMail({
           to: custEmail,
+          from: projectSender.from,
+          fromName: projectSender.fromName,
+          replyTo: projectSender.replyTo,
           subject: `REMINDER: Timesheet approval required — ${tw.project_name} (w/c ${tw.week_commencing})`,
           html: buildCustomerApprovalEmail("", tw.project_name, tw.week_commencing, approvalUrl, true),
         });
@@ -1732,14 +1757,19 @@ export async function sendWeeklySupervisorLinks(triggerDate?: Date): Promise<{ p
         if (!tw) continue;
         const twId = tw.id;
 
-        // 3. Find PM email via project_leads → users
+        // 3. Find PM (email + name) via project_leads → users
         const pmRes = await db.execute(sql`
-          SELECT u.email FROM project_leads pl
+          SELECT u.email, u.name FROM project_leads pl
           JOIN users u ON u.id = pl.user_id
           WHERE pl.project_id = ${project.id}
           LIMIT 1
         `);
         const pmEmail = (pmRes.rows[0] as any)?.email || null;
+        const pmName = (pmRes.rows[0] as any)?.name || null;
+        const projectSender = buildSenderIdentityFromPm(pmEmail, pmName);
+        if (projectSender.warnings.length > 0) {
+          console.log(`[supervisor-links] ${project.code} sender: ${projectSender.warnings.join("; ")}`);
+        }
 
         // 4. Find day shift supervisor (Superintendent > Foreman)
         const dayWorkersRes = await db.execute(sql`
@@ -1815,7 +1845,9 @@ export async function sendWeeklySupervisorLinks(triggerDate?: Date): Promise<{ p
           } else {
             await sendMail({
               to: daySup.email,
-              from: pmEmail || undefined,
+              from: projectSender.from,
+              fromName: projectSender.fromName,
+              replyTo: projectSender.replyTo,
               subject: `Timesheet review — ${project.name} w/c ${weekComm}`,
               html: buildSupervisorTimesheetEmail(daySup.name, project.name, project.code, weekComm, "day", reviewUrl),
               text: `Hi ${daySup.name},\n\nPlease review the Day Shift timesheet for ${project.name} w/c ${weekComm}:\n\n${reviewUrl}\n\nPowerforce Global`,
@@ -1844,7 +1876,9 @@ export async function sendWeeklySupervisorLinks(triggerDate?: Date): Promise<{ p
           } else {
             await sendMail({
               to: nightSup.email,
-              from: pmEmail || undefined,
+              from: projectSender.from,
+              fromName: projectSender.fromName,
+              replyTo: projectSender.replyTo,
               subject: `Timesheet review — ${project.name} w/c ${weekComm}`,
               html: buildSupervisorTimesheetEmail(nightSup.name, project.name, project.code, weekComm, "night", nightReviewUrl),
               text: `Hi ${nightSup.name},\n\nPlease review the Night Shift timesheet for ${project.name} w/c ${weekComm}:\n\n${nightReviewUrl}\n\nPowerforce Global`,

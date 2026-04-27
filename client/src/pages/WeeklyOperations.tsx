@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, RefreshCw, Send, FileText, AlertTriangle, CheckCircle2, Clock, XCircle, Info, Eye } from "lucide-react";
+import { Loader2, RefreshCw, Send, FileText, AlertTriangle, CheckCircle2, Clock, XCircle, Info, Eye, ExternalLink, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -81,6 +81,7 @@ type ProjectSummary = {
 
 type WeeklyOpsStatus = {
   ok: true;
+  appUrl: string;
   project: {
     id: number;
     code: string;
@@ -97,6 +98,9 @@ type WeeklyOpsStatus = {
     timesheetSignatoryName: string | null;
     timesheetSignatoryEmail: string | null;
     sourcingContactEmail: string | null;
+    portalAccessToken: string | null;
+    previewPortalUrl: string | null;
+    draftPdfUrl: string | null;
   };
   pm: { id: number; name: string; email: string } | null;
   weekCommencing: string;
@@ -564,6 +568,106 @@ export default function WeeklyOperations() {
             />
           </div>
 
+          {/* Draft report panel — explicit, obvious access to the current draft */}
+          {(() => {
+            const wr = status.weeklyReport;
+            const hasDraft = !!(wr && wr.status === "draft");
+            const hasPublished = !!(wr && wr.status === "published");
+            const portalToken = status.project.portalAccessToken;
+            const previewUrl = status.project.previewPortalUrl;
+            const draftPdfUrl = status.project.draftPdfUrl;
+
+            return (
+              <Card className="p-4" data-testid="weekly-ops-draft-panel">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs uppercase tracking-wider text-pfg-steel">
+                    Draft weekly report
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className={
+                      hasDraft
+                        ? "border-amber-300 bg-amber-50 text-amber-800"
+                        : hasPublished
+                        ? "border-green-300 bg-green-50 text-green-800"
+                        : "border-gray-300 bg-gray-50 text-gray-700"
+                    }
+                    data-testid="draft-status-badge"
+                  >
+                    {hasDraft
+                      ? "Draft ready for review"
+                      : hasPublished
+                      ? "Published — already sent"
+                      : "No draft yet"}
+                  </Badge>
+                </div>
+
+                {!portalToken && (
+                  <div
+                    className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 mb-2"
+                    data-testid="draft-no-portal-token-warning"
+                  >
+                    <strong>Portal access token missing.</strong> Drafts cannot be previewed or
+                    downloaded until a portal token is issued for this project. Open the project
+                    settings to generate one.
+                  </div>
+                )}
+
+                {portalToken && hasDraft && (
+                  <div className="flex flex-wrap gap-2" data-testid="draft-actions">
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={() => {
+                        if (previewUrl) window.open(previewUrl, "_blank", "noopener,noreferrer");
+                      }}
+                      disabled={!previewUrl}
+                      data-testid="action-open-draft-preview"
+                      className="bg-pfg-navy text-white hover:bg-pfg-navy/90"
+                    >
+                      <ExternalLink className="w-4 h-4 mr-1.5" />
+                      Open draft preview
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        if (draftPdfUrl) window.open(draftPdfUrl, "_blank", "noopener,noreferrer");
+                      }}
+                      disabled={!draftPdfUrl}
+                      data-testid="action-download-draft-pdf"
+                    >
+                      <Download className="w-4 h-4 mr-1.5" />
+                      Download draft PDF
+                    </Button>
+                  </div>
+                )}
+
+                {portalToken && !hasDraft && !hasPublished && (
+                  <div
+                    className="text-xs text-pfg-steel"
+                    data-testid="draft-helper-no-draft"
+                  >
+                    No draft has been generated for this week yet. Use{" "}
+                    <strong>Generate preview (no email)</strong> below to build a draft you can
+                    review on the portal before sending to the customer.
+                  </div>
+                )}
+
+                {portalToken && hasPublished && (
+                  <div
+                    className="text-xs text-pfg-steel"
+                    data-testid="draft-helper-published"
+                  >
+                    The weekly report for this week was already published and emailed to the
+                    customer. To make further changes, regenerate the preview — that will overwrite
+                    the published row with a fresh draft.
+                  </div>
+                )}
+              </Card>
+            );
+          })()}
+
           {/* Actions */}
           <Card className="p-4" data-testid="weekly-ops-actions">
             <div className="text-xs uppercase tracking-wider text-pfg-steel mb-2">Manual actions</div>
@@ -635,7 +739,8 @@ export default function WeeklyOperations() {
                 <strong>Generate preview (no email)</strong> builds the report PDF and saves a{" "}
                 <em>draft</em> weekly_reports row for the selected week. No emails are sent and
                 customers cannot see drafts on the live portal. The preview portal opens in a new
-                tab for internal review.
+                tab for internal review — you can also re-open it any time from the{" "}
+                <em>Draft weekly report</em> panel above.
               </div>
               <div>
                 <strong>Generate &amp; send weekly report</strong> calls the existing report pipeline.

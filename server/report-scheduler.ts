@@ -115,6 +115,8 @@ export async function sendReportForProject(
 
   const pmUser = await getPmUser(project.id);
   const fromEmail = pmUser?.email?.endsWith('@powerforce.global') ? pmUser.email : undefined;
+  const replyToEmail = pmUser?.email || undefined;
+  const fromDisplayName = pmUser?.name || undefined;
   const pmName = pmUser?.name || 'Powerforce Global Project Management';
 
   const toAddresses = [
@@ -340,6 +342,8 @@ export async function sendReportForProject(
   await sendMail({
     to: toAddresses,
     from: fromEmail,
+    fromName: fromDisplayName,
+    replyTo: replyToEmail,
     subject,
     html: emailHtml,
     text: `${isFinal ? 'Final project report' : 'Weekly report'} for ${project.name} attached.\n\nPortal: ${portalUrl}`,

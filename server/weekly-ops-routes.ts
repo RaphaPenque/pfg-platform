@@ -29,6 +29,7 @@ import crypto from "crypto";
 import { db } from "./storage";
 import { sendMail } from "./email";
 import { buildSupervisorTimesheetEmail } from "./timesheet-routes";
+import { getProjectSenderIdentity } from "./project-sender";
 
 const APP_URL = process.env.APP_URL || "https://pfg-platform.onrender.com";
 
@@ -117,7 +118,8 @@ export function registerWeeklyOpsRoutes(
                  customer_project_manager, customer_project_manager_email,
                  site_manager, site_manager_email,
                  timesheet_signatory_name, timesheet_signatory_email,
-                 sourcing_contact_email
+                 sourcing_contact_email,
+                 portal_access_token
           FROM projects WHERE id = ${projectId}
         `);
         const project: any = projRes.rows[0];
@@ -299,8 +301,22 @@ export function registerWeeklyOpsRoutes(
           headline = "Supervisor links not sent";
         }
 
+        // Build portal preview URLs surfaced directly in the status payload so
+        // the Weekly Ops UI can render obvious "Open draft" / "Download draft"
+        // actions when a draft exists. Drafts are gated server-side: the portal
+        // hides drafts from public consumers, so leaking the token here is no
+        // worse than the existing public portal URL.
+        const portalToken = project.portal_access_token || null;
+        const previewPortalUrl = portalToken
+          ? `${APP_URL}/#/portal/${project.code}?token=${portalToken}&preview=1`
+          : null;
+        const draftPdfUrl = (weeklyReport && portalToken)
+          ? `/api/portal/${project.code}/weekly-reports/${weeklyReport.id}/pdf?preview=1&token=${portalToken}`
+          : null;
+
         return res.json({
           ok: true,
+          appUrl: APP_URL,
           project: {
             id: project.id,
             code: project.code,
@@ -317,6 +333,9 @@ export function registerWeeklyOpsRoutes(
             timesheetSignatoryName: project.timesheet_signatory_name,
             timesheetSignatoryEmail: project.timesheet_signatory_email,
             sourcingContactEmail: project.sourcing_contact_email,
+            portalAccessToken: portalToken,
+            previewPortalUrl,
+            draftPdfUrl,
           },
           pm,
           weekCommencing,
@@ -442,8 +461,18 @@ export function registerWeeklyOpsRoutes(
 
         const reviewUrl = `${APP_URL}/#/timesheet-supervisor/${rawToken}`;
 
+        // Resolve project PM as sender — supervisor link should appear FROM the
+        // project's assigned PM, not the logged-in operator.
+        const senderIdentity = await getProjectSenderIdentity(pid);
+        if (senderIdentity.warnings.length > 0) {
+          console.log(`[weekly-ops:resend] sender resolution: ${senderIdentity.warnings.join("; ")}`);
+        }
+
         await sendMail({
           to: sup.email,
+          from: senderIdentity.from,
+          fromName: senderIdentity.fromName,
+          replyTo: senderIdentity.replyTo,
           subject: `Timesheet review — ${tw.project_name} w/c ${weekCommencing}`,
           html: buildSupervisorTimesheetEmail(
             sup.name,
