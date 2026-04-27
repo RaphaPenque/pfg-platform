@@ -1619,7 +1619,7 @@ function buildCustomerApprovalEmail(firstName: string, projectName: string, week
 
 // ─── Supervisor email template ────────────────────────────────────────────────
 
-function buildSupervisorTimesheetEmail(
+export function buildSupervisorTimesheetEmail(
   supervisorName: string,
   projectName: string,
   projectCode: string,
