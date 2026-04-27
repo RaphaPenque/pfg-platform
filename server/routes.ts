@@ -28,6 +28,134 @@ declare global {
 const UPLOAD_BASE = fs.existsSync("/data") ? "/data/uploads" : "./uploads";
 if (!fs.existsSync(UPLOAD_BASE)) fs.mkdirSync(UPLOAD_BASE, { recursive: true });
 
+// ─── Worker file reconciliation (read-only) ──────────────────────────────────
+// Some workers have legacy documents/passport rows whose `file_path` is NULL or
+// stale because of the regression PR #9 fixes (date-only saves wiped file
+// pointers, cert uploads never persisted a row). We must NOT mutate those
+// rows from a GET path, but we still want passports/certs that physically
+// exist on the persistent disk to be downloadable from the worker profile,
+// the project allocation view, and the customer portal Team SQEP export.
+//
+// `reconcileDocsWithDisk` returns a NEW array of doc-shaped objects: every DB
+// document, plus a synthetic "disk-only" entry for any cert_* file present in
+// /data/uploads/<workerId>/ that has no matching DB row. If a DB row's
+// file_path is empty but a file matching its `type` exists on disk, the
+// returned object has `filePath` filled in so the SQEP export and the worker
+// profile UI find the file again. The DB is never written to here.
+type ReconciledDoc = {
+  id?: number;
+  workerId: number;
+  type: string;
+  name: string;
+  filePath: string | null;
+  fileName: string | null;
+  mimeType: string | null;
+  fileSize: number | null;
+  status?: string | null;
+  issuedDate?: string | null;
+  expiryDate?: string | null;
+  uploadedAt?: string | null;
+  fromDisk?: boolean;
+};
+
+function listWorkerDiskFiles(workerId: number): string[] {
+  const dir = path.join(UPLOAD_BASE, String(workerId));
+  try {
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir).filter(f => !f.startsWith("."));
+  } catch {
+    return [];
+  }
+}
+
+function findDiskFileForType(workerId: number, type: string): string | null {
+  // Files are saved as `<type><ext>` (e.g. cert_first_aid.pdf) by multer, but
+  // cert files may be renamed at upload time to <Name>_<CertType>_<Year>.<ext>.
+  // Match either the bare `type.<ext>` form or any file whose stem starts with
+  // a clean version of the cert label. We deliberately keep the match loose:
+  // these files are scoped to one worker's directory.
+  const files = listWorkerDiskFiles(workerId);
+  if (files.length === 0) return null;
+  // First pass: exact filename match by type (covers passport, photo, drivers_license, and cert_X).
+  const exact = files.find(f => path.parse(f).name === type);
+  if (exact) return exact;
+  if (type.startsWith("cert_")) {
+    // Match the cert label inside the renamed file. e.g. cert_first_aid → "First_Aid"
+    const label = type.replace(/^cert_/, "");
+    const parts = label.split("_").filter(Boolean);
+    if (parts.length === 0) return null;
+    const lower = files.map(f => f.toLowerCase());
+    // Prefer a file that contains every word in the label.
+    for (let i = 0; i < lower.length; i++) {
+      const stem = lower[i];
+      if (parts.every(p => stem.includes(p))) return files[i];
+    }
+  }
+  return null;
+}
+
+function reconcileDocsWithDisk(workerId: number, docs: any[]): ReconciledDoc[] {
+  const result: ReconciledDoc[] = [];
+  const seenTypes = new Set<string>();
+  for (const d of docs) {
+    seenTypes.add(d.type);
+    if (d.filePath) {
+      result.push(d);
+      continue;
+    }
+    // No file_path on the DB row — try to backfill from disk for this read.
+    const diskName = findDiskFileForType(workerId, d.type);
+    if (diskName) {
+      result.push({
+        ...d,
+        filePath: `/api/uploads/${workerId}/${diskName}`,
+        fileName: d.fileName || diskName,
+      });
+    } else {
+      result.push(d);
+    }
+  }
+  // Surface cert_* files on disk that have NO DB row at all.
+  const diskFiles = listWorkerDiskFiles(workerId);
+  for (const f of diskFiles) {
+    const stem = path.parse(f).name;
+    // Only surface cert_* stems; passport/photo/drivers_license are linked via worker columns.
+    if (!stem.startsWith("cert_")) continue;
+    if (seenTypes.has(stem)) continue;
+    const label = stem
+      .replace(/^cert_/, "")
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, l => l.toUpperCase());
+    result.push({
+      workerId,
+      type: stem,
+      name: label,
+      filePath: `/api/uploads/${workerId}/${f}`,
+      fileName: f,
+      mimeType: null,
+      fileSize: null,
+      fromDisk: true,
+    });
+  }
+  return result;
+}
+
+function reconcileWorkerFilePaths<T extends { id: number; passportPath?: string | null; profilePhotoPath?: string | null }>(worker: T): T {
+  // Mirror the same idea for the passport / profile photo columns: if the DB
+  // value is empty but a passport.* / photo.* file exists on disk, surface
+  // it. We never persist this back.
+  const out: any = { ...worker };
+  if (!out.passportPath) {
+    const f = findDiskFileForType(worker.id, "passport");
+    if (f) out.passportPath = `/api/uploads/${worker.id}/${f}`;
+  }
+  if (!out.profilePhotoPath) {
+    const f = findDiskFileForType(worker.id, "photo");
+    if (f) out.profilePhotoPath = `/api/uploads/${worker.id}/${f}`;
+  }
+  return out as T;
+}
+
 const upload = multer({
   storage: multer.diskStorage({
     destination: (req, _file, cb) => {
@@ -224,7 +352,11 @@ export function registerRoutes(server: Server, app: Express) {
     for (const wid of assignedWorkerIds) {
       const w = workerMap[wid];
       if (!w) continue;
-      const docs = await storage.getDocumentsByWorker(wid);
+      const dbDocs = await storage.getDocumentsByWorker(wid);
+      // Reconcile DB docs with files on disk so cert files that were uploaded
+      // before PR #9's persistence fix still show up in the customer portal
+      // Team SQEP export under each worker's Certificates folder.
+      const docs = reconcileDocsWithDisk(wid, dbDocs);
       const allWorkExp = await storage.getWorkExperience(wid);
       workers[wid] = {
         id: w.id,
@@ -1003,7 +1135,9 @@ export function registerRoutes(server: Server, app: Express) {
       ...a,
       project: projectMap[a.projectId] || null,
     }));
-    res.json({ ...worker, assignments: enrichedAssignments, documents: workerDocs });
+    const reconciledWorker = reconcileWorkerFilePaths(worker);
+    const reconciledDocs = reconcileDocsWithDisk(worker.id, workerDocs);
+    res.json({ ...reconciledWorker, assignments: enrichedAssignments, documents: reconciledDocs });
   });
 
   // ===== WORK EXPERIENCE =====
@@ -1585,9 +1719,18 @@ export function registerRoutes(server: Server, app: Express) {
   });
 
   // ===== DOCUMENTS =====
+  // Returns the worker's `documents` rows, with two read-only enrichments:
+  //  - if a row's file_path is empty but a matching file exists on disk
+  //    (legacy upload that didn't persist a row before PR #9 fix), filePath
+  //    is surfaced from disk so the worker profile UI / SQEP export can find
+  //    the file. The DB row itself is not modified.
+  //  - any cert_* file on disk that has no DB row at all is appended as a
+  //    synthetic doc entry (`fromDisk: true`) so it still appears in the
+  //    Team SQEP export's certificates folder.
   app.get("/api/workers/:workerId/documents", async (req: Request, res: Response) => {
-    const docs = await storage.getDocumentsByWorker(parseInt(req.params.workerId));
-    res.json(docs);
+    const workerId = parseInt(req.params.workerId);
+    const docs = await storage.getDocumentsByWorker(workerId);
+    res.json(reconcileDocsWithDisk(workerId, docs));
   });
 
   app.post("/api/documents", async (req: Request, res: Response) => {
@@ -1620,19 +1763,25 @@ export function registerRoutes(server: Server, app: Express) {
   });
 
   // Upsert a certificate/document for a worker (insert or update by workerId + type)
+  // IMPORTANT: only fields explicitly present in the request body are written.
+  // The dates form is saved separately from the file upload (which goes through
+  // /api/workers/:id/upload). If we unconditionally set filePath/fileName to
+  // null when those keys are absent from the body, saving date-only changes
+  // will wipe the previously-uploaded file reference — the regression that
+  // surfaced as "RM Andre uploaded a cert and it didn't save".
   app.put("/api/workers/:workerId/documents", async (req: Request, res: Response) => {
     const workerId = parseInt(req.params.workerId);
-    const { type, name, issuedDate, expiryDate, filePath, fileName, mimeType, fileSize } = req.body;
+    const body = req.body ?? {};
+    const { type, name } = body;
     if (!type || !name) return res.status(400).json({ error: "type and name required" });
-    const doc = await storage.upsertDocument(workerId, type, name, {
-      issuedDate: issuedDate || null,
-      expiryDate: expiryDate || null,
-      filePath: filePath || null,
-      fileName: fileName || null,
-      mimeType: mimeType || null,
-      fileSize: fileSize || null,
-      status: "valid",
-    });
+    const data: Record<string, unknown> = { status: "valid" };
+    if ("issuedDate" in body) data.issuedDate = body.issuedDate || null;
+    if ("expiryDate" in body) data.expiryDate = body.expiryDate || null;
+    if ("filePath"   in body) data.filePath   = body.filePath   || null;
+    if ("fileName"   in body) data.fileName   = body.fileName   || null;
+    if ("mimeType"   in body) data.mimeType   = body.mimeType   || null;
+    if ("fileSize"   in body) data.fileSize   = body.fileSize   || null;
+    const doc = await storage.upsertDocument(workerId, type, name, data);
     res.json(doc);
   });
 
@@ -2519,6 +2668,28 @@ export function registerRoutes(server: Server, app: Express) {
       await storage.updateWorker(parseInt(workerId), { profilePhotoPath: filePath });
     } else if (fileType === "passport") {
       await storage.updateWorker(parseInt(workerId), { passportPath: filePath });
+    } else if (fileType.startsWith("cert_")) {
+      // Persist the cert file onto the worker's document row so it shows up in
+      // the workforce table after a reload. Without this upsert, the file lands
+      // on disk but no `documents` row references it — the user-reported "I
+      // uploaded a certificate but it didn't save" symptom.
+      const certLabel = fileType.replace(/^cert_/, "").replace(/_/g, " ");
+      const humanLabel = certLabel.replace(/\b\w/g, (l) => l.toUpperCase());
+      const docName = (req.body?.name && String(req.body.name).trim()) || humanLabel;
+      const docData: Record<string, unknown> = {
+        filePath,
+        fileName: finalFilename,
+        mimeType: req.file.mimetype || null,
+        fileSize: req.file.size ?? null,
+        status: "valid",
+      };
+      if (req.body?.issuedDate) docData.issuedDate = req.body.issuedDate;
+      if (req.body?.expiryDate) docData.expiryDate = req.body.expiryDate;
+      try {
+        await storage.upsertDocument(parseInt(workerId), fileType, docName, docData);
+      } catch (e) {
+        console.error("[upload] cert upsert error:", e);
+      }
     }
 
     res.json({ path: filePath, filename: finalFilename, type: fileType });
@@ -2573,10 +2744,13 @@ export function registerRoutes(server: Server, app: Express) {
       });
     });
 
-    // Load documents for all workers
+    // Load documents for all workers and reconcile with disk so legacy
+    // uploads (where the DB row's file_path was wiped or never set, prior to
+    // PR #9's fix) still surface on the worker profile and the customer
+    // portal SQEP export. Read-only enrichment — never writes back.
     const allDocuments = await Promise.all(allWorkers.map(w => storage.getDocumentsByWorker(w.id)));
     const documentsByWorker: Record<number, any[]> = {};
-    allWorkers.forEach((w, i) => { documentsByWorker[w.id] = allDocuments[i]; });
+    allWorkers.forEach((w, i) => { documentsByWorker[w.id] = reconcileDocsWithDisk(w.id, allDocuments[i]); });
 
     // Load OEM experience (relational) for all workers in one batch
     const allOemExpRelational = await Promise.all(allWorkers.map(w => storage.getOemExperience(w.id)));
@@ -2584,7 +2758,7 @@ export function registerRoutes(server: Server, app: Express) {
     allWorkers.forEach((w, i) => { oemExpByWorker[w.id] = allOemExpRelational[i]; });
 
     const enrichedWorkers = allWorkers.map(w => ({
-      ...w,
+      ...reconcileWorkerFilePaths(w),
       oemExperience: w.oemExperience ? JSON.parse(w.oemExperience) : [],
       oemExperienceRelational: oemExpByWorker[w.id] || [],
       assignments: assignmentsByWorker[w.id] || [],

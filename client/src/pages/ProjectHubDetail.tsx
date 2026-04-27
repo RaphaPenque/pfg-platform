@@ -1347,15 +1347,25 @@ export default function ProjectHubDetail({ params }: { params: { code: string } 
           )}
           {project.portalAccessToken ? (
             <>
-              <Link href={`/portal/${project.code}?token=${project.portalAccessToken}`}>
-                <span
-                  className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg border transition-colors hover:bg-black/5"
-                  style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-steel)" }}
-                  data-testid="project-customer-portal-link"
-                >
-                  Customer Portal <ExternalLink className="w-3 h-3" />
-                </span>
-              </Link>
+              {/*
+                Direct-click must open the portal in a NEW tab using the full
+                hash URL — the customer-portal route lives at /#/portal/<code>.
+                Wouter's <Link> would navigate the current tab and skip
+                target=_blank, so we render a plain <a> to match the
+                copy-link URL shape exactly. The customer-facing page should
+                never replace the PM's working view.
+              */}
+              <a
+                href={`/#/portal/${project.code}?token=${project.portalAccessToken}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1.5 text-[12px] font-semibold px-3 py-1.5 rounded-lg border transition-colors hover:bg-black/5"
+                style={{ borderColor: "hsl(var(--border))", color: "var(--pfg-steel)" }}
+                data-testid="project-customer-portal-link"
+                title="Open customer portal in a new tab"
+              >
+                Customer Portal <ExternalLink className="w-3 h-3" />
+              </a>
               <button
                 type="button"
                 onClick={() => {

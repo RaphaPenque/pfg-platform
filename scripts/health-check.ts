@@ -1412,6 +1412,166 @@ async function main() {
 
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // Section O — Worker certificate upload persistence
+  // ═══════════════════════════════════════════════════════════════════════════
+  console.log(`\n${C.cyan}${C.bold}═══ Section O: Worker certificate upload persistence ═══${C.reset}`);
+  console.log(`${C.grey}Pins the fix for RM Andre's report that uploaded certs vanished on Manuel Rabano.${C.reset}\n`);
+
+  // O1 — Code-content: POST /api/workers/:id/upload upserts a document for cert_* types.
+  try {
+    const routesPath = path.join(repoRoot, "server/routes.ts");
+    const routesSrc = fs.readFileSync(routesPath, "utf8");
+    const uploadIdx = routesSrc.indexOf('app.post("/api/workers/:id/upload"');
+    let o1Ok = false;
+    if (uploadIdx >= 0) {
+      const win = routesSrc.slice(uploadIdx, Math.min(routesSrc.length, uploadIdx + 4000));
+      const branchesOnCert = /fileType\.startsWith\(["']cert_["']\)/.test(win);
+      const upserts = /storage\.upsertDocument\(/.test(win);
+      const hasFilePath = /filePath/.test(win);
+      o1Ok = branchesOnCert && upserts && hasFilePath;
+    }
+    check(
+      o1Ok
+        ? "POST /api/workers/:id/upload upserts a document row for cert_* uploads (filePath persisted)"
+        : "POST /api/workers/:id/upload missing cert_* upsertDocument — uploads will not appear after reload",
+      o1Ok,
+    );
+  } catch (e: any) {
+    check(`server/routes.ts upload route read failed: ${e.message}`, false);
+  }
+
+  // O2 — Code-content: PUT documents preserves file fields when omitted from body.
+  try {
+    const routesPath = path.join(repoRoot, "server/routes.ts");
+    const routesSrc = fs.readFileSync(routesPath, "utf8");
+    const putIdx = routesSrc.indexOf('app.put("/api/workers/:workerId/documents"');
+    let o2Ok = false;
+    if (putIdx >= 0) {
+      const win = routesSrc.slice(putIdx, Math.min(routesSrc.length, putIdx + 2500));
+      const guardsFilePath = /["']filePath["']\s+in\s+body/.test(win);
+      const noBlindNull   = !/filePath:\s*filePath\s*\|\|\s*null/.test(win);
+      o2Ok = guardsFilePath && noBlindNull;
+    }
+    check(
+      o2Ok
+        ? "PUT /api/workers/:workerId/documents preserves filePath when body omits it (date-only saves no longer wipe the file)"
+        : "PUT /api/workers/:workerId/documents may overwrite filePath with null on date-only saves — regression risk",
+      o2Ok,
+    );
+  } catch (e: any) {
+    check(`server/routes.ts PUT documents read failed: ${e.message}`, false);
+  }
+
+  // O3 — Production data: documents whose type starts with "cert_" should
+  // generally have a file_path. A row with no file_path is just date metadata
+  // — not necessarily a bug, but worth flagging if the count is large since
+  // that pattern surfaced when the bug was active. WARN only.
+  try {
+    const certDocs = await pool.query(
+      `SELECT COUNT(*)::int AS missing
+         FROM documents
+        WHERE type LIKE 'cert\\_%' ESCAPE '\\'
+          AND (file_path IS NULL OR file_path = '')
+          AND (issued_date IS NOT NULL OR expiry_date IS NOT NULL)`,
+    );
+    const missing = certDocs.rows[0]?.missing ?? 0;
+    if (missing === 0) {
+      check(`O3 — every cert document with dates has a file_path (no orphaned date-only certs)`, true);
+    } else {
+      check(
+        `O3 — ${missing} cert document(s) have dates but no file_path — likely residue from the date-save-wipes-file regression. Review and re-upload if needed.`,
+        false,
+        undefined,
+        true,
+      );
+    }
+  } catch (e: any) {
+    // documents table or column may not exist locally; skip silently
+    check(`O3 skipped (DB query failed: ${e.message})`, true);
+  }
+
+  // O4 — Code-content: read paths must reconcile DB rows with files on disk
+  // so legacy uploads that lost their file_path before PR #9 still surface
+  // on the worker profile and inside the customer portal Team SQEP export.
+  try {
+    const routesPath = path.join(repoRoot, "server/routes.ts");
+    const routesSrc = fs.readFileSync(routesPath, "utf8");
+    const helperOk = /function\s+reconcileDocsWithDisk\s*\(/.test(routesSrc)
+      && /function\s+reconcileWorkerFilePaths\b/.test(routesSrc);
+    const fullCalls = /app\.get\("\/api\/workers\/:id\/full"[\s\S]{0,1500}reconcileDocsWithDisk\(/.test(routesSrc);
+    const docsCalls = /app\.get\("\/api\/workers\/:workerId\/documents"[\s\S]{0,800}reconcileDocsWithDisk\(/.test(routesSrc);
+    const portalCalls = /app\.get\("\/api\/portal\/:code"[\s\S]{0,6000}reconcileDocsWithDisk\(/.test(routesSrc);
+    const dashCalls = /app\.get\("\/api\/dashboard"[\s\S]{0,5000}reconcileDocsWithDisk\(/.test(routesSrc);
+    const ok = helperOk && fullCalls && docsCalls && portalCalls && dashCalls;
+    check(
+      ok
+        ? "O4 — read paths (/api/workers/:id/full, :workerId/documents, /api/portal/:code, /api/dashboard) reconcile docs with /data/uploads"
+        : "O4 — at least one read path is not reconciling docs with disk; legacy cert files will not appear on worker profile or in Team SQEP export",
+      ok,
+    );
+  } catch (e: any) {
+    check(`O4 skipped (server/routes.ts read failed: ${e.message})`, true);
+  }
+
+  // O5 — Code-content: customer portal link must open in a new tab from both
+  // the project hub detail header and the project allocation card. Same-tab
+  // navigation hijacks the PM's working view (the user-reported regression).
+  try {
+    const phdPath = path.join(repoRoot, "client/src/pages/ProjectHubDetail.tsx");
+    const phd = fs.readFileSync(phdPath, "utf8");
+    const phdIdx = phd.indexOf("project-customer-portal-link");
+    let phdOk = false;
+    if (phdIdx >= 0) {
+      const win = phd.slice(Math.max(0, phdIdx - 600), phdIdx + 200);
+      phdOk = /target="_blank"/.test(win)
+        && /href=\{`\/#\/portal\/\$\{project\.code\}\?token=\$\{project\.portalAccessToken\}`\}/.test(win);
+    }
+    check(
+      phdOk
+        ? "O5a — Project hub Customer Portal link opens in a new tab via the hash URL"
+        : "O5a — Project hub Customer Portal link is not target=_blank with the hash URL — direct click will hijack the PM's tab",
+      phdOk,
+    );
+
+    const paPath = path.join(repoRoot, "client/src/pages/ProjectAllocation.tsx");
+    const pa = fs.readFileSync(paPath, "utf8");
+    const paIdx = pa.indexOf("share-customer-${card.project.code}");
+    let paOk = false;
+    if (paIdx >= 0) {
+      const win = pa.slice(Math.max(0, paIdx - 600), paIdx + 200);
+      paOk = /target="_blank"/.test(win)
+        && /href=\{`\/#\/portal\/\$\{card\.project\.code\}\?token=\$\{card\.project\.portalAccessToken\}`\}/.test(win);
+    }
+    check(
+      paOk
+        ? "O5b — Project allocation Share-with-Customer link opens in a new tab via the hash URL"
+        : "O5b — Project allocation Share-with-Customer link is not target=_blank with the hash URL",
+      paOk,
+    );
+  } catch (e: any) {
+    check(`O5 skipped (read failed: ${e.message})`, true);
+  }
+
+  // O6 — Code-content: worker profile renders a passport download anchor
+  // when the worker has a passportPath. The card was missing this affordance
+  // entirely — passport metadata was shown but the file could not be opened.
+  try {
+    const tablePath = path.join(repoRoot, "client/src/pages/WorkforceTable.tsx");
+    const table = fs.readFileSync(tablePath, "utf8");
+    const ok = /data-testid=\{`passport-download-\$\{worker\.id\}`\}/.test(table)
+      && /worker\.passportPath/.test(table);
+    check(
+      ok
+        ? "O6 — Worker profile renders a passport download icon when passportPath is set"
+        : "O6 — Worker profile is missing the passport download icon — uploaded passports will not be reachable from the workforce table",
+      ok,
+    );
+  } catch (e: any) {
+    check(`O6 skipped (WorkforceTable.tsx read failed: ${e.message})`, true);
+  }
+
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // Summary
   // ═══════════════════════════════════════════════════════════════════════════
 
