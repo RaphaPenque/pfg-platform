@@ -24,14 +24,15 @@ function fail(label: string, err: unknown) {
   console.error(`    ${(err as any)?.message ?? err}`);
   process.exitCode = 1;
 }
-function check(label: string, fn: () => void) {
-  try { fn(); ok(label); } catch (e) { fail(label, e); }
+async function check(label: string, fn: () => void | Promise<void>) {
+  try { await fn(); ok(label); } catch (e) { fail(label, e); }
 }
 
+async function main() {
 // ── Invariant 1: MOB / DEMOB are non-paid ─────────────────────────────────────
 section("MOB / DEMOB non-paid invariant (mirrors health-check N1, N2)");
 
-check("isPaidDay treats every MOB/DEMOB variant as non-paid", () => {
+await check("isPaidDay treats every MOB/DEMOB variant as non-paid", () => {
   assert.strictEqual(isPaidDay("mob"), false);
   assert.strictEqual(isPaidDay("demob"), false);
   assert.strictEqual(isPaidDay("partial_mob"), false);
@@ -41,7 +42,7 @@ check("isPaidDay treats every MOB/DEMOB variant as non-paid", () => {
   assert.strictEqual(isPaidDay("unknown_day_type"), false);
 });
 
-check("paidHours ignores stale total_hours on MOB/DEMOB rows", () => {
+await check("paidHours ignores stale total_hours on MOB/DEMOB rows", () => {
   // The DB may keep the old total_hours value when a row is converted from
   // 'working' to 'mob'/'demob'. The helper must not surface that as paid.
   assert.strictEqual(paidHours({ day_type: "mob", total_hours: "9" }), 0);
@@ -50,7 +51,7 @@ check("paidHours ignores stale total_hours on MOB/DEMOB rows", () => {
   assert.strictEqual(paidHours({ day_type: "partial_demob", total_hours: 4.5 }), 0);
 });
 
-check("worker week total = sum of working days only (MOB/DEMOB excluded)", () => {
+await check("worker week total = sum of working days only (MOB/DEMOB excluded)", () => {
   // Mirrors the production query in health-check Section N3:
   // sum(working hours) MUST equal the row total visible to the customer.
   const week = [
@@ -72,55 +73,166 @@ check("worker week total = sum of working days only (MOB/DEMOB excluded)", () =>
 // ── Invariant 2: PM sender identity (mirrors health-check N7–N9) ──────────────
 section("PM sender identity invariant (mirrors health-check N8, N9)");
 
-check("Missing PM email → no `from`, no `replyTo`; central send-as", () => {
+await check("Missing PM email → no `from`, no `replyTo`; central send-as", () => {
   const id = buildSenderIdentityFromPm(null, "Some PM");
   assert.strictEqual(id.from, undefined,    "from must be undefined when no PM email");
   assert.strictEqual(id.replyTo, undefined, "replyTo must be undefined when no PM email");
 });
 
-check("Off-domain PM email → no impersonation, replyTo still routes to PM", () => {
+await check("Off-domain PM email → no impersonation, replyTo still routes to PM", () => {
   const id = buildSenderIdentityFromPm("ext@external.com", "Ext PM");
   assert.strictEqual(id.from, undefined,         "from must be undefined for off-domain PM");
   assert.strictEqual(id.replyTo, "ext@external.com", "replyTo must still be set so customer replies reach PM");
   assert.ok(id.warnings.some(w => w.includes("powerforce.global")), "must warn about off-domain");
 });
 
-check("@powerforce.global PM → full impersonation (from + replyTo + name)", () => {
+await check("@powerforce.global PM → full impersonation (from + replyTo + name)", () => {
   const id = buildSenderIdentityFromPm("pm@powerforce.global", "PM Name");
   assert.strictEqual(id.from, "pm@powerforce.global");
   assert.strictEqual(id.replyTo, "pm@powerforce.global");
   assert.strictEqual(id.fromName, "PM Name");
 });
 
-// ── Invariant 3: Documented future rule — PM 'approve without supervisor' ─────
-// This rule is documented in PLATFORM_CONTEXT.md as a controlled, audited
-// override that is NOT YET IMPLEMENTED. The smoke test guards the CONTRACT
-// (when implemented, must require role + audit log) by failing if a
-// matching endpoint quietly appears without the documented controls.
+// ── Invariant 3: PM 'approve without supervisor' controlled override ──────────
+// This rule is documented in PLATFORM_CONTEXT.md. The endpoint MUST be a
+// controlled exception, not a normal approval — the static checks below pin
+// every gate so a refactor cannot silently weaken the override.
 //
-// Static check only: scan server/weekly-ops-routes.ts for the endpoint name.
-// If the route exists, an audit-log + role gate must be visible nearby.
+// The handler lives in server/weekly-ops-routes.ts; we scan its source rather
+// than running the route to keep this a fast pure smoke test.
 section("approve-without-supervisor controlled-override contract");
 
-check("approve-without-supervisor, if implemented, has role + audit gates", async () => {
+async function readHandler(): Promise<string | null> {
   const fs = await import("node:fs");
   const path = await import("node:path");
   const { fileURLToPath } = await import("node:url");
   const here = path.dirname(fileURLToPath(import.meta.url));
   const wopsPath = path.resolve(here, "../../server/weekly-ops-routes.ts");
   const src = fs.readFileSync(wopsPath, "utf8");
-  const idx = src.indexOf("/api/weekly-ops/approve-without-supervisor");
-  if (idx < 0) {
-    // Not yet implemented — pass by design.
-    return;
+  // Find the route REGISTRATION (app.post(...)), not the docstring mention.
+  const marker = '"/api/weekly-ops/approve-without-supervisor"';
+  let idx = -1;
+  let from = 0;
+  while (true) {
+    const next = src.indexOf(marker, from);
+    if (next < 0) break;
+    // Walk backwards a few hundred chars and check for `app.post(`
+    const context = src.slice(Math.max(0, next - 200), next);
+    if (/app\.post\s*\(\s*$/.test(context)) {
+      idx = next;
+      break;
+    }
+    from = next + marker.length;
   }
-  const handler = src.slice(idx, Math.min(src.length, idx + 4000));
-  assert.ok(/requireRole\s*\(\s*"admin"/.test(handler),
-    "approve-without-supervisor handler must call requireRole('admin', ...)");
-  assert.ok(/audit/i.test(handler),
-    "approve-without-supervisor handler must write an audit log entry");
+  if (idx < 0) return null;
+  return src.slice(idx, Math.min(src.length, idx + 12000));
+}
+
+await check("approve-without-supervisor endpoint exists and is role-gated to PM/admin/RM", async () => {
+  const handler = await readHandler();
+  assert.ok(handler, "approve-without-supervisor endpoint must exist in server/weekly-ops-routes.ts");
+  assert.ok(/requireRole\s*\(\s*"admin"\s*,\s*"project_manager"\s*,\s*"resource_manager"\s*\)/.test(handler!),
+    "must call requireRole('admin', 'project_manager', 'resource_manager') — never authenticated-only");
 });
 
-console.log(process.exitCode
-  ? "\nFAILED — workflow invariants drifted"
-  : "\nAll workflow-invariant smoke tests passed.");
+await check("override handler requires reason, evidence, and both acknowledgements", async () => {
+  const handler = await readHandler();
+  assert.ok(handler, "override endpoint missing");
+  assert.ok(/reason/i.test(handler!), "must read a reason field from the body");
+  assert.ok(/evidence/i.test(handler!), "must read an evidence field from the body");
+  assert.ok(/acknowledgeNoSupervisor/.test(handler!),
+    "must require acknowledgeNoSupervisor === true (explicit acknowledgement that no supervisor submitted)");
+  assert.ok(/acknowledgeCustomerSendSeparate/.test(handler!),
+    "must require acknowledgeCustomerSendSeparate === true (explicit acknowledgement that the customer send remains separate)");
+});
+
+await check("override handler writes an audit_logs row via storage.createAuditLog", async () => {
+  const handler = await readHandler();
+  assert.ok(handler, "override endpoint missing");
+  assert.ok(/storage\.createAuditLog/.test(handler!),
+    "override handler must call storage.createAuditLog so who/when/why is captured");
+  assert.ok(/timesheet\.approve_override/.test(handler!),
+    "audit log action must be 'timesheet.approve_override' for downstream filtering");
+  assert.ok(/missingSupervisors/.test(handler!),
+    "audit metadata must record which supervisor submission(s) were missing");
+  assert.ok(/previousStatus/.test(handler!),
+    "audit metadata must record the previous timesheet_week status");
+});
+
+await check("override handler refuses inappropriate states and never emails customer", async () => {
+  const handler = await readHandler();
+  assert.ok(handler, "override endpoint missing");
+  // Status guard — only draft/submitted may be overridden. The handler builds
+  // an explicit allow-set so the guard is auditable in source.
+  assert.ok(/allowedFrom/.test(handler!) && /draft/.test(handler!) && /submitted/.test(handler!),
+    "override must restrict source statuses to draft / submitted (not pm_approved, sent_to_customer, customer_approved, recalled)");
+  // No email — the override is approval-only.
+  assert.ok(!/sendMail\s*\(/.test(handler!),
+    "override handler must NOT call sendMail — customer send remains a separate action");
+});
+
+await check("override handler validates weekCommencing as a real calendar date", async () => {
+  const handler = await readHandler();
+  assert.ok(handler, "override endpoint missing");
+  // Regex alone allows 2026-02-30; the handler must additionally round-trip
+  // the date through `new Date(...)` and reject impossible calendar values
+  // before any DB call so callers get a 400 instead of a Postgres 500.
+  assert.ok(/not a valid calendar date/.test(handler!),
+    "override must reject calendar-invalid weekCommencing with an explicit 400");
+});
+
+await check("override handler caps reason and evidence length server-side", async () => {
+  const handler = await readHandler();
+  assert.ok(handler, "override endpoint missing");
+  assert.ok(/REASON_MAX/.test(handler!) && /EVIDENCE_MAX/.test(handler!),
+    "override must declare REASON_MAX / EVIDENCE_MAX caps to bound audit-log PII surface");
+});
+
+await check("override handler refuses when customer_signoff_required=false", async () => {
+  const handler = await readHandler();
+  assert.ok(handler, "override endpoint missing");
+  // We deliberately refuse the override on projects where the normal approve
+  // route would transition directly to customer_approved (and generate the
+  // customer PDFs). Mirroring that PDF-generation path here is non-trivial
+  // and would silently drift; the override is only for pm_approved projects.
+  assert.ok(/customer_signoff_required=false|customer_signoff_required = false/.test(handler!),
+    "override must reference the customer_signoff_required=false guard");
+  assert.ok(/Override approval is not supported on projects with customer_signoff_required=false/.test(handler!),
+    "override must refuse customer_signoff_required=false with a clear 409 message");
+});
+
+await check("override applies the status change with a single conditional UPDATE", async () => {
+  const handler = await readHandler();
+  assert.ok(handler, "override endpoint missing");
+  // The UPDATE must re-assert every guard in its WHERE clause and the
+  // handler must check rowCount === 1 so two concurrent overrides cannot
+  // both succeed and both write an audit log.
+  assert.ok(/UPDATE timesheet_weeks/.test(handler!),
+    "override must update timesheet_weeks");
+  assert.ok(/status IN \('draft','submitted'\)/.test(handler!),
+    "conditional UPDATE must re-assert allowed source statuses");
+  assert.ok(/day_sup_submitted_at IS NULL/.test(handler!) && /night_sup_submitted_at IS NULL/.test(handler!),
+    "conditional UPDATE must re-assert no supervisor submission");
+  assert.ok(/pm_approve_override_at IS NULL/.test(handler!),
+    "conditional UPDATE must guard against an existing override marker");
+  assert.ok(/rowCount\s*!==\s*1/.test(handler!),
+    "handler must verify rowCount === 1 before writing audit log (concurrency / double-audit guard)");
+});
+
+await check("override audit metadata records request IP and user-agent when available", async () => {
+  const handler = await readHandler();
+  assert.ok(handler, "override endpoint missing");
+  assert.ok(/ip:\s*reqIp/.test(handler!) && /userAgent:\s*reqUserAgent/.test(handler!),
+    "override audit metadata must include actor.ip and actor.userAgent");
+});
+
+}
+
+main().then(() => {
+  console.log(process.exitCode
+    ? "\nFAILED — workflow invariants drifted"
+    : "\nAll workflow-invariant smoke tests passed.");
+}).catch((e) => {
+  console.error("\nworkflow invariants runner crashed:", e);
+  process.exit(1);
+});

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, RefreshCw, Send, FileText, AlertTriangle, CheckCircle2, Clock, XCircle, Info, Eye, ExternalLink, Download } from "lucide-react";
+import { Loader2, RefreshCw, Send, FileText, AlertTriangle, CheckCircle2, Clock, XCircle, Info, Eye, ExternalLink, Download, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -123,6 +131,12 @@ type WeeklyOpsStatus = {
     hasTimesheetPdf: boolean;
     customerTokenExists: boolean;
     customerTokenExpiresAt: string | null;
+    overrideApproval: null | {
+      at: string;
+      byUserId: number | null;
+      reason: string | null;
+      evidence: string | null;
+    };
   };
   entries: { count: number; workers: number; totalHours: number };
   assignments: { day: number; night: number; total: number; hasNightShift: boolean };
@@ -155,6 +169,14 @@ export default function WeeklyOperations() {
     confirmLabel: string;
     onConfirm: () => void;
   }>(null);
+
+  // Override approval modal state — separate from the simple confirm dialog
+  // because the override flow needs reason + evidence + two acknowledgements.
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const [overrideReason, setOverrideReason] = useState("");
+  const [overrideEvidence, setOverrideEvidence] = useState("");
+  const [ackNoSupervisor, setAckNoSupervisor] = useState(false);
+  const [ackCustomerSeparate, setAckCustomerSeparate] = useState(false);
 
   // 1. project list (also gives us defaultWeekCommencing)
   const projectsQuery = useQuery<{ ok: true; defaultWeekCommencing: string; projects: ProjectSummary[] }>({
@@ -229,6 +251,46 @@ export default function WeeklyOperations() {
     },
   });
 
+  const overrideApproveMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest(
+        "POST",
+        "/api/weekly-ops/approve-without-supervisor",
+        {
+          projectId,
+          weekCommencing,
+          reason: overrideReason,
+          evidence: overrideEvidence,
+          acknowledgeNoSupervisor: ackNoSupervisor,
+          acknowledgeCustomerSendSeparate: ackCustomerSeparate,
+        },
+      );
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: "Override approval recorded",
+        description:
+          `Status: ${data.previousStatus} → ${data.newStatus}. ` +
+          `Audited (missing: ${(data.missingSupervisors || []).join(", ") || "—"}). ` +
+          `Customer send remains a separate action.`,
+      });
+      setOverrideOpen(false);
+      setOverrideReason("");
+      setOverrideEvidence("");
+      setAckNoSupervisor(false);
+      setAckCustomerSeparate(false);
+      qc.invalidateQueries({ queryKey: ["/api/weekly-ops/status", projectId, weekCommencing] });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Override approval failed",
+        description: err.message,
+        variant: "destructive",
+      });
+    },
+  });
+
   const previewMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/weekly-ops/generate-weekly-report-preview", {
@@ -268,6 +330,33 @@ export default function WeeklyOperations() {
       status.project.sourcingContactEmail,
     ].filter((e): e is string => !!e);
   }, [status]);
+
+  // Override eligibility — only show the action when:
+  //   • a timesheet week exists
+  //   • the week is still draft or submitted (matches the server-side guard)
+  //   • no supervisor has actually submitted (otherwise use the normal flow)
+  //   • at least one shift active for the week is missing its supervisor
+  // The button is disabled (but visible) outside this set so PMs see why it
+  // doesn't apply rather than wonder where it went.
+  const overrideEligible =
+    !!tw &&
+    (tw.status === "draft" || tw.status === "submitted") &&
+    !tw.daySupSubmittedAt &&
+    !tw.nightSupSubmittedAt &&
+    (
+      ((status?.assignments.day ?? 0) > 0 && !tw.daySupSubmittedAt) ||
+      (hasNightShift && !tw.nightSupSubmittedAt)
+    );
+
+  const overrideMissing: string[] = [];
+  if (tw && (status?.assignments.day ?? 0) > 0 && !tw.daySupSubmittedAt) overrideMissing.push("day");
+  if (tw && hasNightShift && !tw.nightSupSubmittedAt) overrideMissing.push("night");
+
+  const overrideValid =
+    overrideReason.trim().length >= 10 &&
+    overrideEvidence.trim().length >= 3 &&
+    ackNoSupervisor &&
+    ackCustomerSeparate;
 
   // ── confirmation handlers ────────────────────────────────────────────────
 
@@ -409,8 +498,18 @@ export default function WeeklyOperations() {
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="text-xs uppercase tracking-wider text-pfg-steel mb-1">Status</div>
-                <div className="text-lg font-semibold text-pfg-navy" data-testid="weekly-ops-headline-text">
+                <div className="text-lg font-semibold text-pfg-navy flex items-center gap-2" data-testid="weekly-ops-headline-text">
                   {status.headline}
+                  {tw?.overrideApproval && (
+                    <Badge
+                      variant="outline"
+                      className="border-amber-500 bg-amber-50 text-amber-800"
+                      data-testid="override-approval-badge"
+                    >
+                      <ShieldAlert className="w-3 h-3 mr-1" />
+                      Override approval
+                    </Badge>
+                  )}
                 </div>
                 <div className="text-sm text-pfg-steel mt-1">
                   {status.project.name} ({status.project.code}) — w/c{" "}
@@ -519,8 +618,18 @@ export default function WeeklyOperations() {
               )}
               <TimelineRow
                 ok={!!tw?.pmApprovedAt}
-                label="PM approved"
-                detail={tw?.pmApprovedAt ? fmtDateTime(tw.pmApprovedAt) : "Not approved yet."}
+                label={
+                  tw?.overrideApproval
+                    ? "PM approved — OVERRIDE (no supervisor submission)"
+                    : "PM approved"
+                }
+                detail={
+                  tw?.pmApprovedAt
+                    ? tw.overrideApproval
+                      ? `${fmtDateTime(tw.pmApprovedAt)} · Override reason: ${tw.overrideApproval.reason || "—"} · Evidence: ${tw.overrideApproval.evidence || "—"}`
+                      : fmtDateTime(tw.pmApprovedAt)
+                    : "Not approved yet."
+                }
                 testId="step-pm-approved"
               />
               <TimelineRow
@@ -719,6 +828,24 @@ export default function WeeklyOperations() {
                 Generate &amp; send weekly report
               </Button>
               <Button
+                variant="outline"
+                size="sm"
+                disabled={!overrideEligible || overrideApproveMutation.isPending}
+                onClick={() => setOverrideOpen(true)}
+                data-testid="action-approve-without-supervisor"
+                className="border-amber-500 text-amber-800 hover:bg-amber-50"
+                title={
+                  overrideEligible
+                    ? "Approve this week as a controlled exception when no supervisor has submitted."
+                    : tw
+                    ? `Override not available from status '${tw.status}' or with a supervisor submission already on file.`
+                    : "Override requires a built timesheet week."
+                }
+              >
+                <ShieldAlert className="w-4 h-4 mr-1.5" />
+                Approve without supervisor (override)
+              </Button>
+              <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => statusQuery.refetch()}
@@ -747,6 +874,12 @@ export default function WeeklyOperations() {
                 It builds the PDF and emails customer contacts. A confirmation step lists every
                 recipient before anything is sent.
               </div>
+              <div>
+                <strong>Approve without supervisor (override)</strong> is a controlled exception
+                — only available when supervisor link delivery has failed or the supervisor is
+                unreachable. Requires a written reason and evidence reference, and writes a full
+                audit log entry. The customer send remains a separate, explicit action.
+              </div>
               {!hasNightShift && (
                 <div className="italic">No night shift assignments found for this project/week — night actions disabled.</div>
               )}
@@ -759,6 +892,164 @@ export default function WeeklyOperations() {
           </Card>
         </div>
       )}
+
+      {/* Override approval modal — controlled exception flow */}
+      <Dialog
+        open={overrideOpen}
+        onOpenChange={(open) => {
+          if (!open && !overrideApproveMutation.isPending) {
+            setOverrideOpen(false);
+            setOverrideReason("");
+            setOverrideEvidence("");
+            setAckNoSupervisor(false);
+            setAckCustomerSeparate(false);
+          }
+        }}
+      >
+        <DialogContent
+          className="sm:max-w-lg"
+          data-testid="override-approval-dialog"
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-800">
+              <ShieldAlert className="w-5 h-5" />
+              Approve without supervisor — controlled exception
+            </DialogTitle>
+            <DialogDescription>
+              This will record a <strong>PM override approval</strong> for{" "}
+              {status?.project.name} ({status?.project.code}) — w/c{" "}
+              {fmtDate(weekCommencing)}. No supervisor submission is on file
+              {overrideMissing.length > 0
+                ? ` for: ${overrideMissing.join(", ")} shift${overrideMissing.length > 1 ? "s" : ""}.`
+                : "."}{" "}
+              Use this only when supervisor link delivery has failed or the
+              supervisor is unreachable. Every field below is written to the
+              audit log.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div>
+              <label
+                className="text-xs font-medium text-pfg-steel uppercase tracking-wider mb-1 block"
+                htmlFor="override-reason"
+              >
+                Reason (≥ 10 chars) <span className="text-red-600">*</span>
+              </label>
+              <textarea
+                id="override-reason"
+                className="w-full border rounded-md px-3 py-2 text-sm bg-white"
+                rows={3}
+                maxLength={1000}
+                placeholder="e.g. Day supervisor on annual leave from 22 Apr; covering foreman has not received the link despite three resends."
+                value={overrideReason}
+                onChange={(e) => setOverrideReason(e.target.value)}
+                data-testid="override-reason-input"
+                disabled={overrideApproveMutation.isPending}
+              />
+            </div>
+
+            <div>
+              <label
+                className="text-xs font-medium text-pfg-steel uppercase tracking-wider mb-1 block"
+                htmlFor="override-evidence"
+              >
+                Evidence / reference <span className="text-red-600">*</span>
+              </label>
+              <input
+                id="override-evidence"
+                type="text"
+                className="w-full border rounded-md px-3 py-2 text-sm bg-white"
+                maxLength={500}
+                placeholder="e.g. INC-1042, Outlook thread 'GRTY supervisor unreachable', phone log 25 Apr 14:20"
+                value={overrideEvidence}
+                onChange={(e) => setOverrideEvidence(e.target.value)}
+                data-testid="override-evidence-input"
+                disabled={overrideApproveMutation.isPending}
+              />
+              <div className="text-[11px] text-pfg-steel mt-1">
+                A ticket id, email subject, phone log entry, or short note. File uploads are not
+                supported in this modal — link to the supporting record.
+              </div>
+            </div>
+
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 space-y-2">
+              <label className="flex items-start gap-2 text-sm text-amber-900">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={ackNoSupervisor}
+                  onChange={(e) => setAckNoSupervisor(e.target.checked)}
+                  data-testid="override-ack-no-supervisor"
+                  disabled={overrideApproveMutation.isPending}
+                />
+                <span>
+                  I acknowledge that <strong>no supervisor has submitted</strong> this week's
+                  timesheet
+                  {overrideMissing.length > 0
+                    ? ` for the ${overrideMissing.join(" and ")} shift${overrideMissing.length > 1 ? "s" : ""}`
+                    : ""}
+                  , and that this approval is being recorded as a PM-level override.
+                </span>
+              </label>
+              <label className="flex items-start gap-2 text-sm text-amber-900">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={ackCustomerSeparate}
+                  onChange={(e) => setAckCustomerSeparate(e.target.checked)}
+                  data-testid="override-ack-customer-separate"
+                  disabled={overrideApproveMutation.isPending}
+                />
+                <span>
+                  I acknowledge that this <strong>does not email the customer</strong>. Sending
+                  the timesheet / weekly report to the customer remains a separate, explicit
+                  action.
+                </span>
+              </label>
+            </div>
+
+            <div className="text-[11px] text-pfg-steel">
+              Resulting state will mirror the normal PM approval (
+              <code className="font-mono">pm_approved</code>, or{" "}
+              <code className="font-mono">customer_approved</code> when customer sign-off is
+              disabled), and will be marked as an <em>override approval</em> wherever the week
+              is shown in Weekly Ops.
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setOverrideOpen(false);
+                setOverrideReason("");
+                setOverrideEvidence("");
+                setAckNoSupervisor(false);
+                setAckCustomerSeparate(false);
+              }}
+              disabled={overrideApproveMutation.isPending}
+              data-testid="override-cancel"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="default"
+              className="bg-amber-600 text-white hover:bg-amber-700"
+              onClick={() => overrideApproveMutation.mutate()}
+              disabled={!overrideValid || overrideApproveMutation.isPending}
+              data-testid="override-confirm"
+            >
+              {overrideApproveMutation.isPending ? (
+                <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+              ) : (
+                <ShieldAlert className="w-4 h-4 mr-1.5" />
+              )}
+              Record override approval
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Confirmation dialog */}
       <AlertDialog open={!!confirmAction} onOpenChange={(open) => !open && setConfirmAction(null)}>

@@ -1410,6 +1410,90 @@ async function main() {
     check(`shared/report-period.ts read failed: ${e.message}`, true);
   }
 
+  // N13 — Approve without Supervisor override: every gate documented in
+  // PLATFORM_CONTEXT.md ("PM 'Approve without Supervisor' override") must be
+  // present in the route handler.  Mirrors the smoke test in
+  // tests/smoke/workflow-invariants.test.ts.
+  try {
+    const wopsPath = path.join(repoRoot, "server/weekly-ops-routes.ts");
+    const wopsSrc = fs.readFileSync(wopsPath, "utf8");
+    const marker = '"/api/weekly-ops/approve-without-supervisor"';
+    let idx = -1;
+    let from = 0;
+    while (true) {
+      const next = wopsSrc.indexOf(marker, from);
+      if (next < 0) break;
+      const ctx = wopsSrc.slice(Math.max(0, next - 200), next);
+      if (/app\.post\s*\(\s*$/.test(ctx)) { idx = next; break; }
+      from = next + marker.length;
+    }
+    let n13Ok = false;
+    let n13Detail = "approve-without-supervisor endpoint not found";
+    if (idx >= 0) {
+      const handler = wopsSrc.slice(idx, Math.min(wopsSrc.length, idx + 12000));
+      const roleGate =
+        /requireRole\s*\(\s*"admin"\s*,\s*"project_manager"\s*,\s*"resource_manager"\s*\)/.test(handler);
+      const requiresReason = /reason/i.test(handler) && /evidence/i.test(handler);
+      const requiresAcks =
+        /acknowledgeNoSupervisor/.test(handler) &&
+        /acknowledgeCustomerSendSeparate/.test(handler);
+      const auditWrite =
+        /storage\.createAuditLog/.test(handler) && /timesheet\.approve_override/.test(handler);
+      const statusGuard =
+        /allowedFrom/.test(handler) && /draft/.test(handler) && /submitted/.test(handler);
+      const noEmail = !/sendMail\s*\(/.test(handler);
+      const calendarDateCheck = /not a valid calendar date/.test(handler);
+      const lengthCaps =
+        /REASON_MAX/.test(handler) && /EVIDENCE_MAX/.test(handler);
+      const customerSignoffRefuse =
+        /Override approval is not supported on projects with customer_signoff_required=false/.test(handler);
+      const conditionalUpdate =
+        /UPDATE timesheet_weeks/.test(handler) &&
+        /status IN \('draft','submitted'\)/.test(handler) &&
+        /day_sup_submitted_at IS NULL/.test(handler) &&
+        /night_sup_submitted_at IS NULL/.test(handler) &&
+        /pm_approve_override_at IS NULL/.test(handler) &&
+        /rowCount\s*!==\s*1/.test(handler);
+      const ipUserAgent =
+        /ip:\s*reqIp/.test(handler) && /userAgent:\s*reqUserAgent/.test(handler);
+      n13Ok =
+        roleGate &&
+        requiresReason &&
+        requiresAcks &&
+        auditWrite &&
+        statusGuard &&
+        noEmail &&
+        calendarDateCheck &&
+        lengthCaps &&
+        customerSignoffRefuse &&
+        conditionalUpdate &&
+        ipUserAgent;
+      if (!n13Ok) {
+        const missing = [];
+        if (!roleGate) missing.push("role-gate");
+        if (!requiresReason) missing.push("reason+evidence");
+        if (!requiresAcks) missing.push("dual-acknowledgement");
+        if (!auditWrite) missing.push("audit-log");
+        if (!statusGuard) missing.push("status-guard(draft/submitted)");
+        if (!noEmail) missing.push("no-customer-email");
+        if (!calendarDateCheck) missing.push("calendar-date-validation");
+        if (!lengthCaps) missing.push("reason/evidence-length-caps");
+        if (!customerSignoffRefuse) missing.push("customer_signoff_required=false-refuse");
+        if (!conditionalUpdate) missing.push("conditional-UPDATE+rowCount-check");
+        if (!ipUserAgent) missing.push("audit-ip+user-agent");
+        n13Detail = `override handler missing: ${missing.join(", ")}`;
+      }
+    }
+    check(
+      n13Ok
+        ? "Approve-without-supervisor override endpoint enforces role / reason / evidence / dual-ack / audit / status-guard / no-customer-email / calendar-date / length-caps / customer-signoff guard / conditional UPDATE / ip+user-agent"
+        : `Approve-without-supervisor override endpoint failed contract — ${n13Detail}`,
+      n13Ok,
+    );
+  } catch (e: any) {
+    check(`server/weekly-ops-routes.ts override handler read failed: ${e.message}`, false);
+  }
+
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Section O — Worker certificate upload persistence

@@ -436,13 +436,30 @@ These are the rules established as the safe manual workflow for weekly reports, 
 - Tokenized URL: `/#/portal/<code>?token=<portalAccessToken>` (and append `&preview=1` for an authenticated PM/admin/RM viewing drafts).
 - Health check: N6 (and F1 — they overlap intentionally).
 
-### PM 'Approve without Supervisor' override (planned, not yet implemented)
-- Documented intent: a PM may approve a timesheet week even though no supervisor has submitted, e.g. when supervisor link delivery has failed or the supervisor is unreachable.
-- **When implemented, the route MUST**:
-  1. Be gated to `admin` and `project_manager` (and possibly `resource_manager`) — never authenticated-only.
-  2. Require an explicit `reason` field on the request body and write it to `audit_logs`.
-  3. Live alongside the existing supervisor-resend flow in `server/weekly-ops-routes.ts`.
-- The smoke test `tests/smoke/workflow-invariants.test.ts` ("approve-without-supervisor controlled-override contract") detects this endpoint and asserts both gates are present.
+### PM 'Approve without Supervisor' override (implemented 2026-04-27)
+- A PM/admin/resource-manager may approve a timesheet week as a **controlled exception** when no supervisor has submitted (supervisor link delivery failed, supervisor unreachable, etc.). This is not a normal approval — it is labelled as an **Override approval** wherever the week is shown.
+- Endpoint: `POST /api/weekly-ops/approve-without-supervisor` (in `server/weekly-ops-routes.ts`).
+- Body fields (every one is required):
+  - `projectId` (number)
+  - `weekCommencing` (`YYYY-MM-DD`)
+  - `reason` (string, ≥ 10 chars — written to `audit_logs.metadata.reason`)
+  - `evidence` (string, ≥ 3 chars — ticket id, email subject, phone log entry, or short note. **No file uploads in this route** — keep the change small; link to the supporting record instead)
+  - `acknowledgeNoSupervisor` (must be literal `true`)
+  - `acknowledgeCustomerSendSeparate` (must be literal `true`)
+- Hard rules enforced by the handler:
+  1. **Role gate** — `requireRole("admin", "project_manager", "resource_manager")`.
+  2. **`weekCommencing` is a real calendar date** — the regex check is followed by a `new Date(...)` round-trip so impossible dates (e.g. `2026-02-30`) return HTTP 400, not a Postgres 500.
+  3. **Reason and evidence length caps** — `reason` capped at 1000 chars, `evidence` at 500 chars (`REASON_MAX`/`EVIDENCE_MAX` constants). Bounds the audit-log PII surface and abuse risk; UI mirrors with `maxLength`.
+  4. **Status guard** — only allowed from `draft` or `submitted`. Refused on `pm_approved`, `sent_to_customer`, `customer_approved`, `recalled`, etc. (anywhere the customer is already in the loop or a recall is in flight).
+  5. **No supervisor submission may already be on file** — if either `day_sup_submitted_at` or `night_sup_submitted_at` is set, the route refuses with HTTP 409 and instructs the user to use the normal PM approval flow.
+  6. **`customer_signoff_required=false` refused with 409** — the normal approve route generates the customer-facing PDFs when it transitions a week directly to `customer_approved`. Mirroring that PDF-generation path in the override is non-trivial and would silently drift, so the override is refused entirely on those projects. Operators must use the standard approval flow once supervisor submission is restored.
+  7. **Customer send isolated** — the handler MUST NOT call `sendMail` and the resulting status is always `pm_approved`. Sending to the customer remains a separate, explicit Weekly Ops action.
+  8. **Atomic conditional UPDATE** — the status change is a single `UPDATE timesheet_weeks ... WHERE id = ? AND status IN ('draft','submitted') AND day_sup_submitted_at IS NULL AND night_sup_submitted_at IS NULL AND pm_approve_override_at IS NULL`. The handler verifies `rowCount === 1` before writing the audit log. Two concurrent overrides racing the same week cannot both succeed and cannot double-audit.
+  9. **Audit log** — `storage.createAuditLog` is called AFTER the conditional UPDATE confirms it applied, with `action="timesheet.approve_override"`, `entityType="timesheet_week"`, and `metadata` containing `projectId`, `projectCode`, `weekCommencing`, `previousStatus`, `resultingStatus`, `missingSupervisors` (which shifts had no submission), `reason`, `evidence`, the dual acknowledgement, `requiresCustomerSignoff`, and the actor (`id`, `email`, `role`, `ip`, `userAgent`).
+  10. **Surfaced on the row** — the override columns `pm_approve_override_at`, `pm_approve_override_by`, `pm_approve_override_reason`, `pm_approve_override_evidence` are written on `timesheet_weeks` so the Weekly Ops UI can render the "Override approval" badge without re-querying audit logs. Supervisor token / submission columns are deliberately untouched, so the missing supervisor stays visible in the data.
+- UI: surfaced in **Weekly Ops** (`client/src/pages/WeeklyOperations.tsx`) — the "Approve without supervisor (override)" button is enabled only when a timesheet week exists, status is `draft` or `submitted`, and at least one active shift has no supervisor submission. The confirmation modal collects the reason and evidence, requires both acknowledgements, and opens with amber styling so the operator cannot mistake it for a normal approval. Once recorded, the headline carries an "Override approval" badge and the PM-approved checklist row reads `PM approved — OVERRIDE (no supervisor submission)` with the reason / evidence inline.
+- Smoke test: `tests/smoke/workflow-invariants.test.ts` ("approve-without-supervisor controlled-override contract") — four static-source assertions covering role gate, reason+evidence+dual-ack, audit-log shape, status guard, and the no-`sendMail` rule.
+- Health check: N13 (`scripts/health-check.ts`) — code-content check that mirrors the smoke test against the production source on every health run.
 
 ### Worker certificate upload persistence
 - **Cert files must persist onto the worker after upload.** The fix RM Andre needed (Manuel Rabano, id=44) was: when `POST /api/workers/:id/upload` receives a file with `type` starting with `cert_`, the handler must upsert a `documents` row with `filePath`, `fileName`, `mimeType`, and `fileSize` set. Without this upsert, the file lands on the persistent disk but no row references it, so on reload the certificate appears not to have saved.
@@ -562,6 +579,58 @@ Every summary card in the platform must be backed by a DB query. This table is t
 ## Changelog
 
 > Keep a running log of significant changes. Most recent first. Format: `YYYY-MM-DD | What changed | Why | Files touched`
+
+### 2026-04-27 (later, follow-up #2b) — Approve-without-Supervisor Override hardening (code review)
+
+**Background:** Code review on PR #10 flagged six concerns. All addressed in the same branch.
+
+- **Concurrency (server):** the override now applies via a single conditional `UPDATE timesheet_weeks ... WHERE id=? AND status IN ('draft','submitted') AND day_sup_submitted_at IS NULL AND night_sup_submitted_at IS NULL AND pm_approve_override_at IS NULL` and verifies `rowCount === 1` before writing the audit log. Two concurrent overrides cannot both succeed and cannot double-audit.
+- **Calendar-date validation (server):** `weekCommencing` is now round-tripped through `new Date(...)` so `2026-02-30`-style values return HTTP 400 instead of a Postgres 500.
+- **Length caps (server + UI):** `reason` capped at 1000 chars, `evidence` at 500 chars (`REASON_MAX`/`EVIDENCE_MAX`). UI mirrors the caps via `maxLength` on the form fields. Bounds audit-log PII surface and abuse risk.
+- **`customer_signoff_required=false` refused (server):** the override now refuses with HTTP 409 on those projects. The normal approve route generates customer-facing PDFs on direct transition to `customer_approved`; mirroring that here would silently drift. Resulting status of the override is therefore always `pm_approved`.
+- **Audit metadata (server):** `actor.ip` and `actor.userAgent` are recorded when available on the request.
+- **UI (`client/src/pages/WeeklyOperations.tsx`):** removed a tautological `((day>0 && !daySubmitted)) === ((day>0 && !daySubmitted))` clause from `overrideEligible`. Modal now resets reason / evidence / both acknowledgements on close, cancel, and after success.
+- **Coverage:** smoke test `tests/smoke/workflow-invariants.test.ts` extended with five new assertions (calendar date, length caps, customer_signoff_required=false refuse, conditional UPDATE + rowCount, audit ip/user-agent). Health-check N13 (`scripts/health-check.ts`) extended to assert the same gates against live source.
+
+### 2026-04-27 (later, follow-up #2) — PM 'Approve without Supervisor' Override
+
+**Background:** Codified as a planned invariant on 2026-04-27 (hardening). RM Andre and the PMs need a controlled, audited way to approve a timesheet week when supervisor submission is unavailable (link delivery failure, supervisor on leave / unreachable). Until now the only path was for a developer to flip the row state manually — no audit trail, no reason captured.
+
+**Implemented (`server/weekly-ops-routes.ts`):**
+- New endpoint `POST /api/weekly-ops/approve-without-supervisor`.
+- Role-gated to `admin`, `project_manager`, `resource_manager`.
+- Body must contain `reason` (≥10 chars), `evidence` (≥3 chars, free-text reference — no file upload here), `acknowledgeNoSupervisor === true`, `acknowledgeCustomerSendSeparate === true`.
+- Status guard: only allowed from `draft` or `submitted`. Returns 409 from any other state. Also returns 409 if any supervisor has actually submitted.
+- Resulting status mirrors normal PM approval (`pm_approved`, or `customer_approved` when sign-off is disabled). Sets `pm_approved_at` plus the four override columns.
+- Writes an `audit_logs` row with `action="timesheet.approve_override"` capturing project / week / previous status / resulting status / missing supervisor shifts / reason / evidence / acknowledgement / actor.
+- Does NOT call `sendMail` — customer send remains a separate Weekly Ops action.
+
+**Schema (`server/migrate-to-postgres.ts`):**
+- Four new nullable columns on `timesheet_weeks`: `pm_approve_override_at` (timestamptz), `pm_approve_override_by` (integer), `pm_approve_override_reason` (text), `pm_approve_override_evidence` (text). Added via `ALTER TABLE … ADD COLUMN IF NOT EXISTS` per the platform's no-Drizzle-migrate convention.
+
+**UI (`client/src/pages/WeeklyOperations.tsx`):**
+- New "Approve without supervisor (override)" button in the Weekly Ops actions panel. Enabled only when a timesheet week exists, status is `draft` or `submitted`, no supervisor has submitted, and at least one active shift is missing its supervisor.
+- New `Dialog` confirmation modal (separate from the existing `AlertDialog`) collecting reason, evidence, and two checkbox acknowledgements (no supervisor submission; customer send remains separate). Submit is gated on all four being valid.
+- Override approval is surfaced in the headline ("Override approval" amber badge), in the checklist row ("PM approved — OVERRIDE (no supervisor submission)" with reason/evidence inline), and in the GET /api/weekly-ops/status payload (`timesheetWeek.overrideApproval`).
+
+**Coverage:**
+- Smoke test `tests/smoke/workflow-invariants.test.ts` — extended the "approve-without-supervisor controlled-override contract" section from 1 to 4 static-source assertions covering: role gate, reason+evidence+dual-ack, audit-log shape (including `action="timesheet.approve_override"`, `missingSupervisors`, `previousStatus`), and status-guard + no-`sendMail`. Same `readHandler` helper now searches for the route REGISTRATION (`app.post(...)`) rather than the docstring mention.
+- Health check `scripts/health-check.ts` — new check N13 mirrors all five gates against the live source on every health run.
+- `PLATFORM_CONTEXT.md` — flipped the "PM 'Approve without Supervisor' override (planned, not yet implemented)" subsection to "(implemented 2026-04-27)" with the full body / status / audit / UI contract.
+
+**Caveats / what this PR deliberately does NOT do:**
+- No file upload for evidence — adding evidence files is a larger change touching `/data/uploads/` semantics and customer-portal exposure rules. The text reference field is enough for the documented use cases (ticket id, email subject, phone log entry).
+- The supervisor token / submission columns on `timesheet_weeks` are deliberately not cleared by the override — the missing supervisor must stay visible in the data, otherwise an audit reconstruction would not show why the override was needed.
+- No automated email is sent on override (no PM notification, no worker notification, no customer email). The audit log + Weekly Ops surface are the system of record.
+- Order of operations from the customer's perspective is unchanged: override approval has the same downstream behaviour as normal PM approval — the existing send-to-customer route still applies and still requires explicit confirmation.
+
+**Manual QA after deploy:**
+1. Weekly Ops → pick a project / week with `status='draft'` or `status='submitted'` and no supervisor submission. The "Approve without supervisor (override)" button should be enabled.
+2. Click the button. Modal opens with reason, evidence, and two checkboxes. Submit is disabled until all four are valid.
+3. Fill a reason (≥10 chars) and evidence (≥3 chars), tick both checkboxes, click "Record override approval". Toast confirms `previousStatus → newStatus`. Headline shows the amber "Override approval" badge. The "PM approved" checklist row reads `PM approved — OVERRIDE (no supervisor submission)` with reason/evidence inline.
+4. Confirm the customer was NOT emailed (email poller logs / Microsoft Graph audit unchanged for this project).
+5. Confirm `audit_logs` has a row with `action='timesheet.approve_override'`, `entity_type='timesheet_week'`, full metadata.
+6. Try to override a week that is `pm_approved`, `sent_to_customer`, `customer_approved`, or `recalled` — the button should be disabled and the API should return 409.
 
 ### 2026-04-27 (later, follow-up) — Worker Document → Customer Portal Team SQEP Workflow
 
