@@ -646,3 +646,29 @@ Role Planning (role_slots + role_slot_periods)
 - Added Known technical debt note: Total Positions and Peak Demand still frontend-only (no DB validation yet).
 
 **Health check state at session close: 68 checks — 0 failed, 18 warnings, 50 passed.**
+
+### 2026-04-27 — Weekly Report PDF Header Fixes + Weekly Ops Process Notes
+
+**Process rule (added at user's request — applies every session):**
+- After ANY platform change, update PLATFORM_CONTEXT.md before closing the session. Do not rely on commit messages alone — context lives here.
+
+**Weekly report PDF header fixes (`server/report-generator.ts`, `shared/report-period.ts`):**
+- Period field was rendering blank (`Period →`) when `startDate`/`endDate` were not set on the project. Period now uses the reporting **week** (`weekStart`–`weekEnd`) by default, falls back to project span, never blank.
+- Project Progress text was hardcoded as `126 of 126 days · 0% complete` — wrong for any project whose total span is not 126 days, and contradictory when % was 0. Now computed from real project span (`endDate − startDate`) evaluated at the END of the reported week, clamped 0–100. When project dates are missing, displays `Schedule not available` instead of misleading numbers.
+- New shared helper `shared/report-period.ts` exports `formatPeriod` and `computeProgress` with full unit-test coverage in `tests/smoke/report-period.test.ts`. Run with `npx tsx tests/smoke/report-period.test.ts`.
+- No DB writes; no email sends; preserves visual layout exactly.
+
+**Weekly Ops workflow guarantees (re-affirmed this session — these rules already implemented, documenting here for handoff):**
+- **Safe preview:** `POST /api/weekly-ops/generate-weekly-report-preview` writes a `weekly_reports` row in **draft** state and returns a portal preview URL with `?preview=1`. Drafts are gated server-side — the customer-facing portal hides any report whose status is not published. Generating a preview is non-destructive and never sends email.
+- **Drafts not visible to customers:** the portal endpoint filters out unpublished/draft rows. `?preview=1&token=…` is required to view a draft, and that URL is intended for internal review only.
+- **PM sender identity:** outbound weekly report emails (when manually sent via Weekly Ops) are sent **from the project's PM email** — not the platform service account — so customer replies route to the PM. Sender is resolved from `projects.pm_email` (or signatory email fallback). Health check Section F flags projects missing this field.
+- **MOB / DEMOB rule:** Mobilisation and Demobilisation days are **not paid days** for the customer. Weekly billing/reporting must exclude MOB and DEMOB calendar days from chargeable days. (Operational rule — not yet enforced in code; flagged here as known requirement for the timesheet/billing rebuild.)
+
+**How to regenerate a GRTY draft preview after this PR deploys:**
+```bash
+curl -X POST "$APP/api/weekly-ops/generate-weekly-report-preview" \
+  -H "x-internal-key: pfg-internal-2026" \
+  -H "Content-Type: application/json" \
+  -d '{"projectCode":"GRTY","weekStart":"2026-04-20"}'
+```
+The response includes `previewPortalUrl` and `pdfUrl` (both with `?preview=1&token=…`). Open `pdfUrl` to verify the Period header now reads `20 Apr – 26 Apr 2026` and Project Progress reads `~14 of 126 days · 11% complete` (not `126 of 126 · 0%`).
